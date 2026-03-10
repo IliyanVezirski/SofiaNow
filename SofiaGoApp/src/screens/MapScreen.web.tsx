@@ -1,29 +1,71 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Modal, Pressable, ScrollView } from 'react-native';
+import L from 'leaflet';
 import * as Location from 'expo-location';
+import { MapContainer, Popup, TileLayer, CircleMarker, Marker, useMap } from 'react-leaflet';
 import { fetchStopEtas, fetchVehiclesNearby, StopEta, Vehicle } from '../services/cgmApi';
 import { fetchStopsNearby, Stop, summarizeStopDirections } from '../services/stopsApi';
-import MapboxGL from '@maplibre/maplibre-react-native';
-import { VehicleType, formatUnixTime, getVehicleAccentColor, getVehicleIcon, getVehicleTypeLabel, VEHICLE_TYPE_ORDER } from '../services/transitUtils';
+import 'leaflet/dist/leaflet.css';
+import { VehicleType, formatUnixTime, getVehicleAccentColor, getVehicleIcon, getVehicleTypeLabel, haversineDistanceMeters, VEHICLE_TYPE_ORDER } from '../services/transitUtils';
+
+type LatLngTuple = [number, number];
 
 const VEHICLE_REFRESH_MS = 3000;
 const STOP_ETA_REFRESH_MS = 15000;
+
+const WebMapContainer = MapContainer as any;
+const WebTileLayer = TileLayer as any;
+const WebCircleMarker = CircleMarker as any;
+const WebPopup = Popup as any;
+const WebMarker = Marker as any;
+
+function RecenterMap({ center }: { center: LatLngTuple }) {
+    const map = useMap();
+
+    useEffect(() => {
+        map.setView(center, map.getZoom(), { animate: true });
+    }, [center, map]);
+
+    return null;
+}
+
+const createVehicleMarkerIcon = (vehicle: Vehicle) => L.divIcon({
+    className: 'sofiago-vehicle-marker',
+    html: `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
+            <div style="font-size:12px;line-height:12px;color:#111827;text-shadow:0 0 4px rgba(255,255,255,0.95);transform:rotate(${vehicle.headingDegrees || 0}deg);">▲</div>
+            <div style="width:30px;height:30px;border-radius:15px;border:2px solid ${getVehicleAccentColor(vehicle.type)};background:rgba(255,255,255,0.92);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(17,24,39,0.18);font-size:18px;line-height:18px;">
+                ${getVehicleIcon(vehicle.type)}
+            </div>
+            <div style="margin-top:2px;min-width:24px;border-radius:999px;padding:2px 6px;background:${getVehicleAccentColor(vehicle.type)};color:#fff;font-size:10px;font-weight:700;line-height:12px;text-align:center;box-shadow:0 2px 8px rgba(17,24,39,0.18);">${vehicle.line}</div>
+        </div>
+    `,
+    iconSize: [34, 42],
+    iconAnchor: [17, 21],
+});
+
+const createStopMarkerIcon = (stop: Stop) => L.divIcon({
+    className: 'sofiago-stop-marker',
+    html: `
+        <div title="${stop.name} | ${summarizeStopDirections(stop, 1).replace('Посока: ', '')}" style="display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:9px;border:2px solid #2563EB;background:#FFFFFF;box-shadow:0 2px 6px rgba(37,99,235,0.3);color:#2563EB;font-size:9px;font-weight:800;line-height:9px;">
+            S
+        </div>
+    `,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+});
 
 export default function MapScreen() {
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [stops, setStops] = useState<Stop[]>([]);
     const [reportModalVisible, setReportModalVisible] = useState(false);
-
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [selectedVehicleType, setSelectedVehicleType] = useState<'all' | VehicleType>('all');
     const [selectedLine, setSelectedLine] = useState('all');
     const [etasByStopId, setEtasByStopId] = useState<Record<string, StopEta[]>>({});
     const [selectedStop, setSelectedStop] = useState<Stop | null>(null);
-    const centerCoordinate: [number, number] = location
-        ? [location.coords.longitude, location.coords.latitude]
-        : [23.3219, 42.6977];
     const vehiclesByType = useMemo(() => {
         if (selectedVehicleType === 'all') {
             return vehicles;
@@ -87,13 +129,13 @@ export default function MapScreen() {
 
         (async () => {
             try {
-                let { status } = await Location.requestForegroundPermissionsAsync();
+                const { status } = await Location.requestForegroundPermissionsAsync();
                 if (status !== 'granted') {
                     setErrorMsg('Permission to access location was denied');
                     return;
                 }
 
-                let loc = await Location.getCurrentPositionAsync({});
+                const loc = await Location.getCurrentPositionAsync({});
                 setLocation(loc);
 
                 try {
@@ -132,29 +174,46 @@ export default function MapScreen() {
         };
     }, []);
 
-    const renderStopEtaSummary = (stopId: string) => {
+    const center: LatLngTuple = useMemo(() => {
+        if (location && stops.length > 0) {
+            const firstStop = stops[0];
+            const distanceToFirstStop = haversineDistanceMeters(
+                location.coords.latitude,
+                location.coords.longitude,
+                firstStop.latitude,
+                firstStop.longitude
+            );
+
+            if (distanceToFirstStop <= 7000) {
+                return [location.coords.latitude, location.coords.longitude];
+            }
+
+            return [firstStop.latitude, firstStop.longitude];
+        }
+
+        if (stops.length > 0) {
+            return [stops[0].latitude, stops[0].longitude];
+        }
+
+        if (location) {
+            return [location.coords.latitude, location.coords.longitude];
+        }
+
+        return [42.6977, 23.3219];
+    }, [location, stops]);
+
+    const renderStopEtaSummary = (stopId: string, textStyle: any = styles.popupSecondary) => {
         const stopEtas = etasByStopId[stopId] || [];
         if (!stopEtas.length) {
-            return <Text style={styles.calloutSecondary}>Няма налични ETA в момента</Text>;
+            return <Text style={textStyle}>Няма налични ETA в момента</Text>;
         }
 
         return stopEtas.slice(0, 3).map((eta) => (
-            <Text key={`${eta.tripId}-${eta.stopId}-${eta.arrivalTimestamp}`} style={styles.calloutSecondary}>
+            <Text key={`${eta.tripId}-${eta.stopId}-${eta.arrivalTimestamp}`} style={textStyle}>
                 {`${getVehicleIcon(eta.type)} ${eta.line} • ${eta.minutesAway} мин • ${formatUnixTime(eta.arrivalTimestamp)}`}
             </Text>
         ));
     };
-
-    const renderDirectionArrow = (headingDegrees?: number) => (
-        <View
-            style={[
-                styles.directionArrowWrap,
-                { transform: [{ rotate: `${headingDegrees || 0}deg` }] },
-            ]}
-        >
-            <Text style={styles.directionArrow}>▲</Text>
-        </View>
-    );
 
     if (errorMsg) {
         return (
@@ -167,86 +226,50 @@ export default function MapScreen() {
     return (
         <View style={styles.page}>
             <View style={styles.container}>
-                <MapboxGL.MapView
-                    style={styles.map}
-                    mapStyle="https://demotiles.maplibre.org/style.json"
-                    logoEnabled={false}
-                >
-                    <MapboxGL.Camera
-                        zoomLevel={13}
-                        centerCoordinate={centerCoordinate}
+                <WebMapContainer center={center} zoom={13} style={styles.webMap}>
+                    <RecenterMap center={center} />
+                    <WebTileLayer
+                        attribution='&copy; OpenStreetMap contributors'
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     />
 
                     {location && (
-                        <MapboxGL.PointAnnotation
-                            id="user-location"
-                            coordinate={[location.coords.longitude, location.coords.latitude]}
+                        <WebCircleMarker
+                            center={[location.coords.latitude, location.coords.longitude]}
+                            radius={10}
+                            pathOptions={{ color: '#007AFF', fillColor: '#007AFF' }}
                         >
-                            <View style={styles.userDot} />
-                        </MapboxGL.PointAnnotation>
+                            <WebPopup>Вашата локация</WebPopup>
+                        </WebCircleMarker>
                     )}
 
                     {stops.map((stop) => (
-                        <MapboxGL.PointAnnotation
-                            key={`stop-${stop.id}`}
-                            id={`stop-${stop.id}`}
-                            coordinate={[stop.longitude, stop.latitude]}
-                            onSelected={() => setSelectedStop(stop)}
-                        >
-                            <View style={styles.stopDot}>
-                                <Text style={styles.stopIcon}>S</Text>
-                            </View>
-                            <MapboxGL.Callout>
-                                <View style={styles.calloutCard}>
-                                    <Text style={styles.calloutTitle}>{stop.name}</Text>
-                                    <Text style={styles.calloutSecondary}>{`Спирка: ${stop.id}`}</Text>
-                                    <Text style={styles.calloutSecondary}>{summarizeStopDirections(stop, 1)}</Text>
-                                    <Text style={styles.calloutSecondary}>{`Линии: ${stop.lines.slice(0, 8).join(', ') || 'н/д'}`}</Text>
-                                    {renderStopEtaSummary(stop.id)}
-                                </View>
-                            </MapboxGL.Callout>
-                        </MapboxGL.PointAnnotation>
+                        <WebMarker
+                            key={stop.id}
+                            position={[stop.latitude, stop.longitude]}
+                            icon={createStopMarkerIcon(stop)}
+                            eventHandlers={{ click: () => setSelectedStop(stop) }}
+                        />
                     ))}
 
                     {filteredVehicles.map((vehicle) => (
-                        <MapboxGL.PointAnnotation
-                            key={`vehicle-${vehicle.id}`}
-                            id={`vehicle-${vehicle.id}`}
-                            coordinate={[vehicle.longitude, vehicle.latitude]}
+                        <WebMarker
+                            key={vehicle.id}
+                            position={[vehicle.latitude, vehicle.longitude]}
+                            icon={createVehicleMarkerIcon(vehicle)}
                         >
-                            <View style={styles.vehicleMarkerWrap}>
-                                {renderDirectionArrow(vehicle.headingDegrees)}
-                                <View
-                                    style={[
-                                        styles.vehicleDot,
-                                        {
-                                            borderColor: getVehicleAccentColor(vehicle.type),
-                                        },
-                                    ]}
-                                >
-                                    <Text style={styles.vehicleEmoji}>{getVehicleIcon(vehicle.type)}</Text>
+                            <WebPopup>
+                                <View style={styles.popupCard}>
+                                    <Text style={styles.popupTitle}>{`${getVehicleIcon(vehicle.type)} Линия ${vehicle.line}`}</Text>
+                                    <Text style={styles.popupSecondary}>{`Vehicle ID: ${vehicle.id}`}</Text>
+                                    <Text style={styles.popupSecondary}>{`Последен update: ${formatUnixTime(vehicle.lastUpdatedUnix)}`}</Text>
+                                    <Text style={styles.popupSecondary}>{`Скорост: ${vehicle.speedKph ? Math.round(vehicle.speedKph) : 0} км/ч`}</Text>
+                                    <Text style={styles.popupSecondary}>{`Спирка: ${vehicle.stopId ? (stopNameById[vehicle.stopId] || vehicle.stopId) : 'н/д'}`}</Text>
                                 </View>
-                                <View
-                                    style={[
-                                        styles.vehicleLineBadge,
-                                        { backgroundColor: getVehicleAccentColor(vehicle.type) },
-                                    ]}
-                                >
-                                    <Text style={styles.vehicleText}>{vehicle.line}</Text>
-                                </View>
-                            </View>
-                            <MapboxGL.Callout>
-                                <View style={styles.calloutCard}>
-                                    <Text style={styles.calloutTitle}>{`${getVehicleIcon(vehicle.type)} Линия ${vehicle.line}`}</Text>
-                                    <Text style={styles.calloutSecondary}>{`Vehicle ID: ${vehicle.id}`}</Text>
-                                    <Text style={styles.calloutSecondary}>{`Последен update: ${formatUnixTime(vehicle.lastUpdatedUnix)}`}</Text>
-                                    <Text style={styles.calloutSecondary}>{`Скорост: ${vehicle.speedKph ? Math.round(vehicle.speedKph) : 0} км/ч`}</Text>
-                                    <Text style={styles.calloutSecondary}>{`Спирка: ${vehicle.stopId ? (stopNameById[vehicle.stopId] || vehicle.stopId) : 'н/д'}`}</Text>
-                                </View>
-                            </MapboxGL.Callout>
-                        </MapboxGL.PointAnnotation>
+                            </WebPopup>
+                        </WebMarker>
                     ))}
-                </MapboxGL.MapView>
+                </WebMapContainer>
 
                 <View style={styles.filtersPanel}>
                     <Text style={styles.filterTitle}>1. Филтър по вид</Text>
@@ -305,14 +328,7 @@ export default function MapScreen() {
                     </View>
                 </View>
 
-                {/* Floating UI Overlay */}
                 <View style={styles.topRightControls}>
-                    <View style={styles.statusBadge}>
-                        <Text style={styles.statusText}>
-                            {lastUpdated ? `Обновено: ${lastUpdated.toLocaleTimeString('bg-BG')}` : 'Зареждане...'}
-                        </Text>
-                        <Text style={styles.statusText}>{`Превозни средства: ${filteredVehicles.length}`}</Text>
-                    </View>
                     <View style={styles.iconButton}>
                         <Text style={styles.iconText}>🛡️</Text>
                     </View>
@@ -343,13 +359,12 @@ export default function MapScreen() {
                                 <Text style={styles.stopScheduleCloseText}>Затвори</Text>
                             </Pressable>
                         </View>
-                        <View style={styles.stopScheduleList}>
-                            {renderStopEtaSummary(selectedStop.id)}
-                        </View>
+                        <ScrollView style={styles.stopScheduleList} showsVerticalScrollIndicator={false}>
+                            {renderStopEtaSummary(selectedStop.id, styles.stopScheduleEta)}
+                        </ScrollView>
                     </View>
                 )}
 
-                {/* Report Modal */}
                 <Modal
                     animationType="slide"
                     transparent={true}
@@ -415,8 +430,9 @@ const styles = StyleSheet.create({
         width: '100%',
         backgroundColor: 'tomato',
     },
-    map: {
-        flex: 1,
+    webMap: {
+        height: '100%',
+        width: '100%',
     },
     filtersPanel: {
         position: 'absolute',
@@ -426,7 +442,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.95)',
         borderRadius: 14,
         padding: 12,
-        zIndex: 20,
+        zIndex: 1000,
         elevation: 20,
     },
     filterTitle: {
@@ -497,161 +513,13 @@ const styles = StyleSheet.create({
         fontSize: 11,
         lineHeight: 14,
     },
-    userDot: {
-        width: 20,
-        height: 20,
-        backgroundColor: '#007AFF',
-        borderRadius: 10,
-        borderWidth: 3,
-        borderColor: 'white',
-    },
-    vehicleMarkerWrap: {
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    directionArrowWrap: {
-        marginBottom: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    directionArrow: {
-        color: '#111827',
-        fontSize: 12,
-        textShadowColor: 'rgba(255,255,255,0.95)',
-        textShadowRadius: 4,
-    },
-    vehicleDot: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.92)',
-        borderWidth: 2,
-        shadowColor: '#111827',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.18,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    vehicleLineBadge: {
-        marginTop: 2,
-        minWidth: 24,
-        borderRadius: 999,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        alignItems: 'center',
-    },
-    vehicleText: {
-        color: '#FFFFFF',
-        fontSize: 10,
-        fontWeight: 'bold',
-    },
-    vehicleEmoji: {
-        fontSize: 18,
-        lineHeight: 18,
-    },
-    stopDot: {
-        backgroundColor: 'white',
-        borderWidth: 2,
-        borderColor: '#007AFF',
-        borderRadius: 15,
-        width: 34,
-        height: 34,
-        alignItems: 'center',
-        justifyContent: 'center',
-        shadowColor: '#111827',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.16,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    stopIcon: {
-        fontSize: 15,
-        fontWeight: '700',
-    },
-    calloutCard: {
-        minWidth: 220,
-        padding: 8,
-        gap: 4,
-    },
-    calloutTitle: {
-        color: '#111827',
-        fontSize: 14,
-        fontWeight: '700',
-        marginBottom: 2,
-    },
-    calloutSecondary: {
-        color: '#374151',
-        fontSize: 12,
-        marginBottom: 2,
-    },
-    stopSchedulePanel: {
-        position: 'absolute',
-        left: 16,
-        right: 16,
-        bottom: 110,
-        backgroundColor: 'rgba(255,255,255,0.97)',
-        borderRadius: 18,
-        padding: 14,
-        zIndex: 25,
-        elevation: 25,
-    },
-    stopScheduleHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        gap: 12,
-        marginBottom: 10,
-    },
-    stopScheduleTitleWrap: {
-        flex: 1,
-    },
-    stopScheduleTitle: {
-        color: '#111827',
-        fontSize: 16,
-        fontWeight: '700',
-        marginBottom: 4,
-    },
-    stopScheduleMeta: {
-        color: '#4B5563',
-        fontSize: 12,
-        marginBottom: 2,
-    },
-    stopScheduleClose: {
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-        backgroundColor: '#E5E7EB',
-    },
-    stopScheduleCloseText: {
-        color: '#111827',
-        fontSize: 12,
-        fontWeight: '600',
-    },
-    stopScheduleList: {
-        gap: 6,
-    },
     topRightControls: {
         position: 'absolute',
         top: 60,
         right: 20,
         alignItems: 'center',
         gap: 15,
-        zIndex: 20,
-        elevation: 20,
-    },
-    statusBadge: {
-        backgroundColor: 'rgba(255,255,255,0.92)',
-        borderRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        marginBottom: 10,
-    },
-    statusText: {
-        color: '#264653',
-        fontSize: 12,
-        fontWeight: '600',
+        zIndex: 1000,
     },
     iconButton: {
         backgroundColor: 'white',
@@ -675,8 +543,7 @@ const styles = StyleSheet.create({
         bottom: 40,
         width: '100%',
         alignItems: 'center',
-        zIndex: 20,
-        elevation: 20,
+        zIndex: 1000,
     },
     reportButton: {
         backgroundColor: '#E63946',
@@ -761,5 +628,71 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#E63946',
         textAlign: 'center',
-    }
+    },
+    popupCard: {
+        minWidth: 220,
+        gap: 4,
+    },
+    popupTitle: {
+        color: '#111827',
+        fontSize: 14,
+        fontWeight: '700',
+        marginBottom: 2,
+    },
+    popupSecondary: {
+        color: '#374151',
+        fontSize: 12,
+        marginBottom: 2,
+    },
+    stopSchedulePanel: {
+        position: 'absolute',
+        left: 16,
+        right: 16,
+        bottom: 110,
+        backgroundColor: 'rgba(255,255,255,0.97)',
+        borderRadius: 18,
+        padding: 14,
+        zIndex: 1200,
+        elevation: 25,
+    },
+    stopScheduleHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        gap: 12,
+        marginBottom: 10,
+    },
+    stopScheduleTitleWrap: {
+        flex: 1,
+    },
+    stopScheduleTitle: {
+        color: '#111827',
+        fontSize: 16,
+        fontWeight: '700',
+        marginBottom: 4,
+    },
+    stopScheduleMeta: {
+        color: '#4B5563',
+        fontSize: 12,
+        marginBottom: 2,
+    },
+    stopScheduleClose: {
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+        backgroundColor: '#E5E7EB',
+    },
+    stopScheduleCloseText: {
+        color: '#111827',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    stopScheduleList: {
+        maxHeight: 160,
+    },
+    stopScheduleEta: {
+        color: '#1F2937',
+        fontSize: 13,
+        marginBottom: 8,
+    },
 });
