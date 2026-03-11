@@ -20,3 +20,4 @@ yarn-error.*
 *.tsbuildinfo
 SofiaGoApp/ios
 SofiaGoApp/android
+*.zip

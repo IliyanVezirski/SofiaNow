@@ -1,158 +1,591 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Modal, Pressable, ScrollView } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Modal, Pressable, ScrollView, TextInput } from 'react-native';
 import * as Location from 'expo-location';
-import { fetchStopEtas, fetchVehiclesNearby, StopEta, Vehicle } from '../services/cgmApi';
-import { fetchStopsNearby, Stop, summarizeStopDirections } from '../services/stopsApi';
+import { fetchStopEtas, fetchVehiclesInBounds, StopEta, Vehicle } from '../services/cgmApi';
+import { fetchLineRouteGeometry, fetchLineRouteGeometryByRouteId, fetchStopById, fetchStopsInBounds, LineRouteGeometry, MapBounds, Stop, summarizeStopDirections } from '../services/stopsApi';
 import MapboxGL from '@maplibre/maplibre-react-native';
-import { VehicleType, formatUnixTime, getVehicleAccentColor, getVehicleIcon, getVehicleTypeLabel, VEHICLE_TYPE_ORDER } from '../services/transitUtils';
+import { VehicleType, formatUnixTime, getVehicleAccentColor, getVehicleIcon, getVehicleTypeLabel, inferLineTypeFromToken, VEHICLE_TYPE_ORDER } from '../services/transitUtils';
+import { RouteSelection } from '../types/routes';
 
-const VEHICLE_REFRESH_MS = 3000;
+const VEHICLE_REFRESH_MS = 500;
 const STOP_ETA_REFRESH_MS = 15000;
+const INITIAL_ZOOM_LEVEL = 16;
+const VEHICLE_ANIMATION_MS = 420;
+const STOP_ETA_PREVIEW_COUNT = 3;
+const DEFAULT_CENTER_COORDINATE: [number, number] = [23.3219, 42.6977];
+const DEFAULT_BOUNDS_DELTA = 0.03;
+const MAX_HEADING_STEP_DEGREES = 32;
+const LOW_SPEED_HEADING_LOCK_KPH = 4;
+const OVERLAP_GROUP_DECIMALS = 4;
+const OVERLAP_OFFSET_DEGREES = 0.00008;
 
-export default function MapScreen() {
+const createFallbackBounds = (latitude: number, longitude: number): MapBounds => ({
+    north: latitude + DEFAULT_BOUNDS_DELTA,
+    south: latitude - DEFAULT_BOUNDS_DELTA,
+    east: longitude + DEFAULT_BOUNDS_DELTA,
+    west: longitude - DEFAULT_BOUNDS_DELTA,
+});
+
+const getDirectionAccentColor = (directionIndex: number) => {
+    return directionIndex % 2 === 0 ? '#1D4ED8' : '#F97316';
+};
+
+const normalizeHeadingDegrees = (value: number) => ((value % 360) + 360) % 360;
+
+const shortestHeadingDelta = (from: number, to: number) => {
+    let delta = to - from;
+    if (delta > 180) {
+        delta -= 360;
+    }
+    if (delta < -180) {
+        delta += 360;
+    }
+    return delta;
+};
+
+const interpolateHeadingDegrees = (from: number, to: number, progress: number) => {
+    return normalizeHeadingDegrees(from + (shortestHeadingDelta(from, to) * progress));
+};
+
+const computeHeadingDegrees = (from: [number, number], to: [number, number]) => {
+    const deltaLon = to[0] - from[0];
+    const deltaLat = to[1] - from[1];
+    const radians = Math.atan2(deltaLon, deltaLat);
+    return (radians * 180) / Math.PI;
+};
+
+const getDirectionArrowSamples = (coordinates: [number, number][], maxArrows = 14) => {
+    if (coordinates.length < 3) {
+        return [] as Array<{ coordinate: [number, number]; headingDegrees: number }>;
+    }
+
+    const segmentCount = coordinates.length - 1;
+    const step = Math.max(1, Math.floor(segmentCount / maxArrows));
+    const samples: Array<{ coordinate: [number, number]; headingDegrees: number }> = [];
+
+    for (let i = step; i < segmentCount; i += step) {
+        const from = coordinates[i - 1];
+        const to = coordinates[i];
+        samples.push({
+            coordinate: to,
+            headingDegrees: computeHeadingDegrees(from, to),
+        });
+    }
+
+    return samples;
+};
+
+interface MapScreenProps {
+    highlightedRoute?: RouteSelection | null;
+    filterPanelVisible?: boolean;
+}
+
+export default function MapScreen({ highlightedRoute, filterPanelVisible = true }: MapScreenProps) {
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+    const [animatedVehicles, setAnimatedVehicles] = useState<Vehicle[]>([]);
     const [stops, setStops] = useState<Stop[]>([]);
     const [reportModalVisible, setReportModalVisible] = useState(false);
 
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-    const [selectedVehicleType, setSelectedVehicleType] = useState<'all' | VehicleType>('all');
-    const [selectedLine, setSelectedLine] = useState('all');
+    const [selectedVehicleTypes, setSelectedVehicleTypes] = useState<VehicleType[]>([]);
+    const [selectedLines, setSelectedLines] = useState<string[]>([]);
     const [etasByStopId, setEtasByStopId] = useState<Record<string, StopEta[]>>({});
     const [selectedStop, setSelectedStop] = useState<Stop | null>(null);
-    const centerCoordinate: [number, number] = location
-        ? [location.coords.longitude, location.coords.latitude]
-        : [23.3219, 42.6977];
+    const [mapCenterCoordinate, setMapCenterCoordinate] = useState<[number, number]>(DEFAULT_CENTER_COORDINATE);
+    const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
+    const [cameraLockedToInitialView, setCameraLockedToInitialView] = useState(false);
+    const [hasInitialCameraTarget, setHasInitialCameraTarget] = useState(false);
+    const [routeGeometry, setRouteGeometry] = useState<LineRouteGeometry | null>(null);
+    const [routeStopSearch, setRouteStopSearch] = useState('');
+    const lastHeadingByVehicleRef = useRef<Record<string, number>>({});
+    const animatedVehiclesRef = useRef<Vehicle[]>([]);
+    const vehicleAnimationFrameRef = useRef<number | null>(null);
+    const isRouteMode = !!highlightedRoute;
+    const visibleStopsRef = useRef<Stop[]>([]);
+
+    useEffect(() => {
+        animatedVehiclesRef.current = animatedVehicles;
+    }, [animatedVehicles]);
+
     const vehiclesByType = useMemo(() => {
-        if (selectedVehicleType === 'all') {
-            return vehicles;
+        if (!selectedVehicleTypes.length) {
+            return animatedVehicles;
         }
 
-        return vehicles.filter((vehicle) => vehicle.type === selectedVehicleType);
-    }, [selectedVehicleType, vehicles]);
+        return animatedVehicles.filter((vehicle) => selectedVehicleTypes.includes(vehicle.type));
+    }, [selectedVehicleTypes, animatedVehicles]);
     const availableLines = useMemo(() => {
-        return Array.from(new Set(vehiclesByType.map((vehicle) => vehicle.line)))
+        if (isRouteMode && highlightedRoute?.line) {
+            return [highlightedRoute.line];
+        }
+
+        const lineSet = new Set(vehicles.map((vehicle) => vehicle.line));
+        selectedLines.forEach((line) => lineSet.add(line));
+
+        return Array.from(lineSet)
             .sort((left, right) => left.localeCompare(right, 'bg', { numeric: true }));
-    }, [vehiclesByType]);
+    }, [vehicles, isRouteMode, highlightedRoute, selectedLines]);
     const filteredVehicles = useMemo(() => {
-        if (selectedLine === 'all') {
+        if (isRouteMode && highlightedRoute) {
+            return animatedVehicles.filter((vehicle) => (
+                vehicle.type === highlightedRoute.type
+                && vehicle.line === highlightedRoute.line
+            ));
+        }
+
+        if (!selectedLines.length) {
             return vehiclesByType;
         }
 
-        return vehiclesByType.filter((vehicle) => vehicle.line === selectedLine);
-    }, [selectedLine, vehiclesByType]);
+        return vehiclesByType.filter((vehicle) => selectedLines.includes(vehicle.line));
+    }, [selectedLines, vehiclesByType, isRouteMode, highlightedRoute, animatedVehicles]);
+    const displayVehicles = useMemo(() => {
+        const groupedVehicles = new Map<string, Vehicle[]>();
+
+        filteredVehicles.forEach((vehicle) => {
+            const key = `${vehicle.latitude.toFixed(OVERLAP_GROUP_DECIMALS)}:${vehicle.longitude.toFixed(OVERLAP_GROUP_DECIMALS)}`;
+            const existingGroup = groupedVehicles.get(key) || [];
+            existingGroup.push(vehicle);
+            groupedVehicles.set(key, existingGroup);
+        });
+
+        return Array.from(groupedVehicles.values()).flatMap((group) => {
+            if (group.length === 1) {
+                return group;
+            }
+
+            return group.map((vehicle, index) => {
+                const angle = (Math.PI * 2 * index) / group.length;
+                return {
+                    ...vehicle,
+                    latitude: vehicle.latitude + (Math.sin(angle) * OVERLAP_OFFSET_DEGREES),
+                    longitude: vehicle.longitude + (Math.cos(angle) * OVERLAP_OFFSET_DEGREES),
+                };
+            });
+        });
+    }, [filteredVehicles]);
+    const filteredStops = useMemo(() => {
+        if (isRouteMode) {
+            return stops;
+        }
+
+        const normalizedSelectedLines = selectedLines.map((line) => String(line || '').trim().toUpperCase());
+        return stops.filter((stop) => {
+            const normalizedStopLines = stop.lines.map((line) => String(line || '').trim().toUpperCase()).filter(Boolean);
+            const matchesLine = !normalizedSelectedLines.length || normalizedSelectedLines.some((line) => normalizedStopLines.includes(line));
+            if (!matchesLine) {
+                return false;
+            }
+
+            if (!selectedVehicleTypes.length) {
+                return true;
+            }
+
+            return normalizedStopLines.some((line) => selectedVehicleTypes.includes(inferLineTypeFromToken(line)));
+        });
+    }, [stops, selectedLines, selectedVehicleTypes, isRouteMode]);
     const stopNameById = useMemo(() => {
         return stops.reduce<Record<string, string>>((result, stop) => {
             result[stop.id] = stop.name;
             return result;
         }, {});
     }, [stops]);
+    const stopById = useMemo(() => {
+        return stops.reduce<Record<string, Stop>>((result, stop) => {
+            result[stop.id] = stop;
+            return result;
+        }, {});
+    }, [stops]);
+    const routeStopsFiltered = useMemo(() => {
+        if (!routeGeometry) return [];
+        const query = routeStopSearch.trim().toLowerCase();
+        return routeGeometry.directions.flatMap((direction, dirIndex) =>
+            direction.stops.map((stop, stopIndex) => ({
+                ...stop,
+                dirIndex,
+                stopIndex,
+                directionName: direction.name || `Посока ${dirIndex + 1}`,
+            }))
+        ).filter((stop) => !query || stop.name.toLowerCase().includes(query) || stop.id.includes(query));
+    }, [routeGeometry, routeStopSearch]);
+
+    const toggleVehicleTypeFilter = (vehicleType: VehicleType) => {
+        setSelectedVehicleTypes((prev) => (
+            prev.includes(vehicleType)
+                ? prev.filter((type) => type !== vehicleType)
+                : [...prev, vehicleType]
+        ));
+    };
+
+    const toggleLineFilter = (line: string) => {
+        setSelectedLines((prev) => (
+            prev.includes(line)
+                ? prev.filter((entry) => entry !== line)
+                : [...prev, line]
+        ));
+    };
 
     useEffect(() => {
-        if (selectedLine !== 'all' && !availableLines.includes(selectedLine)) {
-            setSelectedLine('all');
+        if (vehicleAnimationFrameRef.current !== null) {
+            cancelAnimationFrame(vehicleAnimationFrameRef.current);
+            vehicleAnimationFrameRef.current = null;
         }
-    }, [availableLines, selectedLine]);
+
+        if (!vehicles.length) {
+            setAnimatedVehicles([]);
+            return;
+        }
+
+        const previousVehiclesById = new Map(animatedVehiclesRef.current.map((vehicle) => [vehicle.id, vehicle]));
+        const targetVehicles = vehicles.map((vehicle) => {
+            const previousHeading = lastHeadingByVehicleRef.current[vehicle.id];
+            const nextHeading = Number(vehicle.headingDegrees);
+            const hasNextHeading = Number.isFinite(nextHeading);
+
+            if (!hasNextHeading) {
+                return {
+                    ...vehicle,
+                    headingDegrees: Number.isFinite(previousHeading) ? previousHeading : 0,
+                };
+            }
+
+            const normalizedNext = normalizeHeadingDegrees(nextHeading);
+            if (!Number.isFinite(previousHeading)) {
+                lastHeadingByVehicleRef.current[vehicle.id] = normalizedNext;
+                return {
+                    ...vehicle,
+                    headingDegrees: normalizedNext,
+                };
+            }
+
+            if ((vehicle.speedKph || 0) < LOW_SPEED_HEADING_LOCK_KPH) {
+                return {
+                    ...vehicle,
+                    headingDegrees: previousHeading,
+                };
+            }
+
+            const delta = shortestHeadingDelta(previousHeading, normalizedNext);
+            const clampedDelta = Math.max(-MAX_HEADING_STEP_DEGREES, Math.min(MAX_HEADING_STEP_DEGREES, delta));
+            const stabilizedHeading = normalizeHeadingDegrees(previousHeading + clampedDelta);
+            lastHeadingByVehicleRef.current[vehicle.id] = stabilizedHeading;
+
+            return {
+                ...vehicle,
+                headingDegrees: stabilizedHeading,
+            };
+        });
+        const animationStart = Date.now();
+
+        const tick = () => {
+            const elapsed = Date.now() - animationStart;
+            const rawProgress = Math.min(1, elapsed / VEHICLE_ANIMATION_MS);
+            const easedProgress = 1 - ((1 - rawProgress) ** 3);
+
+            setAnimatedVehicles(targetVehicles.map((vehicle) => {
+                const previousVehicle = previousVehiclesById.get(vehicle.id);
+                if (!previousVehicle) {
+                    return vehicle;
+                }
+
+                return {
+                    ...vehicle,
+                    latitude: previousVehicle.latitude + ((vehicle.latitude - previousVehicle.latitude) * easedProgress),
+                    longitude: previousVehicle.longitude + ((vehicle.longitude - previousVehicle.longitude) * easedProgress),
+                    headingDegrees: interpolateHeadingDegrees(
+                        Number.isFinite(previousVehicle.headingDegrees) ? previousVehicle.headingDegrees as number : (vehicle.headingDegrees || 0),
+                        vehicle.headingDegrees || 0,
+                        easedProgress,
+                    ),
+                };
+            }));
+
+            if (rawProgress < 1) {
+                vehicleAnimationFrameRef.current = requestAnimationFrame(tick);
+                return;
+            }
+
+            vehicleAnimationFrameRef.current = null;
+        };
+
+        tick();
+
+        return () => {
+            if (vehicleAnimationFrameRef.current !== null) {
+                cancelAnimationFrame(vehicleAnimationFrameRef.current);
+                vehicleAnimationFrameRef.current = null;
+            }
+        };
+    }, [vehicles]);
 
     useEffect(() => {
         let isMounted = true;
-        let vehicleRefreshTimer: ReturnType<typeof setInterval> | null = null;
-        let stopEtaRefreshTimer: ReturnType<typeof setInterval> | null = null;
-
-        const refreshVehicles = async (latitude: number, longitude: number) => {
+        (async () => {
             try {
-                const nearbyVehicles = await fetchVehiclesNearby(latitude, longitude);
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status === 'granted') {
+                    const loc = await Location.getCurrentPositionAsync({});
+                    setLocation(loc);
+                    if (isMounted) {
+                        if (!highlightedRoute) {
+                            setHasInitialCameraTarget(true);
+                            setCameraLockedToInitialView(true);
+                        }
+                        setMapCenterCoordinate([loc.coords.longitude, loc.coords.latitude]);
+                        setMapBounds(createFallbackBounds(loc.coords.latitude, loc.coords.longitude));
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.warn('Location unavailable, using default center:', err);
+            }
+
+            if (isMounted) {
+                if (!highlightedRoute) {
+                    setHasInitialCameraTarget(true);
+                    setCameraLockedToInitialView(true);
+                }
+                setMapCenterCoordinate(DEFAULT_CENTER_COORDINATE);
+                setMapBounds(createFallbackBounds(DEFAULT_CENTER_COORDINATE[1], DEFAULT_CENTER_COORDINATE[0]));
+            }
+        })();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!mapBounds) {
+            return;
+        }
+
+        let isMounted = true;
+
+        const refreshViewportData = async () => {
+            try {
+                const visibleStops = await fetchStopsInBounds(mapBounds);
                 if (!isMounted) {
                     return;
                 }
-                setVehicles(nearbyVehicles);
+
+                visibleStopsRef.current = visibleStops;
+                setStops(visibleStops);
+
+                const [visibleVehicles, etasByStop] = await Promise.all([
+                    fetchVehiclesInBounds(mapBounds),
+                    fetchStopEtas(visibleStops.map((stop) => stop.id)),
+                ]);
+
+                if (!isMounted) {
+                    return;
+                }
+
+                setVehicles(visibleVehicles);
+                setEtasByStopId(etasByStop);
+                setLastUpdated(new Date());
+            } catch (apiErr) {
+                console.error('Viewport refresh failed:', apiErr);
+            }
+        };
+
+        const refreshVehiclesOnly = async () => {
+            try {
+                const visibleVehicles = await fetchVehiclesInBounds(mapBounds);
+                if (!isMounted) {
+                    return;
+                }
+
+                setVehicles(visibleVehicles);
                 setLastUpdated(new Date());
             } catch (apiErr) {
                 console.error('Vehicle refresh failed:', apiErr);
             }
         };
 
-        const refreshStopEtas = async (nearbyStops: Stop[]) => {
+        const refreshEtasOnly = async () => {
             try {
-                const nextEtasByStopId = await fetchStopEtas(nearbyStops.map((stop) => stop.id));
+                const nextEtasByStopId = await fetchStopEtas(visibleStopsRef.current.map((stop) => stop.id));
                 if (!isMounted) {
                     return;
                 }
+
                 setEtasByStopId(nextEtasByStopId);
             } catch (apiErr) {
                 console.error('Stop ETA refresh failed:', apiErr);
             }
         };
 
+        void refreshViewportData();
+
+        const vehicleRefreshTimer = setInterval(() => {
+            void refreshVehiclesOnly();
+        }, VEHICLE_REFRESH_MS);
+
+        const stopEtaRefreshTimer = setInterval(() => {
+            void refreshEtasOnly();
+        }, STOP_ETA_REFRESH_MS);
+
+        return () => {
+            isMounted = false;
+            clearInterval(vehicleRefreshTimer);
+            clearInterval(stopEtaRefreshTimer);
+        };
+    }, [mapBounds]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        if (!highlightedRoute) {
+            setRouteGeometry(null);
+            setSelectedVehicleTypes([]);
+            setSelectedLines([]);
+            return () => {
+                isMounted = false;
+            };
+        }
+
+        setSelectedVehicleTypes([highlightedRoute.type]);
+        setSelectedLines([highlightedRoute.line]);
+
         (async () => {
-            try {
-                let { status } = await Location.requestForegroundPermissionsAsync();
-                if (status !== 'granted') {
-                    setErrorMsg('Permission to access location was denied');
-                    return;
-                }
+            const geometry = highlightedRoute.routeId
+                ? await fetchLineRouteGeometryByRouteId(highlightedRoute.routeId)
+                : await fetchLineRouteGeometry(
+                    highlightedRoute.line,
+                    highlightedRoute.type,
+                    highlightedRoute.isNight
+                );
 
-                let loc = await Location.getCurrentPositionAsync({});
-                setLocation(loc);
-
-                try {
-                    const nearbyStops = await fetchStopsNearby(loc.coords.latitude, loc.coords.longitude);
-                    if (isMounted) {
-                        setStops(nearbyStops);
-                    }
-
-                    await refreshVehicles(loc.coords.latitude, loc.coords.longitude);
-                    await refreshStopEtas(nearbyStops);
-
-                    vehicleRefreshTimer = setInterval(() => {
-                        void refreshVehicles(loc.coords.latitude, loc.coords.longitude);
-                    }, VEHICLE_REFRESH_MS);
-
-                    stopEtaRefreshTimer = setInterval(() => {
-                        void refreshStopEtas(nearbyStops);
-                    }, STOP_ETA_REFRESH_MS);
-                } catch (apiErr) {
-                    console.error('API fetch failed:', apiErr);
-                }
-            } catch (err) {
-                console.error('MapScreen initialization failed:', err);
-                setErrorMsg('Failed to initialize map');
+            if (!isMounted) {
+                return;
             }
+
+            setRouteGeometry(geometry);
+
+            if (!geometry?.directions.length) {
+                return;
+            }
+
+            const allCoordinates = geometry.directions.flatMap((direction) => direction.coordinates);
+            if (!allCoordinates.length) {
+                return;
+            }
+
+            const sum = allCoordinates.reduce(
+                (acc, coord) => ({ lon: acc.lon + coord[0], lat: acc.lat + coord[1] }),
+                { lon: 0, lat: 0 }
+            );
+            const centerLon = sum.lon / allCoordinates.length;
+            const centerLat = sum.lat / allCoordinates.length;
+
+            setHasInitialCameraTarget(true);
+            setCameraLockedToInitialView(true);
+            setMapCenterCoordinate([centerLon, centerLat]);
         })();
 
         return () => {
             isMounted = false;
-            if (vehicleRefreshTimer) {
-                clearInterval(vehicleRefreshTimer);
-            }
-            if (stopEtaRefreshTimer) {
-                clearInterval(stopEtaRefreshTimer);
-            }
         };
-    }, []);
+    }, [highlightedRoute]);
 
-    const renderStopEtaSummary = (stopId: string) => {
-        const stopEtas = etasByStopId[stopId] || [];
-        if (!stopEtas.length) {
-            return <Text style={styles.calloutSecondary}>Няма налични ETA в момента</Text>;
+    const openRouteStopDetails = async (routeStop: {
+        id: string;
+        name: string;
+        latitude: number;
+        longitude: number;
+    }, directionName: string) => {
+        const existingStop = stopById[routeStop.id];
+        if (existingStop) {
+            setSelectedStop(existingStop);
+        } else {
+            const resolvedStop = await fetchStopById(routeStop.id);
+            if (resolvedStop) {
+                setSelectedStop(resolvedStop);
+            } else {
+                const lineLabel = routeGeometry?.line || highlightedRoute?.line || '';
+                setSelectedStop({
+                    id: routeStop.id,
+                    name: routeStop.name,
+                    latitude: routeStop.latitude,
+                    longitude: routeStop.longitude,
+                    lines: lineLabel ? [lineLabel] : [],
+                    directions: directionName ? [directionName] : [],
+                });
+            }
         }
 
-        return stopEtas.slice(0, 3).map((eta) => (
-            <Text key={`${eta.tripId}-${eta.stopId}-${eta.arrivalTimestamp}`} style={styles.calloutSecondary}>
+        try {
+            const etas = await fetchStopEtas([routeStop.id]);
+            setEtasByStopId((prev) => ({ ...prev, ...etas }));
+        } catch (error) {
+            console.warn('Failed to fetch route stop ETA details:', error);
+        }
+    };
+
+    const handleRegionDidChange = (event: any) => {
+        if (cameraLockedToInitialView && hasInitialCameraTarget) {
+            setCameraLockedToInitialView(false);
+        }
+
+        const visibleBounds = event?.properties?.visibleBounds;
+
+        if (
+            Array.isArray(visibleBounds)
+            && visibleBounds.length === 2
+            && Array.isArray(visibleBounds[0])
+            && Array.isArray(visibleBounds[1])
+            && visibleBounds[0].length >= 2
+            && visibleBounds[1].length >= 2
+        ) {
+            const first = visibleBounds[0];
+            const second = visibleBounds[1];
+            const east = Math.max(Number(first[0]), Number(second[0]));
+            const west = Math.min(Number(first[0]), Number(second[0]));
+            const north = Math.max(Number(first[1]), Number(second[1]));
+            const south = Math.min(Number(first[1]), Number(second[1]));
+
+            if ([north, south, east, west].every((value) => Number.isFinite(value))) {
+                setMapBounds({ north, south, east, west });
+                return;
+            }
+        }
+
+        const center = event?.geometry?.coordinates;
+        if (Array.isArray(center) && center.length >= 2) {
+            const longitude = Number(center[0]);
+            const latitude = Number(center[1]);
+
+            if (Number.isFinite(longitude) && Number.isFinite(latitude)) {
+                setMapBounds(createFallbackBounds(latitude, longitude));
+            }
+        }
+    };
+
+    const renderStopEtaSummary = (stopId: string, textStyle: any = styles.calloutSecondary, maxItems?: number) => {
+        const stopEtas = etasByStopId[stopId] || [];
+        if (!stopEtas.length) {
+            return <Text style={textStyle}>Няма налични ETA в момента</Text>;
+        }
+
+        const visibleEtas = typeof maxItems === 'number' ? stopEtas.slice(0, maxItems) : stopEtas;
+
+        return visibleEtas.map((eta) => (
+            <Text key={`${eta.tripId}-${eta.stopId}-${eta.arrivalTimestamp}`} style={textStyle}>
                 {`${getVehicleIcon(eta.type)} ${eta.line} • ${eta.minutesAway} мин • ${formatUnixTime(eta.arrivalTimestamp)}`}
             </Text>
         ));
     };
 
-    const renderDirectionArrow = (headingDegrees?: number) => (
-        <View
-            style={[
-                styles.directionArrowWrap,
-                { transform: [{ rotate: `${headingDegrees || 0}deg` }] },
-            ]}
-        >
-            <Text style={styles.directionArrow}>▲</Text>
+    const renderLiveVehicleMarker = (vehicle: Vehicle) => (
+        <View style={styles.liveVehicleContainer}>
+            <Text style={[styles.liveVehicleLineText, { color: getVehicleAccentColor(vehicle.type) }]}>{vehicle.line}</Text>
+            <View style={[styles.liveVehicleWrap, { transform: [{ rotate: `${(vehicle.headingDegrees || 0) - 90}deg` }] }]}>
+                <View style={[styles.liveVehicleAccentPlate, { backgroundColor: getVehicleAccentColor(vehicle.type) }]} />
+                <Text style={styles.liveVehicleIcon}>{getVehicleIcon(vehicle.type)}</Text>
+            </View>
         </View>
     );
 
@@ -171,10 +604,11 @@ export default function MapScreen() {
                     style={styles.map}
                     mapStyle="https://demotiles.maplibre.org/style.json"
                     logoEnabled={false}
+                    onRegionDidChange={handleRegionDidChange}
                 >
                     <MapboxGL.Camera
-                        zoomLevel={13}
-                        centerCoordinate={centerCoordinate}
+                        zoomLevel={cameraLockedToInitialView && hasInitialCameraTarget ? INITIAL_ZOOM_LEVEL : undefined}
+                        centerCoordinate={cameraLockedToInitialView && hasInitialCameraTarget ? mapCenterCoordinate : undefined}
                     />
 
                     {location && (
@@ -186,7 +620,7 @@ export default function MapScreen() {
                         </MapboxGL.PointAnnotation>
                     )}
 
-                    {stops.map((stop) => (
+                    {!routeGeometry && filteredStops.map((stop) => (
                         <MapboxGL.PointAnnotation
                             key={`stop-${stop.id}`}
                             id={`stop-${stop.id}`}
@@ -194,7 +628,7 @@ export default function MapScreen() {
                             onSelected={() => setSelectedStop(stop)}
                         >
                             <View style={styles.stopDot}>
-                                <Text style={styles.stopIcon}>S</Text>
+                                <Text style={styles.stopIcon}>🚏</Text>
                             </View>
                             <MapboxGL.Callout>
                                 <View style={styles.calloutCard}>
@@ -202,68 +636,133 @@ export default function MapScreen() {
                                     <Text style={styles.calloutSecondary}>{`Спирка: ${stop.id}`}</Text>
                                     <Text style={styles.calloutSecondary}>{summarizeStopDirections(stop, 1)}</Text>
                                     <Text style={styles.calloutSecondary}>{`Линии: ${stop.lines.slice(0, 8).join(', ') || 'н/д'}`}</Text>
-                                    {renderStopEtaSummary(stop.id)}
+                                    {renderStopEtaSummary(stop.id, styles.calloutSecondary, STOP_ETA_PREVIEW_COUNT)}
                                 </View>
                             </MapboxGL.Callout>
                         </MapboxGL.PointAnnotation>
                     ))}
 
-                    {filteredVehicles.map((vehicle) => (
+                    {displayVehicles.map((vehicle) => (
                         <MapboxGL.PointAnnotation
                             key={`vehicle-${vehicle.id}`}
                             id={`vehicle-${vehicle.id}`}
                             coordinate={[vehicle.longitude, vehicle.latitude]}
                         >
                             <View style={styles.vehicleMarkerWrap}>
-                                {renderDirectionArrow(vehicle.headingDegrees)}
-                                <View
-                                    style={[
-                                        styles.vehicleDot,
-                                        {
-                                            borderColor: getVehicleAccentColor(vehicle.type),
-                                        },
-                                    ]}
-                                >
-                                    <Text style={styles.vehicleEmoji}>{getVehicleIcon(vehicle.type)}</Text>
-                                </View>
-                                <View
-                                    style={[
-                                        styles.vehicleLineBadge,
-                                        { backgroundColor: getVehicleAccentColor(vehicle.type) },
-                                    ]}
-                                >
-                                    <Text style={styles.vehicleText}>{vehicle.line}</Text>
-                                </View>
+                                {renderLiveVehicleMarker(vehicle)}
                             </View>
                             <MapboxGL.Callout>
                                 <View style={styles.calloutCard}>
                                     <Text style={styles.calloutTitle}>{`${getVehicleIcon(vehicle.type)} Линия ${vehicle.line}`}</Text>
                                     <Text style={styles.calloutSecondary}>{`Vehicle ID: ${vehicle.id}`}</Text>
                                     <Text style={styles.calloutSecondary}>{`Последен update: ${formatUnixTime(vehicle.lastUpdatedUnix)}`}</Text>
-                                    <Text style={styles.calloutSecondary}>{`Скорост: ${vehicle.speedKph ? Math.round(vehicle.speedKph) : 0} км/ч`}</Text>
+                                    <Text style={styles.calloutSecondary}>{`Скорост: ${Number.isFinite(vehicle.speedKph) ? Math.round(vehicle.speedKph as number) : 'н/д'} км/ч`}</Text>
                                     <Text style={styles.calloutSecondary}>{`Спирка: ${vehicle.stopId ? (stopNameById[vehicle.stopId] || vehicle.stopId) : 'н/д'}`}</Text>
                                 </View>
                             </MapboxGL.Callout>
                         </MapboxGL.PointAnnotation>
                     ))}
+
+                    {routeGeometry?.directions.map((direction, index) => (
+                        <MapboxGL.ShapeSource
+                            id={`route-source-${routeGeometry.line}-${index}`}
+                            key={`route-source-${routeGeometry.line}-${index}`}
+                            shape={{
+                                type: 'Feature',
+                                properties: {
+                                    routeColor: getDirectionAccentColor(index),
+                                },
+                                geometry: {
+                                    type: 'LineString',
+                                    coordinates: direction.coordinates,
+                                },
+                            }}
+                        >
+                            <MapboxGL.LineLayer
+                                id={`route-layer-${routeGeometry.line}-${index}`}
+                                style={{
+                                    lineColor: ['get', 'routeColor'],
+                                    lineWidth: 4,
+                                    lineOpacity: 0.9,
+                                }}
+                            />
+                        </MapboxGL.ShapeSource>
+                    ))}
+
+                    {routeGeometry?.directions.map((direction, dirIndex) =>
+                        getDirectionArrowSamples(direction.coordinates).map((arrow, arrowIndex) => (
+                            <MapboxGL.PointAnnotation
+                                key={`route-arrow-${dirIndex}-${arrowIndex}`}
+                                id={`route-arrow-${dirIndex}-${arrowIndex}`}
+                                coordinate={arrow.coordinate}
+                            >
+                                <Text
+                                    style={[
+                                        styles.routeDirectionArrow,
+                                        {
+                                            color: getDirectionAccentColor(dirIndex),
+                                            transform: [{ rotate: `${arrow.headingDegrees}deg` }],
+                                        },
+                                    ]}
+                                >
+                                    ▲
+                                </Text>
+                            </MapboxGL.PointAnnotation>
+                        ))
+                    )}
+
+                    {routeGeometry?.directions.map((direction, dirIndex) =>
+                        direction.stops.map((stop, stopIndex) => (
+                            <MapboxGL.PointAnnotation
+                                key={`route-stop-${dirIndex}-${stop.id}-${stopIndex}`}
+                                id={`route-stop-${dirIndex}-${stop.id}-${stopIndex}`}
+                                coordinate={[stop.longitude, stop.latitude]}
+                                onSelected={() => { void openRouteStopDetails(stop, direction.name || `Посока ${dirIndex + 1}`); }}
+                            >
+                                <View
+                                    style={[
+                                        styles.routeStopDot,
+                                        { backgroundColor: getDirectionAccentColor(dirIndex), borderColor: getDirectionAccentColor(dirIndex) },
+                                    ]}
+                                >
+                                    <Text style={styles.routeStopText}>{stopIndex + 1}</Text>
+                                </View>
+                                <MapboxGL.Callout>
+                                    <View style={styles.calloutCard}>
+                                        <Text style={styles.calloutTitle}>{`${stopIndex + 1}. ${stop.name}`}</Text>
+                                        <Text style={styles.calloutSecondary}>{`Спирка ID: ${stop.id}`}</Text>
+                                        <Text style={styles.calloutSecondary}>{`Линия: ${routeGeometry?.line || highlightedRoute?.line || 'н/д'}`}</Text>
+                                        <Text style={styles.calloutSecondary}>{`Посока: ${direction.name || `Посока ${dirIndex + 1}`}`}</Text>
+                                        {renderStopEtaSummary(stop.id, styles.calloutSecondary, STOP_ETA_PREVIEW_COUNT)}
+                                    </View>
+                                </MapboxGL.Callout>
+                            </MapboxGL.PointAnnotation>
+                        ))
+                    )}
                 </MapboxGL.MapView>
 
-                <View style={styles.filtersPanel}>
+                {filterPanelVisible && !isRouteMode && (
+                <ScrollView
+                    style={styles.filtersPanel}
+                    contentContainerStyle={styles.filtersPanelContent}
+                    showsVerticalScrollIndicator={false}
+                    nestedScrollEnabled
+                >
                     <Text style={styles.filterTitle}>1. Филтър по вид</Text>
                     <View style={styles.chipRow}>
                         <TouchableOpacity
-                            style={[styles.filterChip, selectedVehicleType === 'all' && styles.filterChipActive]}
-                            onPress={() => setSelectedVehicleType('all')}
+                            style={[styles.filterChip, !selectedVehicleTypes.length && styles.filterChipActive]}
+                            onPress={() => setSelectedVehicleTypes([])}
                         >
-                            <Text style={[styles.filterChipText, selectedVehicleType === 'all' && styles.filterChipTextActive]}>Всички</Text>
+                            <Text style={[styles.filterChipText, !selectedVehicleTypes.length && styles.filterChipTextActive]}>Всички</Text>
                         </TouchableOpacity>
                         {VEHICLE_TYPE_ORDER.map((vehicleType) => (
                             <TouchableOpacity
                                 key={vehicleType}
-                                style={[styles.filterChip, selectedVehicleType === vehicleType && styles.filterChipActive]}
-                                onPress={() => setSelectedVehicleType(vehicleType)}
+                                style={[styles.filterChip, selectedVehicleTypes.includes(vehicleType) && styles.filterChipActive]}
+                                onPress={() => toggleVehicleTypeFilter(vehicleType)}
                             >
-                                <Text style={[styles.filterChipText, selectedVehicleType === vehicleType && styles.filterChipTextActive]}>
+                                <Text style={[styles.filterChipText, selectedVehicleTypes.includes(vehicleType) && styles.filterChipTextActive]}>
                                     {getVehicleIcon(vehicleType)} {getVehicleTypeLabel(vehicleType)}
                                 </Text>
                             </TouchableOpacity>
@@ -273,26 +772,26 @@ export default function MapScreen() {
                     <ScrollView style={styles.linesScroll} showsVerticalScrollIndicator={false}>
                         <View style={styles.chipRow}>
                             <TouchableOpacity
-                                style={[styles.filterChip, selectedLine === 'all' && styles.filterChipActive]}
-                                onPress={() => setSelectedLine('all')}
+                                style={[styles.filterChip, !selectedLines.length && styles.filterChipActive]}
+                                onPress={() => setSelectedLines([])}
                             >
-                                <Text style={[styles.filterChipText, selectedLine === 'all' && styles.filterChipTextActive]}>Всички</Text>
+                                <Text style={[styles.filterChipText, !selectedLines.length && styles.filterChipTextActive]}>Всички</Text>
                             </TouchableOpacity>
                             {availableLines.map((line) => (
                                 <TouchableOpacity
                                     key={line}
-                                    style={[styles.filterChip, selectedLine === line && styles.filterChipActive]}
-                                    onPress={() => setSelectedLine(line)}
+                                    style={[styles.filterChip, selectedLines.includes(line) && styles.filterChipActive]}
+                                    onPress={() => toggleLineFilter(line)}
                                 >
-                                    <Text style={[styles.filterChipText, selectedLine === line && styles.filterChipTextActive]}>{line}</Text>
+                                    <Text style={[styles.filterChipText, selectedLines.includes(line) && styles.filterChipTextActive]}>{line}</Text>
                                 </TouchableOpacity>
                             ))}
                         </View>
                     </ScrollView>
                     <Text style={styles.filterHint}>{`Показани превозни средства: ${filteredVehicles.length}/${vehicles.length}`}</Text>
-                    <Text style={styles.filterHint}>{`Видими спирки: ${stops.length}`}</Text>
+                    <Text style={styles.filterHint}>{`Видими спирки: ${filteredStops.length}/${stops.length}`}</Text>
                     <View style={styles.nearbyStopsList}>
-                        {stops.slice(0, 6).map((stop) => (
+                        {filteredStops.slice(0, 6).map((stop) => (
                             <TouchableOpacity
                                 key={stop.id}
                                 style={styles.nearbyStopButton}
@@ -303,23 +802,44 @@ export default function MapScreen() {
                             </TouchableOpacity>
                         ))}
                     </View>
-                </View>
+                </ScrollView>
+                )}
 
-                {/* Floating UI Overlay */}
-                <View style={styles.topRightControls}>
-                    <View style={styles.statusBadge}>
-                        <Text style={styles.statusText}>
-                            {lastUpdated ? `Обновено: ${lastUpdated.toLocaleTimeString('bg-BG')}` : 'Зареждане...'}
-                        </Text>
-                        <Text style={styles.statusText}>{`Превозни средства: ${filteredVehicles.length}`}</Text>
-                    </View>
-                    <View style={styles.iconButton}>
-                        <Text style={styles.iconText}>🛡️</Text>
-                    </View>
-                    <View style={styles.iconButton}>
-                        <Text style={styles.iconText}>🚇</Text>
-                    </View>
+                {isRouteMode && routeGeometry && (
+                <View style={styles.routeStopsPanel}>
+                    <Text style={styles.routeStopsPanelTitle}>{`🚏 Спирки — ${routeGeometry.line}`}</Text>
+                    <TextInput
+                        style={styles.routeStopSearchInput}
+                        placeholder="Търси спирка по име..."
+                        placeholderTextColor="#9CA3AF"
+                        value={routeStopSearch}
+                        onChangeText={setRouteStopSearch}
+                    />
+                    <ScrollView style={styles.routeStopSearchList} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+                        {routeStopsFiltered.map((stop) => (
+                            <TouchableOpacity
+                                key={`rs-${stop.dirIndex}-${stop.id}-${stop.stopIndex}`}
+                                style={[
+                                    styles.routeStopSearchItem,
+                                    selectedStop?.id === stop.id && styles.routeStopSearchItemActive,
+                                ]}
+                                onPress={() => { void openRouteStopDetails(stop, stop.directionName); }}
+                            >
+                                <View style={[styles.routeStopSearchBadge, { backgroundColor: getDirectionAccentColor(stop.dirIndex) }]}>
+                                    <Text style={styles.routeStopSearchBadgeText}>{stop.stopIndex + 1}</Text>
+                                </View>
+                                <View style={styles.routeStopSearchInfo}>
+                                    <Text style={styles.routeStopSearchName} numberOfLines={1}>{stop.name}</Text>
+                                    <Text style={styles.routeStopSearchDir} numberOfLines={1}>{stop.directionName}</Text>
+                                </View>
+                            </TouchableOpacity>
+                        ))}
+                        {routeStopsFiltered.length === 0 && (
+                            <Text style={styles.routeStopSearchEmpty}>Няма намерени спирки</Text>
+                        )}
+                    </ScrollView>
                 </View>
+                )}
 
                 <View style={styles.bottomOverlay}>
                     <TouchableOpacity
@@ -343,9 +863,9 @@ export default function MapScreen() {
                                 <Text style={styles.stopScheduleCloseText}>Затвори</Text>
                             </Pressable>
                         </View>
-                        <View style={styles.stopScheduleList}>
-                            {renderStopEtaSummary(selectedStop.id)}
-                        </View>
+                        <ScrollView style={styles.stopScheduleList} showsVerticalScrollIndicator={false}>
+                            {renderStopEtaSummary(selectedStop.id, styles.stopScheduleEta)}
+                        </ScrollView>
                     </View>
                 )}
 
@@ -420,14 +940,18 @@ const styles = StyleSheet.create({
     },
     filtersPanel: {
         position: 'absolute',
-        top: 20,
-        left: 16,
+        top: 62,
+        right: 76,
         width: 248,
+        maxHeight: '72%',
         backgroundColor: 'rgba(255,255,255,0.95)',
         borderRadius: 14,
         padding: 12,
         zIndex: 20,
         elevation: 20,
+    },
+    filtersPanelContent: {
+        paddingBottom: 8,
     },
     filterTitle: {
         color: '#264653',
@@ -509,53 +1033,50 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    directionArrowWrap: {
-        marginBottom: 1,
+    liveVehicleContainer: {
         alignItems: 'center',
         justifyContent: 'center',
     },
-    directionArrow: {
-        color: '#111827',
-        fontSize: 12,
-        textShadowColor: 'rgba(255,255,255,0.95)',
-        textShadowRadius: 4,
+    liveVehicleLineText: {
+        marginBottom: 2,
+        fontSize: 15,
+        fontWeight: '900',
+        textShadowColor: 'rgba(255,255,255,0.96)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 1,
     },
-    vehicleDot: {
+    liveVehicleWrap: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 56,
+        height: 56,
+    },
+    liveVehicleAccentPlate: {
+        position: 'absolute',
         width: 30,
         height: 30,
-        borderRadius: 15,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.92)',
-        borderWidth: 2,
-        shadowColor: '#111827',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.18,
-        shadowRadius: 4,
-        elevation: 3,
+        borderRadius: 9,
+        opacity: 0.22,
     },
-    vehicleLineBadge: {
-        marginTop: 2,
-        minWidth: 24,
-        borderRadius: 999,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        alignItems: 'center',
+    liveVehicleIcon: {
+        fontSize: 36,
+        lineHeight: 36,
+        textShadowColor: 'rgba(17,24,39,0.24)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 6,
     },
-    vehicleText: {
-        color: '#FFFFFF',
-        fontSize: 10,
-        fontWeight: 'bold',
-    },
-    vehicleEmoji: {
-        fontSize: 18,
-        lineHeight: 18,
+    routeDirectionArrow: {
+        fontSize: 22,
+        fontWeight: '900',
+        textShadowColor: 'rgba(255,255,255,0.95)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 2,
     },
     stopDot: {
         backgroundColor: 'white',
         borderWidth: 2,
         borderColor: '#007AFF',
-        borderRadius: 15,
+        borderRadius: 6,
         width: 34,
         height: 34,
         alignItems: 'center',
@@ -568,6 +1089,19 @@ const styles = StyleSheet.create({
     },
     stopIcon: {
         fontSize: 15,
+        fontWeight: '700',
+    },
+    routeStopDot: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        borderWidth: 2.5,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    routeStopText: {
+        color: '#FFFFFF',
+        fontSize: 11,
         fontWeight: '700',
     },
     calloutCard: {
@@ -630,28 +1164,87 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     stopScheduleList: {
+        maxHeight: 180,
         gap: 6,
     },
-    topRightControls: {
+    stopScheduleEta: {
+        color: '#1F2937',
+        fontSize: 13,
+        marginBottom: 8,
+    },
+    routeStopsPanel: {
         position: 'absolute',
-        top: 60,
-        right: 20,
-        alignItems: 'center',
-        gap: 15,
+        top: 62,
+        right: 76,
+        width: 268,
+        maxHeight: '72%',
+        backgroundColor: 'rgba(255,255,255,0.96)',
+        borderRadius: 14,
+        padding: 12,
         zIndex: 20,
         elevation: 20,
     },
-    statusBadge: {
-        backgroundColor: 'rgba(255,255,255,0.92)',
-        borderRadius: 12,
+    routeStopsPanelTitle: {
+        color: '#111827',
+        fontSize: 14,
+        fontWeight: '700',
+        marginBottom: 8,
+    },
+    routeStopSearchInput: {
+        backgroundColor: '#F3F4F6',
+        borderRadius: 10,
         paddingHorizontal: 12,
         paddingVertical: 8,
-        marginBottom: 10,
+        fontSize: 13,
+        color: '#111827',
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
     },
-    statusText: {
-        color: '#264653',
-        fontSize: 12,
+    routeStopSearchList: {
+        maxHeight: 320,
+    },
+    routeStopSearchItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 7,
+        paddingHorizontal: 6,
+        borderRadius: 10,
+        gap: 10,
+    },
+    routeStopSearchItemActive: {
+        backgroundColor: '#DBEAFE',
+    },
+    routeStopSearchBadge: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    routeStopSearchBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    routeStopSearchInfo: {
+        flex: 1,
+    },
+    routeStopSearchName: {
+        color: '#111827',
+        fontSize: 13,
         fontWeight: '600',
+    },
+    routeStopSearchDir: {
+        color: '#6B7280',
+        fontSize: 11,
+        marginTop: 1,
+    },
+    routeStopSearchEmpty: {
+        color: '#9CA3AF',
+        fontSize: 13,
+        textAlign: 'center',
+        paddingVertical: 16,
     },
     iconButton: {
         backgroundColor: 'white',

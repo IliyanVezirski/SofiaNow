@@ -15,26 +15,68 @@ export const getVehicleTypeLabel = (type: VehicleType) => {
     }
 };
 
+export const inferLineTypeFromToken = (lineToken: string | undefined | null): VehicleType => {
+    const normalized = String(lineToken || '').trim().toUpperCase();
+
+    if (normalized.includes('ТБ') || normalized.includes('TB')) {
+        return 'trolley';
+    }
+
+    if (normalized.includes('ТМ') || normalized.includes('TM')) {
+        return 'tram';
+    }
+
+    if (normalized.startsWith('M')) {
+        return 'subway';
+    }
+
+    return 'bus';
+};
+
 export const getRouteMetadata = (routeId: string | undefined | null) => {
-    const normalizedRouteId = (routeId || '').trim();
+    const normalizedRouteId = (routeId || '').trim().toUpperCase();
+    const primaryToken = normalizedRouteId.split('-')[0];
 
-    if (normalizedRouteId.startsWith('TM')) {
-        return { routeId: normalizedRouteId, line: normalizedRouteId.replace('TM', ''), type: 'tram' as VehicleType };
+    const sanitizeLine = (value: string) => {
+        const cleaned = (value || '').trim().toUpperCase().replace(/\s+/g, '');
+        if (!cleaned) {
+            return '';
+        }
+
+        return cleaned.replace(/[^0-9A-ZА-Я]/g, '');
+    };
+
+    const normalizedPrimaryToken = sanitizeLine(primaryToken);
+
+    if (normalizedPrimaryToken.startsWith('TM')) {
+        const line = sanitizeLine(normalizedPrimaryToken.replace(/^TM/, ''));
+        return { routeId: normalizedRouteId || 'Unknown', line: line || normalizedPrimaryToken, type: 'tram' as VehicleType };
     }
 
-    if (normalizedRouteId.startsWith('TB')) {
-        return { routeId: normalizedRouteId, line: normalizedRouteId.replace('TB', ''), type: 'trolley' as VehicleType };
+    if (normalizedPrimaryToken.startsWith('TB')) {
+        const line = sanitizeLine(normalizedPrimaryToken.replace(/^TB/, ''));
+        return { routeId: normalizedRouteId || 'Unknown', line: line || normalizedPrimaryToken, type: 'trolley' as VehicleType };
     }
 
-    if (normalizedRouteId.startsWith('M')) {
-        return { routeId: normalizedRouteId, line: normalizedRouteId.replace(/^M/, ''), type: 'subway' as VehicleType };
+    if (/^M\d+/i.test(normalizedPrimaryToken)) {
+        const line = sanitizeLine(normalizedPrimaryToken.replace(/^M/, ''));
+        return { routeId: normalizedRouteId || 'Unknown', line: line || normalizedPrimaryToken, type: 'subway' as VehicleType };
     }
 
-    if (normalizedRouteId.startsWith('A')) {
-        return { routeId: normalizedRouteId, line: normalizedRouteId.replace('A', ''), type: 'bus' as VehicleType };
+    if (/^N\d+/i.test(normalizedPrimaryToken)) {
+        return { routeId: normalizedRouteId || 'Unknown', line: normalizedPrimaryToken, type: 'bus' as VehicleType };
     }
 
-    return { routeId: normalizedRouteId || 'Unknown', line: normalizedRouteId || 'Unknown', type: 'bus' as VehicleType };
+    if (normalizedPrimaryToken.startsWith('A')) {
+        const line = sanitizeLine(normalizedPrimaryToken.replace(/^A/, ''));
+        return { routeId: normalizedRouteId || 'Unknown', line: line || normalizedPrimaryToken, type: 'bus' as VehicleType };
+    }
+
+    return {
+        routeId: normalizedRouteId || 'Unknown',
+        line: normalizedPrimaryToken || normalizedRouteId || 'Unknown',
+        type: 'bus' as VehicleType,
+    };
 };
 
 export const getVehicleIcon = (type: VehicleType) => {
@@ -53,9 +95,9 @@ export const getVehicleIcon = (type: VehicleType) => {
 export const getVehicleAccentColor = (type: VehicleType) => {
     switch (type) {
         case 'tram':
-            return '#F59E0B';
+            return '#F97316';
         case 'trolley':
-            return '#10B981';
+            return '#2563EB';
         case 'subway':
             return '#6366F1';
         default:
