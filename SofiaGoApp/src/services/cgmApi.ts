@@ -395,7 +395,7 @@ export const fetchVehiclesNearby = async (lat: number, lon: number): Promise<Veh
                         latitude: vLat,
                         longitude: vLon,
                         speedKph: typeof entity.vehicle.position.speed === 'number'
-                            ? entity.vehicle.position.speed * 3.6
+                            ? entity.vehicle.position.speed
                             : undefined,
                         stopId: entity.vehicle.stopId,
                         currentStatus: entity.vehicle.currentStatus,
@@ -471,7 +471,7 @@ export const fetchVehiclesInBounds = async (bounds: MapBounds): Promise<Vehicle[
                         latitude: vLat,
                         longitude: vLon,
                         speedKph: typeof entity.vehicle.position.speed === 'number'
-                            ? entity.vehicle.position.speed * 3.6
+                            ? entity.vehicle.position.speed
                             : undefined,
                         stopId: entity.vehicle.stopId,
                         currentStatus: entity.vehicle.currentStatus,

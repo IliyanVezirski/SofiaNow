@@ -11,6 +11,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<BottomTab>('map');
   const [selectedRoute, setSelectedRoute] = useState<RouteSelection | null>(null);
   const [mapFiltersVisible, setMapFiltersVisible] = useState(false);
+  const [openSearchToken, setOpenSearchToken] = useState(0);
+  const [toggleFavoritesToken, setToggleFavoritesToken] = useState(0);
+  const [recenterToken, setRecenterToken] = useState(0);
+  const [dismissTransientPanelsToken, setDismissTransientPanelsToken] = useState(0);
 
   return (
     <View style={styles.container}>
@@ -18,6 +22,10 @@ export default function App() {
         <MapScreen
           highlightedRoute={selectedRoute}
           filterPanelVisible={mapFiltersVisible}
+          searchRequestToken={openSearchToken}
+          favoritesRequestToken={toggleFavoritesToken}
+          recenterRequestToken={recenterToken}
+          dismissTransientPanelsToken={dismissTransientPanelsToken}
         />
         {activeTab === 'schedules' && (
           <View style={styles.schedulesOverlay}>
@@ -40,7 +48,13 @@ export default function App() {
           ]}
           onPress={() => {
             if (activeTab === 'map') {
-              setMapFiltersVisible((prev) => !prev);
+              setMapFiltersVisible((prev) => {
+                const next = !prev;
+                if (next) {
+                  setDismissTransientPanelsToken((value) => value + 1);
+                }
+                return next;
+              });
             }
           }}
           disabled={activeTab !== 'map'}
@@ -52,6 +66,8 @@ export default function App() {
           onPress={() => {
             setActiveTab('map');
             setSelectedRoute(null);
+            setMapFiltersVisible(false);
+            setDismissTransientPanelsToken((value) => value + 1);
           }}
         >
           <Text style={styles.floatingIcon}>🗺️</Text>
@@ -60,9 +76,47 @@ export default function App() {
           style={[styles.floatingButton, activeTab === 'schedules' && styles.floatingButtonActive]}
           onPress={() => {
             setActiveTab((prev) => (prev === 'schedules' ? 'map' : 'schedules'));
+            setMapFiltersVisible(false);
+            setDismissTransientPanelsToken((value) => value + 1);
           }}
         >
           <Text style={styles.floatingIcon}>🕒</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.floatingButton, activeTab !== 'map' && styles.floatingButtonDisabled]}
+          onPress={() => {
+            if (activeTab === 'map') {
+              setMapFiltersVisible(false);
+              setOpenSearchToken((prev) => prev + 1);
+            }
+          }}
+          disabled={activeTab !== 'map'}
+        >
+          <Text style={styles.floatingIcon}>🔎</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.floatingButton, activeTab !== 'map' && styles.floatingButtonDisabled]}
+          onPress={() => {
+            if (activeTab === 'map') {
+              setMapFiltersVisible(false);
+              setToggleFavoritesToken((prev) => prev + 1);
+            }
+          }}
+          disabled={activeTab !== 'map'}
+        >
+          <Text style={styles.floatingIcon}>⭐</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.floatingButton, activeTab !== 'map' && styles.floatingButtonDisabled]}
+          onPress={() => {
+            if (activeTab === 'map') {
+              setMapFiltersVisible(false);
+              setRecenterToken((prev) => prev + 1);
+            }
+          }}
+          disabled={activeTab !== 'map'}
+        >
+          <Text style={styles.floatingIcon}>📍</Text>
         </TouchableOpacity>
       </View>
       <StatusBar style="auto" />

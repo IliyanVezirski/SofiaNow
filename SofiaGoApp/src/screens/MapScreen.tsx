@@ -3,6 +3,7 @@ import { StyleSheet, View, Text, TouchableOpacity, Modal, Pressable, ScrollView,
 import * as Location from 'expo-location';
 import { fetchStopEtas, fetchVehiclesInBounds, StopEta, Vehicle } from '../services/cgmApi';
 import { fetchLineRouteGeometry, fetchLineRouteGeometryByRouteId, fetchStopById, fetchStopsInBounds, LineRouteGeometry, MapBounds, Stop, summarizeStopDirections } from '../services/stopsApi';
+import { addFavoritePlace, FavoritePlace, loadFavoritePlaces, PlaceSearchResult, removeFavoritePlace, searchLocations } from '../services/places';
 import MapboxGL from '@maplibre/maplibre-react-native';
 import { VehicleType, formatUnixTime, getVehicleAccentColor, getVehicleIcon, getVehicleTypeLabel, inferLineTypeFromToken, VEHICLE_TYPE_ORDER } from '../services/transitUtils';
 import { RouteSelection } from '../types/routes';
@@ -78,9 +79,20 @@ const getDirectionArrowSamples = (coordinates: [number, number][], maxArrows = 1
 interface MapScreenProps {
     highlightedRoute?: RouteSelection | null;
     filterPanelVisible?: boolean;
+    searchRequestToken?: number;
+    favoritesRequestToken?: number;
+    recenterRequestToken?: number;
+    dismissTransientPanelsToken?: number;
 }
 
-export default function MapScreen({ highlightedRoute, filterPanelVisible = true }: MapScreenProps) {
+export default function MapScreen({
+    highlightedRoute,
+    filterPanelVisible = true,
+    searchRequestToken,
+    favoritesRequestToken,
+    recenterRequestToken,
+    dismissTransientPanelsToken,
+}: MapScreenProps) {
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [animatedVehicles, setAnimatedVehicles] = useState<Vehicle[]>([]);
@@ -99,11 +111,99 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
     const [hasInitialCameraTarget, setHasInitialCameraTarget] = useState(false);
     const [routeGeometry, setRouteGeometry] = useState<LineRouteGeometry | null>(null);
     const [routeStopSearch, setRouteStopSearch] = useState('');
+    const [locationSearchQuery, setLocationSearchQuery] = useState('');
+    const [locationSearchResults, setLocationSearchResults] = useState<PlaceSearchResult[]>([]);
+    const [locationSearchLoading, setLocationSearchLoading] = useState(false);
+    const [favoritePlaces, setFavoritePlaces] = useState<FavoritePlace[]>([]);
+    const [favoritesVisible, setFavoritesVisible] = useState(false);
+    const [searchModalVisible, setSearchModalVisible] = useState(false);
     const lastHeadingByVehicleRef = useRef<Record<string, number>>({});
     const animatedVehiclesRef = useRef<Vehicle[]>([]);
     const vehicleAnimationFrameRef = useRef<number | null>(null);
     const isRouteMode = !!highlightedRoute;
     const visibleStopsRef = useRef<Stop[]>([]);
+
+    useEffect(() => {
+        void (async () => {
+            const favorites = await loadFavoritePlaces();
+            setFavoritePlaces(favorites);
+        })();
+    }, []);
+
+    useEffect(() => {
+        const normalizedQuery = locationSearchQuery.trim();
+        if (!normalizedQuery) {
+            setLocationSearchResults([]);
+            setLocationSearchLoading(false);
+            return;
+        }
+
+        let isMounted = true;
+        setLocationSearchLoading(true);
+        const timer = setTimeout(() => {
+            void (async () => {
+                try {
+                    const results = await searchLocations(normalizedQuery, 6);
+                    if (isMounted) {
+                        setLocationSearchResults(results);
+                    }
+                } catch (error) {
+                    console.warn('Location search failed:', error);
+                    if (isMounted) {
+                        setLocationSearchResults([]);
+                    }
+                } finally {
+                    if (isMounted) {
+                        setLocationSearchLoading(false);
+                    }
+                }
+            })();
+        }, 320);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timer);
+        };
+    }, [locationSearchQuery]);
+
+    useEffect(() => {
+        if (typeof searchRequestToken === 'number' && searchRequestToken > 0) {
+            setSearchModalVisible((prev) => {
+                const next = !prev;
+                if (next) {
+                    setFavoritesVisible(false);
+                }
+                return next;
+            });
+        }
+    }, [searchRequestToken]);
+
+    useEffect(() => {
+        if (typeof favoritesRequestToken === 'number' && favoritesRequestToken > 0) {
+            setSearchModalVisible(false);
+            setFavoritesVisible((prev) => !prev);
+        }
+    }, [favoritesRequestToken]);
+
+    useEffect(() => {
+        if (typeof recenterRequestToken === 'number' && recenterRequestToken > 0) {
+            void recenterToUserLocation();
+        }
+    }, [recenterRequestToken]);
+
+    useEffect(() => {
+        if (typeof dismissTransientPanelsToken === 'number' && dismissTransientPanelsToken > 0) {
+            setSearchModalVisible(false);
+            setFavoritesVisible(false);
+        }
+    }, [dismissTransientPanelsToken]);
+
+    useEffect(() => {
+        if (filterPanelVisible) {
+            setSearchModalVisible(false);
+            setFavoritesVisible(false);
+        }
+    }, [filterPanelVisible]);
 
     useEffect(() => {
         animatedVehiclesRef.current = animatedVehicles;
@@ -127,20 +227,38 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
         return Array.from(lineSet)
             .sort((left, right) => left.localeCompare(right, 'bg', { numeric: true }));
     }, [vehicles, isRouteMode, highlightedRoute, selectedLines]);
+    const selectedStopLines = useMemo(() => {
+        if (!selectedStop?.lines?.length) {
+            return [] as string[];
+        }
+
+        return selectedStop.lines
+            .map((line) => String(line || '').trim().toUpperCase())
+            .filter(Boolean);
+    }, [selectedStop]);
     const filteredVehicles = useMemo(() => {
+        const matchesSelectedStop = (vehicle: Vehicle) => {
+            if (!selectedStopLines.length) {
+                return true;
+            }
+
+            return selectedStopLines.includes(String(vehicle.line || '').trim().toUpperCase());
+        };
+
         if (isRouteMode && highlightedRoute) {
             return animatedVehicles.filter((vehicle) => (
                 vehicle.type === highlightedRoute.type
                 && vehicle.line === highlightedRoute.line
+                && matchesSelectedStop(vehicle)
             ));
         }
 
         if (!selectedLines.length) {
-            return vehiclesByType;
+            return vehiclesByType.filter(matchesSelectedStop);
         }
 
-        return vehiclesByType.filter((vehicle) => selectedLines.includes(vehicle.line));
-    }, [selectedLines, vehiclesByType, isRouteMode, highlightedRoute, animatedVehicles]);
+        return vehiclesByType.filter((vehicle) => selectedLines.includes(vehicle.line) && matchesSelectedStop(vehicle));
+    }, [selectedLines, vehiclesByType, isRouteMode, highlightedRoute, animatedVehicles, selectedStopLines]);
     const displayVehicles = useMemo(() => {
         const groupedVehicles = new Map<string, Vehicle[]>();
 
@@ -156,7 +274,8 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
                 return group;
             }
 
-            return group.map((vehicle, index) => {
+            const stableGroup = group.slice().sort((left, right) => left.id.localeCompare(right.id));
+            return stableGroup.map((vehicle, index) => {
                 const angle = (Math.PI * 2 * index) / group.length;
                 return {
                     ...vehicle,
@@ -282,7 +401,7 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
         const tick = () => {
             const elapsed = Date.now() - animationStart;
             const rawProgress = Math.min(1, elapsed / VEHICLE_ANIMATION_MS);
-            const easedProgress = 1 - ((1 - rawProgress) ** 3);
+            const easedProgress = rawProgress;
 
             setAnimatedVehicles(targetVehicles.map((vehicle) => {
                 const previousVehicle = previousVehiclesById.get(vehicle.id);
@@ -491,6 +610,15 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
         };
     }, [highlightedRoute]);
 
+    const refreshStopEtas = async (stopId: string) => {
+        try {
+            const etas = await fetchStopEtas([stopId]);
+            setEtasByStopId((prev) => ({ ...prev, ...etas }));
+        } catch (error) {
+            console.warn('Failed to fetch stop ETA details:', error);
+        }
+    };
+
     const openRouteStopDetails = async (routeStop: {
         id: string;
         name: string;
@@ -517,12 +645,81 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
             }
         }
 
-        try {
-            const etas = await fetchStopEtas([routeStop.id]);
-            setEtasByStopId((prev) => ({ ...prev, ...etas }));
-        } catch (error) {
-            console.warn('Failed to fetch route stop ETA details:', error);
+        await refreshStopEtas(routeStop.id);
+    };
+
+    const openStopDetails = async (stop: Stop) => {
+        setSelectedStop(stop);
+        await refreshStopEtas(stop.id);
+    };
+
+    const openStopPopupOnly = (stop: Stop) => {
+        void refreshStopEtas(stop.id);
+    };
+
+    const openRouteStopPopupOnly = (stopId: string) => {
+        void refreshStopEtas(stopId);
+    };
+
+    const focusMapOnCoordinate = (latitude: number, longitude: number) => {
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return;
         }
+
+        setHasInitialCameraTarget(true);
+        setCameraLockedToInitialView(true);
+        setMapCenterCoordinate([longitude, latitude]);
+        setMapBounds(createFallbackBounds(latitude, longitude));
+    };
+
+    const recenterToUserLocation = async () => {
+        try {
+            let nextLocation = location;
+            if (!nextLocation) {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                    return;
+                }
+
+                nextLocation = await Location.getCurrentPositionAsync({});
+                setLocation(nextLocation);
+            }
+
+            focusMapOnCoordinate(nextLocation.coords.latitude, nextLocation.coords.longitude);
+        } catch (error) {
+            console.warn('Failed to recenter to user location:', error);
+        }
+    };
+
+    const saveFavorite = async (name: string, latitude: number, longitude: number) => {
+        const nextFavorites = await addFavoritePlace({ name, latitude, longitude });
+        setFavoritePlaces(nextFavorites);
+    };
+
+    const onSelectSearchResult = (result: PlaceSearchResult) => {
+        focusMapOnCoordinate(result.latitude, result.longitude);
+        setLocationSearchQuery(result.name);
+        setLocationSearchResults([]);
+    };
+
+    const onRemoveFavorite = async (favoriteId: string) => {
+        const nextFavorites = await removeFavoritePlace(favoriteId);
+        setFavoritePlaces(nextFavorites);
+    };
+
+    const onMapLongPress = (event: any) => {
+        const coords = event?.geometry?.coordinates;
+        if (!Array.isArray(coords) || coords.length < 2) {
+            return;
+        }
+
+        const longitude = Number(coords[0]);
+        const latitude = Number(coords[1]);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return;
+        }
+
+        void saveFavorite(`Запазена точка ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, latitude, longitude);
     };
 
     const handleRegionDidChange = (event: any) => {
@@ -579,6 +776,49 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
         ));
     };
 
+    const renderStopEtaByLine = (stop: Stop) => {
+        const stopEtas = etasByStopId[stop.id] || [];
+        const etasByLine = new Map<string, StopEta[]>();
+
+        stopEtas.forEach((eta) => {
+            const key = String(eta.line || '').trim();
+            if (!key) {
+                return;
+            }
+
+            const existing = etasByLine.get(key) || [];
+            existing.push(eta);
+            etasByLine.set(key, existing);
+        });
+
+        const uniqueLines = Array.from(new Set([
+            ...stop.lines.map((line) => String(line || '').trim()).filter(Boolean),
+            ...Array.from(etasByLine.keys()),
+        ])).sort((left, right) => left.localeCompare(right, 'bg', { numeric: true }));
+
+        if (!uniqueLines.length) {
+            return <Text style={styles.stopScheduleEta}>Няма налични линии за тази спирка</Text>;
+        }
+
+        return uniqueLines.map((line) => {
+            const lineEtas = (etasByLine.get(line) || [])
+                .slice()
+                .sort((left, right) => left.arrivalTimestamp - right.arrivalTimestamp)
+                .slice(0, 3);
+
+            return (
+                <View key={`${stop.id}-${line}`} style={styles.stopLineBoardRow}>
+                    <Text style={styles.stopLineBoardLine}>{line}</Text>
+                    <Text style={styles.stopLineBoardEta}>
+                        {lineEtas.length
+                            ? lineEtas.map((eta) => `${eta.minutesAway} мин (${formatUnixTime(eta.arrivalTimestamp)})`).join(' · ')
+                            : 'Няма live ETA в момента'}
+                    </Text>
+                </View>
+            );
+        });
+    };
+
     const renderLiveVehicleMarker = (vehicle: Vehicle) => (
         <View style={styles.liveVehicleContainer}>
             <Text style={[styles.liveVehicleLineText, { color: getVehicleAccentColor(vehicle.type) }]}>{vehicle.line}</Text>
@@ -605,6 +845,7 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
                     mapStyle="https://demotiles.maplibre.org/style.json"
                     logoEnabled={false}
                     onRegionDidChange={handleRegionDidChange}
+                    onLongPress={onMapLongPress}
                 >
                     <MapboxGL.Camera
                         zoomLevel={cameraLockedToInitialView && hasInitialCameraTarget ? INITIAL_ZOOM_LEVEL : undefined}
@@ -625,7 +866,7 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
                             key={`stop-${stop.id}`}
                             id={`stop-${stop.id}`}
                             coordinate={[stop.longitude, stop.latitude]}
-                            onSelected={() => setSelectedStop(stop)}
+                            onSelected={() => openStopPopupOnly(stop)}
                         >
                             <View style={styles.stopDot}>
                                 <Text style={styles.stopIcon}>🚏</Text>
@@ -717,7 +958,7 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
                                 key={`route-stop-${dirIndex}-${stop.id}-${stopIndex}`}
                                 id={`route-stop-${dirIndex}-${stop.id}-${stopIndex}`}
                                 coordinate={[stop.longitude, stop.latitude]}
-                                onSelected={() => { void openRouteStopDetails(stop, direction.name || `Посока ${dirIndex + 1}`); }}
+                                onSelected={() => openRouteStopPopupOnly(stop.id)}
                             >
                                 <View
                                     style={[
@@ -740,6 +981,92 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
                         ))
                     )}
                 </MapboxGL.MapView>
+
+                <Modal
+                    animationType="fade"
+                    transparent
+                    visible={searchModalVisible}
+                    onRequestClose={() => setSearchModalVisible(false)}
+                >
+                    <View style={styles.searchModalOverlay}>
+                        <View style={styles.searchModalCard}>
+                            <View style={styles.searchModalHeader}>
+                                <Text style={styles.searchModalTitle}>Търсене на места</Text>
+                                <Pressable onPress={() => setSearchModalVisible(false)} style={styles.searchModalClose}>
+                                    <Text style={styles.searchModalCloseText}>✕</Text>
+                                </Pressable>
+                            </View>
+                            <TextInput
+                                style={styles.locationSearchInput}
+                                placeholder="Търси адрес или място..."
+                                placeholderTextColor="#6B7280"
+                                value={locationSearchQuery}
+                                onChangeText={setLocationSearchQuery}
+                            />
+                            {(locationSearchLoading || locationSearchResults.length > 0) && (
+                                <ScrollView
+                                    style={styles.locationSearchResults}
+                                    showsVerticalScrollIndicator
+                                    nestedScrollEnabled
+                                >
+                                    {locationSearchLoading && (
+                                        <Text style={styles.locationSearchStatus}>Търсене...</Text>
+                                    )}
+                                    {!locationSearchLoading && locationSearchResults.map((result) => (
+                                        <View key={result.id} style={styles.locationSearchResultRow}>
+                                            <TouchableOpacity style={styles.locationSearchResultPress} onPress={() => onSelectSearchResult(result)}>
+                                                <Text style={styles.locationSearchResultTitle} numberOfLines={1}>{result.name}</Text>
+                                                <Text style={styles.locationSearchResultSubtitle} numberOfLines={1}>{result.subtitle}</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.favoriteInlineButton}
+                                                onPress={() => { void saveFavorite(result.name, result.latitude, result.longitude); }}
+                                            >
+                                                <Text style={styles.favoriteInlineButtonText}>☆</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    ))}
+                                </ScrollView>
+                            )}
+                        </View>
+                    </View>
+                </Modal>
+
+                {favoritesVisible && (
+                    <View style={styles.favoritesPanel}>
+                        <View style={styles.favoritesPanelHeader}>
+                            <Text style={styles.favoritesPanelTitle}>Любими места</Text>
+                            <TouchableOpacity
+                                style={styles.favoritesPanelCloseButton}
+                                onPress={() => setFavoritesVisible(false)}
+                            >
+                                <Text style={styles.favoritesPanelCloseButtonText}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView style={styles.favoritesPanelList} showsVerticalScrollIndicator={false}>
+                            {!favoritePlaces.length && (
+                                <Text style={styles.favoritesEmptyText}>Няма запазени места. Задръж на картата или запази от търсачката.</Text>
+                            )}
+                            {favoritePlaces.map((favorite) => (
+                                <View key={favorite.id} style={styles.favoriteRow}>
+                                    <TouchableOpacity
+                                        style={styles.favoriteRowMain}
+                                        onPress={() => focusMapOnCoordinate(favorite.latitude, favorite.longitude)}
+                                    >
+                                        <Text style={styles.favoriteRowName} numberOfLines={1}>{favorite.name}</Text>
+                                        <Text style={styles.favoriteRowCoords} numberOfLines={1}>{`${favorite.latitude.toFixed(5)}, ${favorite.longitude.toFixed(5)}`}</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.favoriteRemoveButton}
+                                        onPress={() => { void onRemoveFavorite(favorite.id); }}
+                                    >
+                                        <Text style={styles.favoriteRemoveButtonText}>✕</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
 
                 {filterPanelVisible && !isRouteMode && (
                 <ScrollView
@@ -795,7 +1122,7 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
                             <TouchableOpacity
                                 key={stop.id}
                                 style={styles.nearbyStopButton}
-                                onPress={() => setSelectedStop(stop)}
+                                onPress={() => { void openStopDetails(stop); }}
                             >
                                 <Text style={styles.nearbyStopButtonText} numberOfLines={1}>{stop.name}</Text>
                                 <Text style={styles.nearbyStopDirectionText} numberOfLines={2}>{summarizeStopDirections(stop, 1)}</Text>
@@ -864,7 +1191,8 @@ export default function MapScreen({ highlightedRoute, filterPanelVisible = true 
                             </Pressable>
                         </View>
                         <ScrollView style={styles.stopScheduleList} showsVerticalScrollIndicator={false}>
-                            {renderStopEtaSummary(selectedStop.id, styles.stopScheduleEta)}
+                            <Text style={styles.stopLineBoardTitle}>Live ETA по линии</Text>
+                            {renderStopEtaByLine(selectedStop)}
                         </ScrollView>
                     </View>
                 )}
@@ -952,6 +1280,104 @@ const styles = StyleSheet.create({
     },
     filtersPanelContent: {
         paddingBottom: 8,
+    },
+    searchModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(17,24,39,0.35)',
+        justifyContent: 'flex-start',
+        paddingTop: 28,
+        paddingHorizontal: 12,
+    },
+    searchModalCard: {
+        backgroundColor: 'rgba(255,255,255,0.98)',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        padding: 12,
+    },
+    searchModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 10,
+    },
+    searchModalTitle: {
+        color: '#111827',
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    searchModalClose: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F3F4F6',
+    },
+    searchModalCloseText: {
+        color: '#374151',
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    locationSearchInput: {
+        backgroundColor: 'rgba(255,255,255,0.96)',
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+        fontSize: 14,
+        color: '#111827',
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+    },
+    locationSearchResults: {
+        marginTop: 6,
+        maxHeight: 220,
+        backgroundColor: 'rgba(255,255,255,0.97)',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        paddingVertical: 6,
+        paddingHorizontal: 8,
+    },
+    locationSearchStatus: {
+        color: '#4B5563',
+        fontSize: 13,
+        paddingVertical: 8,
+        textAlign: 'center',
+    },
+    locationSearchResultRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingVertical: 6,
+    },
+    locationSearchResultPress: {
+        flex: 1,
+    },
+    locationSearchResultTitle: {
+        color: '#111827',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    locationSearchResultSubtitle: {
+        color: '#6B7280',
+        fontSize: 11,
+        marginTop: 1,
+    },
+    favoriteInlineButton: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#EEF2FF',
+        borderWidth: 1,
+        borderColor: '#C7D2FE',
+    },
+    favoriteInlineButtonText: {
+        color: '#1D4ED8',
+        fontSize: 16,
+        fontWeight: '700',
     },
     filterTitle: {
         color: '#264653',
@@ -1172,6 +1598,30 @@ const styles = StyleSheet.create({
         fontSize: 13,
         marginBottom: 8,
     },
+    stopLineBoardTitle: {
+        color: '#1F2937',
+        fontSize: 13,
+        fontWeight: '700',
+        marginBottom: 8,
+    },
+    stopLineBoardRow: {
+        backgroundColor: '#F3F4F6',
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginBottom: 8,
+    },
+    stopLineBoardLine: {
+        color: '#111827',
+        fontSize: 13,
+        fontWeight: '700',
+        marginBottom: 3,
+    },
+    stopLineBoardEta: {
+        color: '#374151',
+        fontSize: 12,
+        lineHeight: 16,
+    },
     routeStopsPanel: {
         position: 'absolute',
         top: 62,
@@ -1270,6 +1720,92 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         zIndex: 20,
         elevation: 20,
+    },
+    locationButtonIcon: {
+        fontSize: 24,
+        lineHeight: 24,
+    },
+    favoritesPanel: {
+        position: 'absolute',
+        right: 70,
+        top: 128,
+        width: 280,
+        maxHeight: 320,
+        backgroundColor: 'rgba(255,255,255,0.97)',
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        padding: 10,
+        zIndex: 30,
+        elevation: 30,
+    },
+    favoritesPanelTitle: {
+        color: '#111827',
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    favoritesPanelHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+    },
+    favoritesPanelCloseButton: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F3F4F6',
+    },
+    favoritesPanelCloseButtonText: {
+        color: '#374151',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    favoritesPanelList: {
+        maxHeight: 262,
+    },
+    favoritesEmptyText: {
+        color: '#6B7280',
+        fontSize: 12,
+        lineHeight: 16,
+        paddingVertical: 8,
+    },
+    favoriteRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 8,
+        backgroundColor: '#F9FAFB',
+        borderRadius: 10,
+        padding: 8,
+    },
+    favoriteRowMain: {
+        flex: 1,
+    },
+    favoriteRowName: {
+        color: '#111827',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    favoriteRowCoords: {
+        color: '#6B7280',
+        fontSize: 11,
+        marginTop: 2,
+    },
+    favoriteRemoveButton: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FEE2E2',
+    },
+    favoriteRemoveButtonText: {
+        color: '#B91C1C',
+        fontSize: 13,
+        fontWeight: '700',
     },
     reportButton: {
         backgroundColor: '#E63946',
