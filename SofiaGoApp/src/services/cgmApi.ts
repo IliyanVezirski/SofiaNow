@@ -4,7 +4,7 @@ import { MapBounds } from './stopsApi';
 import bundledRouteNames from '../data/routeNames.static.json';
 import bundledStops from '../data/stops.static.json';
 import bundledLinesData from '../data/lines-data.static.json';
-import bundledSchedule from '../data/schedule.static.json';
+import bundledSchedule from '../data/schedule.weekly.static.json';
 
 export interface Vehicle {
     id: string;
@@ -40,6 +40,7 @@ export interface GlobalDeparture extends StopEta {
 const VEHICLE_POSITIONS_URL = 'https://gtfs.sofiatraffic.bg/api/v1/vehicle-positions';
 const TRIP_UPDATES_URL = 'https://gtfs.sofiatraffic.bg/api/v1/trip-updates';
 const TRIP_UPDATES_CACHE_MS = 15000;
+const VEHICLE_POSITIONS_CACHE_MS = 2000;
 const MAX_STOP_ETA_RESULTS = 12;
 const MAX_FULL_SCHEDULE_RESULTS = 200;
 const VEHICLE_LAT_DELTA = 0.03;
@@ -68,6 +69,14 @@ let tripUpdatesCache: {
     fetchedAt: number;
     entities: any[];
 } | null = null;
+
+let vehiclePositionsCache: {
+    fetchedAt: number;
+    entities: any[];
+} | null = null;
+
+let tripUpdatesFetchPromise: Promise<any[]> | null = null;
+let vehiclePositionsFetchPromise: Promise<any[]> | null = null;
 
 const routeShortNameByRouteId: Record<string, string> = bundledRouteNames;
 const stopCoordinatesById = (bundledStops as Array<{ id: string; name: string; latitude: number; longitude: number }>).reduce<Record<string, {
@@ -325,29 +334,60 @@ const getTripUpdateEntities = async () => {
         return tripUpdatesCache.entities;
     }
 
-    const feed = await decodeRealtimeFeed(TRIP_UPDATES_URL);
-    tripUpdatesCache = {
-        fetchedAt: now,
-        entities: feed.entity,
-    };
+    if (tripUpdatesFetchPromise) {
+        return tripUpdatesFetchPromise;
+    }
 
-    return feed.entity;
+    tripUpdatesFetchPromise = (async () => {
+        try {
+            const feed = await decodeRealtimeFeed(TRIP_UPDATES_URL);
+            tripUpdatesCache = { fetchedAt: Date.now(), entities: feed.entity };
+            return feed.entity;
+        } finally {
+            tripUpdatesFetchPromise = null;
+        }
+    })();
+
+    return tripUpdatesFetchPromise;
+};
+
+const getVehiclePositionEntities = async () => {
+    const now = Date.now();
+    if (vehiclePositionsCache && now - vehiclePositionsCache.fetchedAt < VEHICLE_POSITIONS_CACHE_MS) {
+        return vehiclePositionsCache.entities;
+    }
+
+    if (vehiclePositionsFetchPromise) {
+        return vehiclePositionsFetchPromise;
+    }
+
+    vehiclePositionsFetchPromise = (async () => {
+        try {
+            const feed = await decodeRealtimeFeed(VEHICLE_POSITIONS_URL);
+            vehiclePositionsCache = { fetchedAt: Date.now(), entities: feed.entity };
+            return feed.entity;
+        } finally {
+            vehiclePositionsFetchPromise = null;
+        }
+    })();
+
+    return vehiclePositionsFetchPromise;
 };
 
 export const fetchVehiclesNearby = async (lat: number, lon: number): Promise<Vehicle[]> => {
     try {
-        const [feed, tripUpdateEntities] = await Promise.all([
-            decodeRealtimeFeed(VEHICLE_POSITIONS_URL),
+        const [vpEntities, tripUpdateEntities] = await Promise.all([
+            getVehiclePositionEntities(),
             getTripUpdateEntities(),
         ]);
 
-        const vehicles: Vehicle[] = [];
+        const vehiclesById = new Map<string, Vehicle>();
         const upcomingStopTargetsByTripId = getUpcomingStopTargetsByTripId(tripUpdateEntities);
 
         const latDelta = VEHICLE_LAT_DELTA;
         const lonDelta = VEHICLE_LON_DELTA;
 
-        feed.entity.forEach((entity: any) => {
+        vpEntities.forEach((entity: any) => {
             if (entity.vehicle && entity.vehicle.position) {
                 const vLat = entity.vehicle.position.latitude;
                 const vLon = entity.vehicle.position.longitude;
@@ -386,7 +426,7 @@ export const fetchVehiclesNearby = async (lat: number, lon: number): Promise<Veh
                         headingDegrees,
                     });
 
-                    vehicles.push({
+                    vehiclesById.set(vehicleId, {
                         id: vehicleId,
                         routeId: routeMetadata.routeId,
                         tripId,
@@ -407,7 +447,7 @@ export const fetchVehiclesNearby = async (lat: number, lon: number): Promise<Veh
             }
         });
 
-        return vehicles;
+        return Array.from(vehiclesById.values());
 
     } catch (error) {
         console.error('Failed to fetch/decode GTFS:', error);
@@ -417,14 +457,14 @@ export const fetchVehiclesNearby = async (lat: number, lon: number): Promise<Veh
 
 export const fetchVehiclesInBounds = async (bounds: MapBounds): Promise<Vehicle[]> => {
     try {
-        const [feed, tripUpdateEntities] = await Promise.all([
-            decodeRealtimeFeed(VEHICLE_POSITIONS_URL),
+        const [vpEntities, tripUpdateEntities] = await Promise.all([
+            getVehiclePositionEntities(),
             getTripUpdateEntities(),
         ]);
-        const vehicles: Vehicle[] = [];
+        const vehiclesById = new Map<string, Vehicle>();
         const upcomingStopTargetsByTripId = getUpcomingStopTargetsByTripId(tripUpdateEntities);
 
-        feed.entity.forEach((entity: any) => {
+        vpEntities.forEach((entity: any) => {
             if (entity.vehicle && entity.vehicle.position) {
                 const vLat = entity.vehicle.position.latitude;
                 const vLon = entity.vehicle.position.longitude;
@@ -462,7 +502,7 @@ export const fetchVehiclesInBounds = async (bounds: MapBounds): Promise<Vehicle[
                         headingDegrees,
                     });
 
-                    vehicles.push({
+                    vehiclesById.set(vehicleId, {
                         id: vehicleId,
                         routeId: routeMetadata.routeId,
                         tripId,
@@ -483,7 +523,7 @@ export const fetchVehiclesInBounds = async (bounds: MapBounds): Promise<Vehicle[
             }
         });
 
-        return vehicles;
+        return Array.from(vehiclesById.values());
     } catch (error) {
         console.error('Failed to fetch/decode GTFS in bounds:', error);
         return [];
@@ -610,28 +650,228 @@ export interface StaticScheduleEntry {
     type: VehicleType;
     destination: string;
     times: number[];  // minutes since midnight
+    routeId: string;
 }
 
-const scheduleIndex = bundledSchedule as Record<string, Record<string, number[]>>;
+export type DayType = 'w' | 'h';
 
-export const getStaticStopSchedule = (stopId: string): StaticScheduleEntry[] => {
+export const getDayTypeForDate = (date: Date = new Date()): DayType => {
+    const day = date.getDay();
+    return (day >= 1 && day <= 5) ? 'w' : 'h';
+};
+
+const scheduleIndex = bundledSchedule as Record<string, Record<string, { w: number[]; h: number[] }>>;
+
+// Inverse index: routeId → Map<destination, stopId[]> — built lazily
+let _routeStopsIndex: Record<string, Map<string, string[]>> | null = null;
+const getRouteStopsIndex = () => {
+    if (_routeStopsIndex) return _routeStopsIndex;
+    _routeStopsIndex = {};
+    for (const [stopId, stopData] of Object.entries(scheduleIndex)) {
+        for (const key of Object.keys(stopData)) {
+            const sepIdx = key.indexOf('|');
+            const routeId = key.slice(0, sepIdx);
+            const destination = key.slice(sepIdx + 1);
+            if (!_routeStopsIndex[routeId]) _routeStopsIndex[routeId] = new Map();
+            const map = _routeStopsIndex[routeId];
+            if (!map.has(destination)) map.set(destination, []);
+            map.get(destination)!.push(stopId);
+        }
+    }
+    return _routeStopsIndex;
+};
+
+export interface ScheduleBasedStop {
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+}
+
+export interface ScheduleBasedDirection {
+    name: string;
+    stops: ScheduleBasedStop[];
+}
+
+export const getScheduleBasedDirections = (routeId: string): ScheduleBasedDirection[] => {
+    const idx = getRouteStopsIndex();
+    const dirMap = idx[routeId];
+    if (!dirMap) return [];
+    const dt = getDayTypeForDate();
+    const directions: ScheduleBasedDirection[] = [];
+    for (const [destination, stopIds] of dirMap.entries()) {
+        // Sort stops by their first scheduled departure time (approximates route order)
+        const stopsWithTime = stopIds
+            .map((sid) => {
+                const coords = stopCoordinatesById[sid];
+                if (!coords) return null;
+                const schedData = scheduleIndex[sid]?.[routeId + '|' + destination];
+                const times = schedData?.[dt] || schedData?.w || [];
+                const firstTime = times.length > 0 ? times[0] : 9999;
+                return {
+                    id: sid,
+                    name: stopNameById[sid] || sid,
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    firstTime,
+                };
+            })
+            .filter((s): s is NonNullable<typeof s> => s !== null);
+        stopsWithTime.sort((a, b) => a.firstTime - b.firstTime);
+        if (stopsWithTime.length > 0) {
+            directions.push({
+                name: destination,
+                stops: stopsWithTime.map(({ firstTime, ...rest }) => rest),
+            });
+        }
+    }
+    return directions;
+};
+
+// Resolve a lines-data routeId to the schedule's routeId (they may differ)
+let _scheduleRouteIdMap: Map<string, string> | null = null;
+const getScheduleRouteIdMap = () => {
+    if (_scheduleRouteIdMap) return _scheduleRouteIdMap;
+    _scheduleRouteIdMap = new Map();
+    const idx = getRouteStopsIndex();
+    for (const schedRouteId of Object.keys(idx)) {
+        const line = resolveLineByRouteShortName(schedRouteId);
+        const meta = getRouteMetadata(schedRouteId);
+        const inferredType = inferLineTypeFromToken(line);
+        const type = inferredType === 'bus' ? meta.type : inferredType;
+        const key = `${type}:${line}`;
+        if (!_scheduleRouteIdMap.has(key)) {
+            _scheduleRouteIdMap.set(key, schedRouteId);
+        }
+    }
+    return _scheduleRouteIdMap;
+};
+
+export const resolveScheduleRouteId = (line: string, type: VehicleType, linesDataRouteId: string): string => {
+    const idx = getRouteStopsIndex();
+    if (idx[linesDataRouteId]) return linesDataRouteId;
+    const map = getScheduleRouteIdMap();
+    return map.get(`${type}:${line}`) || linesDataRouteId;
+};
+
+export const getStaticStopSchedule = (stopId: string, dayType?: DayType): StaticScheduleEntry[] => {
+    const dt = dayType ?? getDayTypeForDate();
     const stopData = scheduleIndex[stopId];
     if (!stopData) return [];
     const results: StaticScheduleEntry[] = [];
-    for (const [key, times] of Object.entries(stopData)) {
+    for (const [key, dayTimes] of Object.entries(stopData)) {
         const sepIdx = key.indexOf('|');
         const routeId = key.slice(0, sepIdx);
         const destination = key.slice(sepIdx + 1);
         const meta = getRouteMetadata(routeId);
         const line = resolveLineByRouteShortName(routeId);
-        const type = inferLineTypeFromToken(line);
-        results.push({ line, type, destination, times });
+        const inferredType = inferLineTypeFromToken(line);
+        const type = inferredType === 'bus' ? meta.type : inferredType;
+        const times = dayTimes[dt] || [];
+        if (times.length > 0) results.push({ line, type, destination, times, routeId });
     }
     return results.sort((a, b) => {
         const lineCmp = a.line.localeCompare(b.line, 'bg', { numeric: true });
         if (lineCmp !== 0) return lineCmp;
         return a.destination.localeCompare(b.destination, 'bg');
     });
+};
+
+export interface TripStopInfo {
+    stopId: string;
+    stopName: string;
+    latitude: number;
+    longitude: number;
+    arrivalTimestamp?: number;
+    departureTimestamp?: number;
+    stopSequence?: number;
+}
+
+export const fetchTripStops = async (tripId: string): Promise<TripStopInfo[]> => {
+    if (!tripId) return [];
+    try {
+        const entities = await getTripUpdateEntities();
+        const nowUnix = Math.floor(Date.now() / 1000);
+
+        for (const entity of entities) {
+            if (String(entity?.tripUpdate?.trip?.tripId || '').trim() !== tripId) continue;
+
+            const stops: TripStopInfo[] = [];
+            for (const stu of entity.tripUpdate.stopTimeUpdate || []) {
+                const stopId = String(stu.stopId || '').trim();
+                if (!stopId) continue;
+                const coords = stopCoordinatesById[stopId];
+                if (!coords) continue;
+
+                const arrivalTimestamp = Number(stu.arrival?.time || 0) || undefined;
+                const departureTimestamp = Number(stu.departure?.time || 0) || undefined;
+                const effectiveTs = arrivalTimestamp || departureTimestamp || 0;
+                if (effectiveTs && effectiveTs < nowUnix - 60) continue;
+
+                const stopSequence = Number(stu.stopSequence || 0) || undefined;
+                const nameEntry = stopNameById[stopId];
+                stops.push({
+                    stopId,
+                    stopName: nameEntry || stopId,
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    arrivalTimestamp,
+                    departureTimestamp,
+                    stopSequence,
+                });
+            }
+
+            stops.sort((a, b) => {
+                if (a.stopSequence && b.stopSequence) return a.stopSequence - b.stopSequence;
+                return (a.arrivalTimestamp || a.departureTimestamp || 0) - (b.arrivalTimestamp || b.departureTimestamp || 0);
+            });
+
+            return stops;
+        }
+        return [];
+    } catch (err) {
+        console.warn('fetchTripStops failed:', err);
+        return [];
+    }
+};
+
+export interface LineScheduleDirection {
+    directionName: string;
+    firstStopId: string;
+    firstStopName: string;
+    times: number[];
+}
+
+export const getStaticLineSchedule = (
+    routeId: string,
+    stops: { id: string; name: string }[][],
+    dayType?: DayType,
+): LineScheduleDirection[] => {
+    const dt = dayType ?? getDayTypeForDate();
+    const results: LineScheduleDirection[] = [];
+
+    for (const dirStops of stops) {
+        if (!dirStops.length) continue;
+        // Try first few stops to find schedule data for this route
+        for (const stop of dirStops.slice(0, 3)) {
+            const stopData = scheduleIndex[stop.id];
+            if (!stopData) continue;
+            const matchingKey = Object.keys(stopData).find((k) => k.startsWith(routeId + '|'));
+            if (!matchingKey) continue;
+            const times = stopData[matchingKey]?.[dt] || [];
+            if (!times.length) continue;
+            const destination = matchingKey.slice(matchingKey.indexOf('|') + 1);
+            results.push({
+                directionName: destination,
+                firstStopId: stop.id,
+                firstStopName: stop.name,
+                times,
+            });
+            break;
+        }
+    }
+
+    return results;
 };
 
 export const fetchGlobalDepartures = async (limit = 120): Promise<GlobalDeparture[]> => {
@@ -687,6 +927,107 @@ export interface StopTime {
     time: string;
     realTime: boolean;
 }
+
+/**
+ * For a given StopEta, find the closest scheduled time and return delay info.
+ */
+export const getEtaScheduleInfo = (eta: StopEta): { scheduledMinSinceMidnight: number | null; delayMinutes: number | null } => {
+    const dt = getDayTypeForDate();
+    const stopSched = scheduleIndex[eta.stopId];
+    if (!stopSched) return { scheduledMinSinceMidnight: null, delayMinutes: null };
+
+    const lineKey = Object.keys(stopSched).find((k) => k.startsWith(eta.routeId + '|'));
+    if (!lineKey) return { scheduledMinSinceMidnight: null, delayMinutes: null };
+
+    const schedMins = stopSched[lineKey]?.[dt];
+    if (!schedMins?.length) return { scheduledMinSinceMidnight: null, delayMinutes: null };
+
+    const d = new Date(eta.arrivalTimestamp * 1000);
+    const predMin = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+
+    let bestMatch = -1;
+    let bestDiff = Infinity;
+    for (const sm of schedMins) {
+        const diff = predMin - sm;
+        if (diff >= -2 && diff <= 20 && diff < bestDiff) {
+            bestDiff = diff;
+            bestMatch = sm;
+        }
+    }
+
+    if (bestMatch < 0) return { scheduledMinSinceMidnight: null, delayMinutes: null };
+    return { scheduledMinSinceMidnight: bestMatch, delayMinutes: Math.round(predMin - bestMatch) };
+};
+
+export const fetchTripDelay = async (tripId: string): Promise<number | null> => {
+    if (!tripId) return null;
+    try {
+        const entities = await getTripUpdateEntities();
+        let tripUpdate: any = null;
+        for (const entity of entities) {
+            const tu = entity.tripUpdate;
+            if (!tu?.trip) continue;
+            if ((tu.trip.tripId || entity.id) === tripId) {
+                tripUpdate = tu;
+                break;
+            }
+        }
+        if (!tripUpdate?.stopTimeUpdate?.length) return null;
+
+        const routeId = tripUpdate.trip?.routeId || '';
+        if (!routeId) return null;
+
+        const nowSec = Math.floor(Date.now() / 1000);
+        const upcoming = tripUpdate.stopTimeUpdate.filter((stu: any) => {
+            const t = Number(stu.arrival?.time || stu.departure?.time || 0);
+            return t > nowSec;
+        }).slice(0, 5);
+
+        if (!upcoming.length) return null;
+
+        const schedule = scheduleIndex;
+        const delays: number[] = [];
+
+        const dt = getDayTypeForDate();
+
+        for (const stu of upcoming) {
+            const predSec = Number(stu.arrival?.time || stu.departure?.time || 0);
+            const d = new Date(predSec * 1000);
+            const predMin = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+
+            const stopSched = schedule[stu.stopId as string];
+            if (!stopSched) continue;
+
+            const lineKey = Object.keys(stopSched).find((k) => k.startsWith(routeId + '|'));
+            if (!lineKey) continue;
+
+            const schedMins = stopSched[lineKey]?.[dt];
+            if (!schedMins?.length) continue;
+
+            let bestMatch = -1;
+            let bestDiff = Infinity;
+            for (const sm of schedMins) {
+                const diff = predMin - sm;
+                if (diff >= -2 && diff <= 20 && diff < bestDiff) {
+                    bestDiff = diff;
+                    bestMatch = sm;
+                }
+            }
+
+            if (bestMatch >= 0) {
+                delays.push(predMin - bestMatch);
+            }
+        }
+
+        if (!delays.length) return null;
+
+        delays.sort((a, b) => a - b);
+        const medianMinutes = delays[Math.floor(delays.length / 2)];
+        return Math.round(medianMinutes * 60);
+    } catch {
+        return null;
+    }
+};
 
 // Since real-time GTFS for virtual boards requires matching trip updates to stop schedules (which requires parsing static GTFS),
 // we will keep the Virtual Board mocked for now as it's considerably more complex without a backend wrapper.

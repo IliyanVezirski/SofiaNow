@@ -256,12 +256,19 @@ const loadAllStops = async (): Promise<Stop[]> => {
     }
 
     stopsCachePromise = (async () => {
-        if (Platform.OS === 'web') {
-            return normalizeBundledStops();
-        }
-
         try {
-            return buildStopsFromLinesData(bundledLinesData as any[]);
+            const bundled = normalizeBundledStops();
+
+            // Keep the same stop source on web and native to avoid data divergence.
+            if (bundled.length) {
+                return bundled;
+            }
+
+            if (Platform.OS !== 'web') {
+                return buildStopsFromLinesData(bundledLinesData as any[]);
+            }
+
+            return bundled;
         } catch (error) {
             console.warn('Falling back to bundled static stops:', error);
             return normalizeBundledStops();
@@ -419,7 +426,7 @@ const parseLineRouteDirection = (direction: any): LineRouteDirection | null => {
 
 const OSRM_BASE_URL = 'https://router.project-osrm.org/route/v1/driving';
 
-const fetchOsrmRoute = async (stops: Array<{ latitude: number; longitude: number }>): Promise<[number, number][]> => {
+export const fetchOsrmRoute = async (stops: Array<{ latitude: number; longitude: number }>): Promise<[number, number][]> => {
     if (stops.length < 2) {
         return stops.map((s) => [s.longitude, s.latitude]);
     }

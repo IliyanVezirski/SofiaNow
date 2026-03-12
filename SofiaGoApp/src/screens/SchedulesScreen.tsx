@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { getVehicleIcon, VehicleType } from '../services/transitUtils';
 import { AvailableLine, fetchAvailableLines, fetchLineRouteGeometryByRouteId, fetchLineRouteGeometry, fetchStopById, fetchAllStops, LineRouteGeometry, Stop } from '../services/stopsApi';
-import { getStaticStopSchedule, StaticScheduleEntry } from '../services/cgmApi';
+import { getStaticStopSchedule, getStaticLineSchedule, getScheduleBasedDirections, resolveScheduleRouteId, StaticScheduleEntry, LineScheduleDirection, DayType, getDayTypeForDate } from '../services/cgmApi';
 import { RouteSelection } from '../types/routes';
 
 type ScheduleKind = 'bus' | 'trolley' | 'tram' | 'subway' | 'night';
@@ -27,9 +27,11 @@ const getLineKind = (line: AvailableLine): ScheduleKind => {
 
 interface SchedulesScreenProps {
     onOpenRoute?: (route: RouteSelection) => void;
+    onClose?: () => void;
+    onFocusStop?: (stopId: string, latitude: number, longitude: number) => void;
 }
 
-export default function SchedulesScreen({ onOpenRoute }: SchedulesScreenProps) {
+export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: SchedulesScreenProps) {
     const [allLines, setAllLines] = useState<AvailableLine[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedKind, setSelectedKind] = useState<ScheduleKind>('bus');
@@ -40,6 +42,23 @@ export default function SchedulesScreen({ onOpenRoute }: SchedulesScreenProps) {
     const [allStops, setAllStops] = useState<Stop[]>([]);
     const [expandedStopId, setExpandedStopId] = useState<string | null>(null);
     const [stopSchedule, setStopSchedule] = useState<StaticScheduleEntry[]>([]);
+    const [selectedDayType, setSelectedDayType] = useState<DayType>(getDayTypeForDate());
+    const [lineSchedule, setLineSchedule] = useState<LineScheduleDirection[]>([]);
+    const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+
+    const toggleSection = (key: string) => {
+        setExpandedSections((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    };
+
+    const schedRouteId = useMemo(() => {
+        if (!selectedLine?.routeId) return '';
+        return resolveScheduleRouteId(selectedLine.line, selectedLine.type, selectedLine.routeId);
+    }, [selectedLine]);
 
     useEffect(() => {
         (async () => {
@@ -54,6 +73,26 @@ export default function SchedulesScreen({ onOpenRoute }: SchedulesScreenProps) {
             }
         })();
     }, []);
+
+    useEffect(() => {
+        if (!onClose) return;
+        const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+            onClose();
+            return true;
+        });
+        return () => sub.remove();
+    }, [onClose]);
+
+    useEffect(() => {
+        if (!routeGeometry || !schedRouteId) {
+            setLineSchedule([]);
+            return;
+        }
+        const dirStops = routeGeometry.directions.map((dir) =>
+            dir.stops.map((s) => ({ id: s.id, name: s.name }))
+        );
+        setLineSchedule(getStaticLineSchedule(schedRouteId, dirStops, selectedDayType));
+    }, [routeGeometry, schedRouteId, selectedDayType]);
 
     const linesForKind = useMemo(
         () => allLines.filter((line) => getLineKind(line) === selectedKind),
@@ -84,15 +123,29 @@ export default function SchedulesScreen({ onOpenRoute }: SchedulesScreenProps) {
             .slice(0, 30);
     }, [allStops, stopSearch, selectedLine]);
 
-    const handleStopPress = (stopId: string) => {
+    const handleStopPress = (stopId: string, filterByLine = !!selectedLine) => {
         if (expandedStopId === stopId) {
             setExpandedStopId(null);
             setStopSchedule([]);
             return;
         }
         setExpandedStopId(stopId);
-        setStopSchedule(getStaticStopSchedule(stopId));
+        let schedule = getStaticStopSchedule(stopId, selectedDayType);
+        if (filterByLine && schedRouteId) {
+            schedule = schedule.filter((e) => e.routeId === schedRouteId);
+        }
+        setStopSchedule(schedule);
     };
+
+    useEffect(() => {
+        if (expandedStopId) {
+            let schedule = getStaticStopSchedule(expandedStopId, selectedDayType);
+            if (schedRouteId) {
+                schedule = schedule.filter((e) => e.routeId === schedRouteId);
+            }
+            setStopSchedule(schedule);
+        }
+    }, [selectedDayType]);
 
     const formatMinutes = (m: number) => {
         const h = Math.floor(m / 60);
@@ -105,31 +158,52 @@ export default function SchedulesScreen({ onOpenRoute }: SchedulesScreenProps) {
         return d.getHours() * 60 + d.getMinutes();
     }, [expandedStopId]);
 
+    const isToday = selectedDayType === getDayTypeForDate();
+
     const renderStopSchedule = () => {
-        if (stopSchedule.length === 0) {
-            return <Text style={styles.stopEtaEmpty}>Няма налично разписание</Text>;
-        }
-        return stopSchedule.map((entry) => {
-            const label = `${getVehicleIcon(entry.type)} ${entry.line}${entry.destination ? ` → ${entry.destination}` : ''}`;
-            return (
-                <View key={label} style={styles.lineGroup}>
-                    <Text style={styles.lineGroupHeader}>{label}</Text>
-                    <View style={styles.lineGroupTimes}>
-                        {entry.times.map((m) => {
-                            const isPast = m < nowMinutes;
-                            return (
-                                <Text
-                                    key={m}
-                                    style={[styles.lineGroupTime, isPast && styles.stopEtaPast]}
-                                >
-                                    {formatMinutes(m)}
-                                </Text>
-                            );
-                        })}
-                    </View>
+        return (
+            <>
+                <View style={styles.dayTypeRow}>
+                    <TouchableOpacity
+                        style={[styles.dayTypeChip, selectedDayType === 'w' && styles.dayTypeChipActive]}
+                        onPress={() => setSelectedDayType('w')}
+                    >
+                        <Text style={[styles.dayTypeChipText, selectedDayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.dayTypeChip, selectedDayType === 'h' && styles.dayTypeChipActive]}
+                        onPress={() => setSelectedDayType('h')}
+                    >
+                        <Text style={[styles.dayTypeChipText, selectedDayType === 'h' && styles.dayTypeChipTextActive]}>Празник</Text>
+                    </TouchableOpacity>
                 </View>
-            );
-        });
+                {stopSchedule.length === 0 ? (
+                    <Text style={styles.stopEtaEmpty}>Няма налично разписание</Text>
+                ) : (
+                    stopSchedule.map((entry) => {
+                        const label = `${getVehicleIcon(entry.type)} ${entry.line}${entry.destination ? ` → ${entry.destination}` : ''}`;
+                        return (
+                            <View key={label} style={styles.lineGroup}>
+                                <Text style={styles.lineGroupHeader}>{label}</Text>
+                                <View style={styles.lineGroupTimes}>
+                                    {entry.times.map((m) => {
+                                        const isPast = isToday && m < nowMinutes;
+                                        return (
+                                            <Text
+                                                key={m}
+                                                style={[styles.lineGroupTime, isPast && styles.stopEtaPast]}
+                                            >
+                                                {formatMinutes(m)}
+                                            </Text>
+                                        );
+                                    })}
+                                </View>
+                            </View>
+                        );
+                    })
+                )}
+            </>
+        );
     };
 
     useEffect(() => {
@@ -141,15 +215,58 @@ export default function SchedulesScreen({ onOpenRoute }: SchedulesScreenProps) {
             setStopSearch('');
             setExpandedStopId(null);
             setStopSchedule([]);
+            setExpandedSections(new Set());
             return;
         }
 
         setRouteLoading(true);
 
         (async () => {
-            const route = selectedLine.routeId
+            let route = selectedLine.routeId
                 ? await fetchLineRouteGeometryByRouteId(selectedLine.routeId)
                 : await fetchLineRouteGeometry(selectedLine.line, selectedLine.type, selectedLine.isNight);
+            // Fallback: build directions from schedule data if lines-data has no/empty geometry
+            // or if the stops don't have schedule entries for this route
+            const effectiveSchedRouteId = resolveScheduleRouteId(selectedLine.line, selectedLine.type, selectedLine.routeId);
+            let needsFallback = !route || route.directions.every((d) => d.stops.length === 0);
+            if (!needsFallback && route) {
+                // Validate each direction against schedule data.
+                // If one direction has no matches (or overall coverage is too low), prefer schedule-based stops.
+                const directionHasMatch = route.directions.map((d) => {
+                    const testStops = d.stops.slice(0, 5);
+                    if (testStops.length === 0) return false;
+                    return testStops.some((s) => {
+                        const sched = getStaticStopSchedule(s.id, selectedDayType);
+                        return sched.some((e) => e.routeId === effectiveSchedRouteId);
+                    });
+                });
+
+                const sampledStops = route.directions.flatMap((d) => d.stops.slice(0, 8));
+                const matchedStops = sampledStops.filter((s) => {
+                    const sched = getStaticStopSchedule(s.id, selectedDayType);
+                    return sched.some((e) => e.routeId === effectiveSchedRouteId);
+                }).length;
+                const coverageRatio = sampledStops.length ? (matchedStops / sampledStops.length) : 0;
+
+                const anyDirectionMissing = directionHasMatch.some((hasMatch) => !hasMatch);
+                const lowCoverage = sampledStops.length > 0 && coverageRatio < 0.35;
+                if (anyDirectionMissing || lowCoverage) needsFallback = true;
+            }
+            if (needsFallback) {
+                const schedDirs = getScheduleBasedDirections(effectiveSchedRouteId);
+                if (schedDirs.length > 0) {
+                    route = {
+                        line: selectedLine.line,
+                        type: selectedLine.type,
+                        isNight: selectedLine.isNight,
+                        directions: schedDirs.map((d) => ({
+                            name: d.name,
+                            coordinates: d.stops.map((s) => [s.longitude, s.latitude] as [number, number]),
+                            stops: d.stops,
+                        })),
+                    };
+                }
+            }
             if (!cancelled) {
                 setRouteGeometry(route);
                 setRouteLoading(false);
@@ -171,8 +288,17 @@ export default function SchedulesScreen({ onOpenRoute }: SchedulesScreenProps) {
     return (
         <View style={styles.page}>
             <View style={styles.header}>
-                <Text style={styles.title}>Линии</Text>
-                <Text style={styles.subtitle}>{`${allLines.length} налични линии`}</Text>
+                <View style={styles.headerRow}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.title}>Линии</Text>
+                        <Text style={styles.subtitle}>{`${allLines.length} налични линии`}</Text>
+                    </View>
+                    {onClose && (
+                        <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+                            <Text style={styles.closeButtonText}>{"\u00D7"}</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
             </View>
 
             <View style={styles.globalSearchWrap}>
@@ -236,11 +362,11 @@ export default function SchedulesScreen({ onOpenRoute }: SchedulesScreenProps) {
 
                 <ScrollView style={styles.linesScroll} showsVerticalScrollIndicator={false}>
                     <View style={styles.linesGrid}>
-                        {linesForKind.map((line) => {
+                        {linesForKind.map((line, index) => {
                             const isActive = selectedLine?.routeId === line.routeId && selectedLine?.line === line.line;
                             return (
                                 <TouchableOpacity
-                                    key={`${line.routeId || line.line}`}
+                                    key={`schedule-line-${line.routeId || line.line}-${index}`}
                                     style={[styles.lineChip, isActive && styles.chipActive]}
                                     onPress={() => setSelectedLine(isActive ? null : line)}
                                 >
@@ -284,35 +410,111 @@ export default function SchedulesScreen({ onOpenRoute }: SchedulesScreenProps) {
                             </TouchableOpacity>
                         </View>
 
-                        {filteredDirections.map((direction, dirIndex) => (
-                            <View key={`dir-${dirIndex}`} style={styles.directionBlock}>
-                                <Text style={styles.directionTitle} numberOfLines={2}>
-                                    {direction.name || `Посока ${dirIndex + 1}`}
-                                </Text>
-                                {direction.stops.map((stop, stopIndex) => (
-                                    <TouchableOpacity
-                                        key={`${dirIndex}-${stop.id}-${stopIndex}`}
-                                        style={[
-                                            styles.stopRow,
-                                            expandedStopId === stop.id && styles.stopRowActive,
-                                        ]}
-                                        activeOpacity={0.7}
-                                        onPress={() => { void handleStopPress(stop.id); }}
-                                    >
-                                        <Text style={styles.stopIndex}>{`${stopIndex + 1}.`}</Text>
-                                        <View style={styles.stopInfo}>
-                                            <Text style={styles.stopName}>{stop.name}</Text>
-                                            <Text style={styles.stopMeta}>{`ID: ${stop.id}`}</Text>
-                                            {expandedStopId === stop.id && (
-                                                <View style={styles.stopEtaPanel}>
-                                                    {renderStopSchedule()}
-                                                </View>
-                                            )}
+                        {lineSchedule.length > 0 && (
+                            <View style={styles.accordionSection}>
+                                <TouchableOpacity
+                                    style={styles.accordionHeader}
+                                    activeOpacity={0.7}
+                                    onPress={() => toggleSection('schedule')}
+                                >
+                                    <Text style={styles.accordionHeaderText}>🕒 Разписание на линията</Text>
+                                    <Text style={styles.accordionArrow}>{expandedSections.has('schedule') ? '▲' : '▼'}</Text>
+                                </TouchableOpacity>
+                                {expandedSections.has('schedule') && (
+                                    <View style={styles.accordionBody}>
+                                        <View style={styles.dayTypeRow}>
+                                            <TouchableOpacity
+                                                style={[styles.dayTypeChip, selectedDayType === 'w' && styles.dayTypeChipActive]}
+                                                onPress={() => setSelectedDayType('w')}
+                                            >
+                                                <Text style={[styles.dayTypeChipText, selectedDayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[styles.dayTypeChip, selectedDayType === 'h' && styles.dayTypeChipActive]}
+                                                onPress={() => setSelectedDayType('h')}
+                                            >
+                                                <Text style={[styles.dayTypeChipText, selectedDayType === 'h' && styles.dayTypeChipTextActive]}>Празник</Text>
+                                            </TouchableOpacity>
                                         </View>
-                                    </TouchableOpacity>
-                                ))}
+                                        {lineSchedule.map((dir) => (
+                                            <View key={`ls-${dir.firstStopId}`} style={styles.lineScheduleDir}>
+                                                <Text style={styles.lineScheduleDirTitle}>{`→ ${dir.directionName}`}</Text>
+                                                <Text style={styles.lineScheduleStop}>{`от ${dir.firstStopName}`}</Text>
+                                                <View style={styles.lineGroupTimes}>
+                                                    {dir.times.map((m) => {
+                                                        const past = isToday && m < nowMinutes;
+                                                        return (
+                                                            <Text
+                                                                key={m}
+                                                                style={[styles.lineGroupTime, past && styles.stopEtaPast]}
+                                                            >
+                                                                {formatMinutes(m)}
+                                                            </Text>
+                                                        );
+                                                    })}
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </View>
+                                )}
                             </View>
-                        ))}
+                        )}
+
+                        {filteredDirections.map((direction, dirIndex) => {
+                            const dirKey = `dir-${dirIndex}`;
+                            const isExpanded = expandedSections.has(dirKey);
+                            return (
+                                <View key={dirKey} style={styles.accordionSection}>
+                                    <TouchableOpacity
+                                        style={styles.accordionHeader}
+                                        activeOpacity={0.7}
+                                        onPress={() => toggleSection(dirKey)}
+                                    >
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.accordionHeaderText} numberOfLines={2}>
+                                                {`🚏 ${direction.name || `Посока ${dirIndex + 1}`}`}
+                                            </Text>
+                                            <Text style={styles.accordionSubText}>{`${direction.stops.length} спирки`}</Text>
+                                        </View>
+                                        <Text style={styles.accordionArrow}>{isExpanded ? '▲' : '▼'}</Text>
+                                    </TouchableOpacity>
+                                    {isExpanded && (
+                                        <View style={styles.accordionBody}>
+                                            {direction.stops.map((stop, stopIndex) => (
+                                                <TouchableOpacity
+                                                    key={`${dirIndex}-${stop.id}-${stopIndex}`}
+                                                    style={[
+                                                        styles.stopRow,
+                                                        expandedStopId === stop.id && styles.stopRowActive,
+                                                    ]}
+                                                    activeOpacity={0.7}
+                                                    onPress={() => { void handleStopPress(stop.id); }}
+                                                >
+                                                    <Text style={styles.stopIndex}>{`${stopIndex + 1}.`}</Text>
+                                                    <View style={styles.stopInfo}>
+                                                        <Text style={styles.stopName}>{stop.name}</Text>
+                                                        <Text style={styles.stopMeta}>{`ID: ${stop.id}`}</Text>
+                                                        {expandedStopId === stop.id && (
+                                                            <View style={styles.stopEtaPanel}>
+                                                                {renderStopSchedule()}
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                    {onFocusStop && (
+                                                        <TouchableOpacity
+                                                            style={styles.stopMapBtn}
+                                                            onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
+                                                        >
+                                                            <Text style={styles.stopMapBtnText}>{"\uD83D\uDCCD"}</Text>
+                                                        </TouchableOpacity>
+                                                    )}
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    )}
+                                </View>
+                            );
+                        })}
 
                         {filteredDirections.length === 0 && stopSearch.trim() !== '' && (
                             <Text style={styles.emptyText}>Няма спирки, съвпадащи с търсенето</Text>
@@ -337,6 +539,26 @@ const styles = StyleSheet.create({
     header: {
         paddingHorizontal: 16,
         marginBottom: 8,
+    },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    closeButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#F1F5F9',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    closeButtonText: {
+        fontSize: 22,
+        color: '#334155',
+        fontWeight: '600',
+        lineHeight: 24,
     },
     title: {
         color: '#0F172A',
@@ -496,13 +718,57 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '700',
     },
-    directionBlock: {
+
+    accordionSection: {
         borderWidth: 1,
         borderColor: '#E2E8F0',
-        borderRadius: 10,
-        padding: 10,
-        backgroundColor: '#F8FAFC',
+        borderRadius: 12,
         marginBottom: 10,
+        overflow: 'hidden',
+    },
+    accordionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#EFF6FF',
+        paddingHorizontal: 12,
+        paddingVertical: 11,
+        gap: 8,
+    },
+    accordionHeaderText: {
+        color: '#1E293B',
+        fontSize: 14,
+        fontWeight: '700',
+        flex: 1,
+    },
+    accordionSubText: {
+        color: '#64748B',
+        fontSize: 11,
+        fontWeight: '600',
+        marginTop: 1,
+    },
+    accordionArrow: {
+        color: '#64748B',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    accordionBody: {
+        padding: 10,
+        backgroundColor: '#FFFFFF',
+    },
+    lineScheduleDir: {
+        marginBottom: 10,
+    },
+    lineScheduleDirTitle: {
+        color: '#1E293B',
+        fontSize: 13,
+        fontWeight: '700',
+        marginBottom: 2,
+    },
+    lineScheduleStop: {
+        color: '#64748B',
+        fontSize: 11,
+        fontWeight: '600',
+        marginBottom: 6,
     },
     directionTitle: {
         color: '#1E293B',
@@ -542,11 +808,48 @@ const styles = StyleSheet.create({
         fontSize: 11,
         marginTop: 1,
     },
+    stopMapBtn: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        backgroundColor: '#EFF6FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginLeft: 4,
+    },
+    stopMapBtnText: {
+        fontSize: 14,
+    },
     stopEtaPanel: {
         marginTop: 6,
         paddingTop: 6,
         borderTopWidth: 1,
         borderTopColor: '#E2E8F0',
+    },
+    dayTypeRow: {
+        flexDirection: 'row',
+        gap: 6,
+        marginBottom: 8,
+    },
+    dayTypeChip: {
+        backgroundColor: '#F1F5F9',
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 5,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    dayTypeChipActive: {
+        backgroundColor: '#1E293B',
+        borderColor: '#1E293B',
+    },
+    dayTypeChipText: {
+        color: '#475569',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    dayTypeChipTextActive: {
+        color: '#FFFFFF',
     },
     stopEtaText: {
         color: '#1E293B',

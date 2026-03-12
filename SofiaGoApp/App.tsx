@@ -1,6 +1,8 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import * as NavigationBar from 'expo-navigation-bar';
+import { Ionicons } from '@expo/vector-icons';
 import MapScreen from './src/screens/MapScreen';
 import SchedulesScreen from './src/screens/SchedulesScreen';
 import { RouteSelection } from './src/types/routes';
@@ -9,12 +11,21 @@ type BottomTab = 'map' | 'schedules';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<BottomTab>('map');
+
+  useEffect(() => {
+    void NavigationBar.setVisibilityAsync('hidden');
+  }, []);
+
   const [selectedRoute, setSelectedRoute] = useState<RouteSelection | null>(null);
   const [mapFiltersVisible, setMapFiltersVisible] = useState(false);
   const [openSearchToken, setOpenSearchToken] = useState(0);
   const [toggleFavoritesToken, setToggleFavoritesToken] = useState(0);
   const [recenterToken, setRecenterToken] = useState(0);
   const [dismissTransientPanelsToken, setDismissTransientPanelsToken] = useState(0);
+  const [filterCount, setFilterCount] = useState(0);
+  const [focusStopCoordinate, setFocusStopCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [focusStopId, setFocusStopId] = useState<string | null>(null);
+  const handleFilterCountChange = useCallback((count: number) => setFilterCount(count), []);
 
   return (
     <View style={styles.container}>
@@ -26,20 +37,27 @@ export default function App() {
           favoritesRequestToken={toggleFavoritesToken}
           recenterRequestToken={recenterToken}
           dismissTransientPanelsToken={dismissTransientPanelsToken}
+          onFilterCountChange={handleFilterCountChange}
+          focusStopCoordinate={focusStopCoordinate}
+          focusStopId={focusStopId}
         />
-        {activeTab === 'schedules' && (
-          <View style={styles.schedulesOverlay}>
+        <View style={[styles.schedulesOverlay, activeTab !== 'schedules' && { display: 'none' }]}>
           <SchedulesScreen
             onOpenRoute={(route) => {
               setSelectedRoute(route);
               setActiveTab('map');
             }}
+            onClose={() => setActiveTab('map')}
+            onFocusStop={(stopId, latitude, longitude) => {
+              setFocusStopId(stopId);
+              setFocusStopCoordinate({ latitude, longitude });
+              setActiveTab('map');
+            }}
           />
-          </View>
-        )}
+        </View>
       </View>
 
-      <View style={styles.floatingMenu}>
+      {activeTab !== 'schedules' && <View style={styles.floatingMenu}>
         <TouchableOpacity
           style={[
             styles.floatingButton,
@@ -59,7 +77,16 @@ export default function App() {
           }}
           disabled={activeTab !== 'map'}
         >
-          <Text style={styles.floatingIcon}>🎛️</Text>
+          <Ionicons
+            name="filter-outline"
+            size={24}
+            color={activeTab === 'map' && mapFiltersVisible ? '#1E3A8A' : '#0F172A'}
+          />
+          {filterCount > 0 && (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeText}>{filterCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.floatingButton, activeTab === 'map' && styles.floatingButtonActive]}
@@ -118,7 +145,7 @@ export default function App() {
         >
           <Text style={styles.floatingIcon}>📍</Text>
         </TouchableOpacity>
-      </View>
+      </View>}
       <StatusBar style="auto" />
     </View>
   );
@@ -143,8 +170,8 @@ const styles = StyleSheet.create({
     right: 16,
     top: 62,
     gap: 12,
-    zIndex: 40,
-    elevation: 40,
+    zIndex: 999,
+    elevation: 999,
   },
   floatingButton: {
     width: 52,
@@ -170,5 +197,23 @@ const styles = StyleSheet.create({
   floatingIcon: {
     fontSize: 24,
     lineHeight: 24,
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#1E293B',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 14,
   },
 });

@@ -146,7 +146,9 @@ export const searchLocations = async (query: string, limit = 8): Promise<PlaceSe
         viewbox: `${SOFIA_WEST_LON},${SOFIA_NORTH_LAT},${SOFIA_EAST_LON},${SOFIA_SOUTH_LAT}`,
     });
 
-    const response = await fetch(`${NOMINATIM_SEARCH_URL}?${params.toString()}`);
+    const response = await fetch(`${NOMINATIM_SEARCH_URL}?${params.toString()}`, {
+        headers: { 'User-Agent': 'SofiaGo/1.0 (transit app for Sofia; https://github.com/nickkostov/SofiaGo)' },
+    });
     if (!response.ok) {
         throw new Error(`Location search failed with status ${response.status}`);
     }

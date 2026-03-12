@@ -12,7 +12,7 @@ import { RouteSelection } from '../types/routes';
 
 type LatLngTuple = [number, number];
 
-const VEHICLE_REFRESH_MS = 500;
+const VEHICLE_REFRESH_MS = 1500;
 const STOP_ETA_REFRESH_MS = 15000;
 const INITIAL_ZOOM_LEVEL = 16;
 const VEHICLE_ANIMATION_MS = 450;
@@ -31,6 +31,7 @@ const MAX_HEADING_STEP_DEGREES = 32;
 const LOW_SPEED_HEADING_LOCK_KPH = 4;
 const OVERLAP_GROUP_DECIMALS = 4;
 const OVERLAP_OFFSET_DEGREES = 0.00008;
+const MAX_RENDERED_STOPS = 40;
 
 const createFallbackBounds = (latitude: number, longitude: number): MapBounds => ({
     north: latitude + DEFAULT_BOUNDS_DELTA,
@@ -501,6 +502,20 @@ export default function MapScreen({
             });
         });
     }, [filteredVehicles]);
+    const renderedDisplayVehicles = useMemo(() => {
+        const idCounts = new Map<string, number>();
+        return displayVehicles.map((vehicle) => {
+            const seen = idCounts.get(vehicle.id) || 0;
+            const nextSeen = seen + 1;
+            idCounts.set(vehicle.id, nextSeen);
+            const uniqueSuffix = nextSeen === 1 ? '' : `-${nextSeen}`;
+
+            return {
+                ...vehicle,
+                renderKey: `${vehicle.id}${uniqueSuffix}`,
+            };
+        });
+    }, [displayVehicles]);
     const filteredStops = useMemo(() => {
         if (isRouteMode) {
             return stops;
@@ -521,6 +536,25 @@ export default function MapScreen({
             return normalizedStopLines.some((line) => selectedVehicleTypes.includes(inferLineTypeFromToken(line)));
         });
     }, [stops, selectedLines, selectedVehicleTypes, isRouteMode]);
+    const renderedStops = useMemo(() => {
+        if (isRouteMode || filteredStops.length <= MAX_RENDERED_STOPS) {
+            return filteredStops;
+        }
+
+        const [centerLatitude, centerLongitude] = mapCenter;
+        return filteredStops
+            .slice()
+            .sort((left, right) => {
+                const leftDeltaLat = left.latitude - centerLatitude;
+                const leftDeltaLon = left.longitude - centerLongitude;
+                const rightDeltaLat = right.latitude - centerLatitude;
+                const rightDeltaLon = right.longitude - centerLongitude;
+                const leftDistanceScore = (leftDeltaLat * leftDeltaLat) + (leftDeltaLon * leftDeltaLon);
+                const rightDistanceScore = (rightDeltaLat * rightDeltaLat) + (rightDeltaLon * rightDeltaLon);
+                return leftDistanceScore - rightDistanceScore;
+            })
+            .slice(0, MAX_RENDERED_STOPS);
+    }, [filteredStops, isRouteMode, mapCenter]);
     const stopNameById = useMemo(() => {
         return stops.reduce<Record<string, string>>((result, stop) => {
             result[stop.id] = stop.name;
@@ -766,7 +800,7 @@ export default function MapScreen({
 
                 const [visibleVehicles, etasByStop] = await Promise.all([
                     fetchVehiclesInBounds(mapBounds),
-                    fetchStopEtas(visibleStops.map((stop) => stop.id)),
+                    fetchStopEtas(visibleStops.slice(0, MAX_RENDERED_STOPS).map((stop) => stop.id)),
                 ]);
 
                 if (!isMounted) {
@@ -797,7 +831,9 @@ export default function MapScreen({
 
         const refreshEtasOnly = async () => {
             try {
-                const etasByStop = await fetchStopEtas(visibleStopsRef.current.map((stop) => stop.id));
+                const etasByStop = await fetchStopEtas(
+                    visibleStopsRef.current.slice(0, MAX_RENDERED_STOPS).map((stop) => stop.id)
+                );
                 if (!isMounted) {
                     return;
                 }
@@ -1054,7 +1090,7 @@ export default function MapScreen({
                         </WebMarker>
                     )}
 
-                    {!routeGeometry && filteredStops.map((stop) => (
+                    {!routeGeometry && renderedStops.map((stop) => (
                         <WebMarker
                             key={stop.id}
                             position={[stop.latitude, stop.longitude]}
@@ -1087,9 +1123,9 @@ export default function MapScreen({
                         </WebMarker>
                     ))}
 
-                    {displayVehicles.map((vehicle) => (
+                    {renderedDisplayVehicles.map((vehicle) => (
                         <WebMarker
-                            key={vehicle.id}
+                            key={vehicle.renderKey}
                             position={[vehicle.latitude, vehicle.longitude]}
                             icon={createVehicleMarkerIcon(vehicle)}
                             zIndexOffset={1500}
@@ -1392,7 +1428,7 @@ export default function MapScreen({
                         </View>
                     </ScrollView>
                     <Text style={styles.filterHint}>{`Показани превозни средства: ${filteredVehicles.length}/${vehicles.length}`}</Text>
-                    <Text style={styles.filterHint}>{`Видими спирки: ${filteredStops.length}/${stops.length}`}</Text>
+                    <Text style={styles.filterHint}>{`Видими спирки: ${renderedStops.length}/${filteredStops.length}`}</Text>
                     <View style={styles.nearbyStopsList}>
                         {filteredStops.slice(0, 6).map((stop) => (
                             <TouchableOpacity
