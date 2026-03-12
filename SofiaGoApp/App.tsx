@@ -100,7 +100,7 @@ export default function App() {
           <Text style={styles.floatingIcon}>🗺️</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.floatingButton, activeTab === 'schedules' && styles.floatingButtonActive]}
+          style={styles.floatingButton}
           onPress={() => {
             setActiveTab((prev) => (prev === 'schedules' ? 'map' : 'schedules'));
             setMapFiltersVisible(false);
@@ -196,7 +196,9 @@ const styles = StyleSheet.create({
   },
   floatingIcon: {
     fontSize: 24,
-    lineHeight: 24,
+    lineHeight: 30,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   filterBadge: {
     position: 'absolute',
