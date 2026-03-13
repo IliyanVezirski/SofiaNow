@@ -384,6 +384,123 @@ export default function MapScreen({
                         })
                     )}
 
+                    {/* Vehicle route overlay */}
+                    {!hasTripRoute && vehicleRoute.vehicleRouteStops.length > 0 && (() => {
+                        const trackedVehicle = animation.renderedDisplayVehicles.find((v) => v.id === vehicleRoute.vehicleRouteVehicleId);
+                        let liveCoords: [number, number][] = vehicleRoute.vehicleRouteCoords;
+                        if (trackedVehicle && vehicleRoute.vehicleRouteCoords.length >= 2) {
+                            const vLon = trackedVehicle.longitude;
+                            const vLat = trackedVehicle.latitude;
+                            let bestIdx = 0;
+                            let bestDist = Infinity;
+                            for (let i = 0; i < vehicleRoute.vehicleRouteCoords.length; i += 1) {
+                                const dx = vehicleRoute.vehicleRouteCoords[i][0] - vLon;
+                                const dy = vehicleRoute.vehicleRouteCoords[i][1] - vLat;
+                                const d = dx * dx + dy * dy;
+                                if (d < bestDist) {
+                                    bestDist = d;
+                                    bestIdx = i;
+                                }
+                            }
+                            liveCoords = [[vLon, vLat], ...vehicleRoute.vehicleRouteCoords.slice(bestIdx + 1)];
+                            if (liveCoords.length < 2) {
+                                liveCoords = [[vLon, vLat], vehicleRoute.vehicleRouteCoords[vehicleRoute.vehicleRouteCoords.length - 1]];
+                            }
+                        }
+
+                        return (
+                            <>
+                                {liveCoords.length >= 2 && (
+                                    <MapboxGL.ShapeSource
+                                        id="vehicle-route-line"
+                                        shape={{
+                                            type: 'Feature',
+                                            properties: {},
+                                            geometry: { type: 'LineString', coordinates: liveCoords },
+                                        }}
+                                    >
+                                        <MapboxGL.LineLayer
+                                            id="vehicle-route-layer"
+                                            style={{
+                                                lineColor: '#059669',
+                                                lineWidth: 4,
+                                                lineOpacity: 0.85,
+                                            }}
+                                        />
+                                    </MapboxGL.ShapeSource>
+                                )}
+
+                                {vehicleRoute.vehicleRouteStops.map((stop, idx) => {
+                                    const annId = `vr-stop-${stop.stopId}-${idx}`;
+                                    return (
+                                        <MapboxGL.PointAnnotation
+                                            key={annId}
+                                            id={annId}
+                                            coordinate={[stop.longitude, stop.latitude]}
+                                            onSelected={async () => {
+                                                selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+                                                selectedStop.selectedStopIdRef.current = stop.stopId;
+                                                selectedStop.setSelectedStopAnnotationId(annId);
+                                                selectedVehicleIdRef.current = null;
+                                                setSelectedVehicleId(null);
+
+                                                const resolved = await fetchStopById(stop.stopId);
+                                                if (resolved) {
+                                                    selectedStop.setSelectedStop(resolved);
+                                                } else {
+                                                    selectedStop.setSelectedStop({
+                                                        id: stop.stopId,
+                                                        name: stop.stopName,
+                                                        latitude: stop.latitude,
+                                                        longitude: stop.longitude,
+                                                        lines: [],
+                                                        directions: [],
+                                                    });
+                                                }
+                                                await etasHook.refreshEtasForStop(stop.stopId);
+                                            }}
+                                            onDeselected={() => {
+                                                if (selectedStop.selectedStopIdRef.current === stop.stopId) selectedStop.closeSelectedStop();
+                                            }}
+                                        >
+                                            <View style={{ alignItems: 'center', zIndex: 20, elevation: 20 }}>
+                                                <View style={[styles.vehicleRouteStopDot, selectedStop.selectedStopAnnotationId === annId && styles.vehicleRouteStopDotSelected]}>
+                                                    <Text style={styles.vehicleRouteStopText}>{idx + 1}</Text>
+                                                </View>
+                                                <View style={styles.vehicleRouteStopLabel}>
+                                                    <Text style={styles.vehicleRouteStopName} numberOfLines={1}>{stop.stopName}</Text>
+                                                    {stop.arrivalTimestamp ? <Text style={styles.vehicleRouteStopTime}>{formatUnixTime(stop.arrivalTimestamp)}</Text> : null}
+                                                </View>
+                                            </View>
+                                        </MapboxGL.PointAnnotation>
+                                    );
+                                })}
+                            </>
+                        );
+                    })()}
+
+                    {/* Tracked vehicle marker when vehicle route is active */}
+                    {!hasTripRoute && vehicleRoute.hasVehicleRoute && (() => {
+                        const trackedVehicle = animation.renderedDisplayVehicles.find((v) => v.id === vehicleRoute.vehicleRouteVehicleId);
+                        if (!trackedVehicle) return null;
+                        return (
+                            <MapboxGL.PointAnnotation
+                                key={`tracked-${trackedVehicle.renderId}`}
+                                id={`tracked-${trackedVehicle.renderId}`}
+                                coordinate={[trackedVehicle.longitude, trackedVehicle.latitude]}
+                                onSelected={() => {
+                                    selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+                                    selectedVehicleIdRef.current = trackedVehicle.id;
+                                    setSelectedVehicleId(trackedVehicle.id);
+                                    selectedStop.closeSelectedStop();
+                                    void fetchTripDelay(trackedVehicle.tripId).then((d) => setVehicleDelays((p) => ({ ...p, [trackedVehicle.id]: d })));
+                                }}
+                            >
+                                <View style={styles.vehicleMarkerWrap}><VehicleMarkerContent vehicle={trackedVehicle} /></View>
+                            </MapboxGL.PointAnnotation>
+                        );
+                    })()}
+
                     {/* Vehicles */}
                     {!hasTripRoute && !vehicleRoute.hasVehicleRoute && animation.renderedDisplayVehicles.map((vehicle) => (
                         <MapboxGL.PointAnnotation
@@ -623,6 +740,12 @@ const styles = StyleSheet.create({
     routeStopDot: { width: 26, height: 26, borderRadius: 13, borderWidth: 2.5, alignItems: 'center', justifyContent: 'center' },
     routeStopDotSelected: { borderColor: '#F59E0B', borderWidth: 4, transform: [{ scale: 1.18 }] },
     routeStopText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+    vehicleRouteStopDot: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#059669', borderWidth: 2, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+    vehicleRouteStopDotSelected: { borderColor: '#F59E0B', borderWidth: 4, transform: [{ scale: 1.15 }] },
+    vehicleRouteStopText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700' },
+    vehicleRouteStopLabel: { backgroundColor: '#FFFFFF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2, maxWidth: 120, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2 },
+    vehicleRouteStopName: { fontSize: 9, fontWeight: '600', color: '#1F2937', textAlign: 'center' },
+    vehicleRouteStopTime: { fontSize: 9, fontWeight: '700', color: '#059669', textAlign: 'center' },
     routeDirectionArrow: { fontSize: 22, fontWeight: '900', textShadowColor: 'rgba(255,255,255,0.95)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 2 },
     droppedPinIcon: { fontSize: 28, lineHeight: 28, textShadowColor: 'rgba(220,38,38,0.35)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4 },
     tripStopDot: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF', borderWidth: 3, borderColor: '#1E3A8A' },

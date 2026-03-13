@@ -1,7 +1,0 @@
-Starting project at D:\SofiaGo\SofiaGoApp
-Starting Metro Bundler
-
-CommandError: TypeError: Cannot read properties of undefined (reading 'body')
-Check the Ngrok status page for outages: https://status.ngrok.com/
-
-D:\SofiaGo\SofiaGoApp>
