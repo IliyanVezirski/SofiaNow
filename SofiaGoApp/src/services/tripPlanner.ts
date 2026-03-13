@@ -3,6 +3,7 @@
 
 const BASE_URL = 'https://www.sofiatraffic.bg';
 const LOCALE = 'bg';
+const IS_WEB_RUNTIME = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 // ─── Session management ────────────────────────────────────────────────────────
 
@@ -35,6 +36,24 @@ async function ensureSession(): Promise<{ csrf: string; cookies: string }> {
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  if (IS_WEB_RUNTIME) {
+    const webRes = await fetch(`/api${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!webRes.ok) {
+      const text = await webRes.text();
+      throw new Error(`Trip proxy ${path} returned ${webRes.status}: ${text.slice(0, 200)}`);
+    }
+
+    return webRes.json();
+  }
+
   const { csrf, cookies } = await ensureSession();
 
   const xsrfMatch = cookies.match(/XSRF-TOKEN=([^;]+)/);

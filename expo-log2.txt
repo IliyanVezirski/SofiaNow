@@ -1,0 +1,3 @@
+ConfigError: The expected package.json path: C:\Users\Magi\package.json does not exist
+
+C:\Users\Magi>

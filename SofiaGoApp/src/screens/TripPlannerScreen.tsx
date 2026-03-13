@@ -12,14 +12,21 @@ import {
   View,
 } from 'react-native';
 import {
-  searchLocations,
   planTrip,
   decodePolyline,
-  TripLocation,
+  searchLocations,
+  TripRequest,
   Itinerary,
   ItineraryLeg,
   PlanType,
 } from '../services/tripPlanner';
+import * as Location from 'expo-location';
+
+export interface TripLocation {
+  latitude: number;
+  longitude: number;
+  name: string;
+}
 
 /* ─── helpers ─────────────────────────────────────────────────── */
 
@@ -147,10 +154,12 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
   const [toText, setToText] = useState('');
   const [fromLoc, setFromLoc] = useState<TripLocation | null>(null);
   const [toLoc, setToLoc] = useState<TripLocation | null>(null);
+  const [autoFromLoading, setAutoFromLoading] = useState(false);
 
   const [suggestions, setSuggestions] = useState<TripLocation[]>([]);
   const [activeField, setActiveField] = useState<'from' | 'to' | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualFromEditedRef = useRef(false);
 
   const [planType, setPlanType] = useState<PlanType>('0');
   const [loading, setLoading] = useState(false);
@@ -164,6 +173,48 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
     const sub = BackHandler.addEventListener('hardwareBackPress', () => { onClose(); return true; });
     return () => sub.remove();
   }, [onClose]);
+
+  /* auto-fill current location as starting point */
+  useEffect(() => {
+    if (initialFromLocation) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!manualFromEditedRef.current) {
+          setFromText('Моята локация');
+        }
+        setAutoFromLoading(true);
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted' || cancelled) return;
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (lastKnown && !cancelled && !manualFromEditedRef.current) {
+          setFromLoc({
+            latitude: lastKnown.coords.latitude,
+            longitude: lastKnown.coords.longitude,
+            name: 'Моята локация',
+          });
+        }
+        const loc = await Location.getCurrentPositionAsync({});
+        if (cancelled) return;
+        const myLocation: TripLocation = {
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+          name: 'Моята локация',
+        };
+        if (!manualFromEditedRef.current) {
+          setFromText(myLocation.name);
+        }
+        setFromLoc(myLocation);
+      } catch (err) {
+        console.warn('Failed to get location for trip planner:', err);
+      } finally {
+        if (!cancelled) {
+          setAutoFromLoading(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   /* prefill from map-selected coordinate */
   useEffect(() => {
@@ -190,7 +241,11 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
 
   /* autocomplete */
   const onChangeText = useCallback((field: 'from' | 'to', text: string) => {
-    if (field === 'from') { setFromText(text); setFromLoc(null); }
+    if (field === 'from') {
+      manualFromEditedRef.current = true;
+      setFromText(text);
+      setFromLoc(null);
+    }
     else { setToText(text); setToLoc(null); }
     setActiveField(field);
 
@@ -199,6 +254,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
 
     debounceRef.current = setTimeout(async () => {
       try {
+        // Use CGM API for location search
         const locs = await searchLocations(text);
         setSuggestions(locs);
       } catch { setSuggestions([]); }
@@ -206,7 +262,11 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
   }, []);
 
   const pickSuggestion = (loc: TripLocation) => {
-    if (activeField === 'from') { setFromText(loc.name); setFromLoc(loc); }
+    if (activeField === 'from') {
+      manualFromEditedRef.current = true;
+      setFromText(loc.name);
+      setFromLoc(loc);
+    }
     else if (activeField === 'to') { setToText(loc.name); setToLoc(loc); }
     setSuggestions([]);
     setActiveField(null);
@@ -255,7 +315,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
         <View style={s.inputsCol}>
           <TextInput
             style={s.input}
-            placeholder="Откъде..."
+            placeholder={autoFromLoading ? 'Задавам текуща локация...' : 'Откъде...'}
             placeholderTextColor="#94A3B8"
             value={fromText}
             onChangeText={(t) => onChangeText('from', t)}

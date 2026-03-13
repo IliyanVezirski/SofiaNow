@@ -1,0 +1,7 @@
+
+> sofiagoapp@1.0.0 web:serve
+> node scripts/webServer.js
+
+SofiaGo web server running at http://localhost:3000
+
+D:\SofiaGo\SofiaGoApp>

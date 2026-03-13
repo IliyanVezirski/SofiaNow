@@ -1,0 +1,13 @@
+Starting project at D:\SofiaGo\SofiaGoApp
+Starting Metro Bundler
+
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Exception in PromiseRejectCallback:
+D:\SofiaGo\SofiaGoApp\node_modules\dnssd-advertise\dist\dnssd-advertise.js:2628
+        return next();
+
+RangeError: Maximum call stack size exceeded
+
+
+D:\SofiaGo\SofiaGoApp>
