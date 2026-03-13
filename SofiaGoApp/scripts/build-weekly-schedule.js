@@ -38,6 +38,10 @@ console.log('Trips loaded:', Object.keys(trips).length);
 // Structure: { stopId: { routeKey: { w:[], s:[], u:[] } } }
 const schedule = {};
 
+// Also collect stop_sequence per trip to derive canonical stop order per route|destination
+// tripStops: { tripId: [ { stopId, seq } ] }
+const tripStops = {};
+
 const stData = fs.readFileSync('gtfs_static/stop_times.txt', 'utf8');
 const stLines = stData.split('\n');
 console.log('stop_times lines:', stLines.length);
@@ -45,7 +49,7 @@ console.log('stop_times lines:', stLines.length);
 for (let i = 1; i < stLines.length; i++) {
   const p = stLines[i].split(',');
   if (p.length < 5) continue;
-  const tripId = p[0], arrTime = p[1], stopId = p[3];
+  const tripId = p[0], arrTime = p[1], stopId = p[3], stopSeq = parseInt(p[4]) || 0;
   const trip = trips[tripId];
   if (!trip) continue;
 
@@ -65,6 +69,10 @@ for (let i = 1; i < stLines.length; i++) {
     if (dt === 'w') schedule[stopId][key].w.push(mins);
     else schedule[stopId][key].h.push(mins);
   }
+
+  // Track stop sequence for this trip
+  if (!tripStops[tripId]) tripStops[tripId] = [];
+  tripStops[tripId].push({ stopId, seq: stopSeq });
 }
 
 // Sort and dedupe
@@ -81,6 +89,26 @@ for (const stop of Object.values(schedule)) {
 console.log('Stops:', Object.keys(schedule).length);
 console.log('Total time entries:', totalEntries);
 
+// 4) Build canonical stop order per route|destination from GTFS stop_sequence.
+// For each route key, pick the trip with the MOST stops (the "full" variant) and use its stop order.
+const stopOrder = {};
+for (const [tripId, stopsArr] of Object.entries(tripStops)) {
+  const trip = trips[tripId];
+  if (!trip) continue;
+  const key = trip.route + '|' + trip.headsign;
+  stopsArr.sort((a, b) => a.seq - b.seq);
+  const ordered = stopsArr.map(s => s.stopId);
+  if (!stopOrder[key] || stopOrder[key].length < ordered.length) {
+    stopOrder[key] = ordered;
+  }
+}
+
+console.log('Stop order keys:', Object.keys(stopOrder).length);
+
 fs.writeFileSync('src/data/schedule.weekly.static.json', JSON.stringify(schedule));
 const size = fs.statSync('src/data/schedule.weekly.static.json').size;
 console.log('Written schedule.weekly.static.json:', (size / 1048576).toFixed(2) + 'MB');
+
+fs.writeFileSync('src/data/stopOrder.static.json', JSON.stringify(stopOrder));
+const soSize = fs.statSync('src/data/stopOrder.static.json').size;
+console.log('Written stopOrder.static.json:', (soSize / 1024).toFixed(1) + 'KB');

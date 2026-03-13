@@ -5,9 +5,11 @@ import * as NavigationBar from 'expo-navigation-bar';
 import { Ionicons } from '@expo/vector-icons';
 import MapScreen from './src/screens/MapScreen';
 import SchedulesScreen from './src/screens/SchedulesScreen';
+import TripPlannerScreen, { TripRouteGeoJSON } from './src/screens/TripPlannerScreen';
 import { RouteSelection } from './src/types/routes';
+import { TripLocation } from './src/services/tripPlanner';
 
-type BottomTab = 'map' | 'schedules';
+type BottomTab = 'map' | 'schedules' | 'planner';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<BottomTab>('map');
@@ -25,6 +27,10 @@ export default function App() {
   const [filterCount, setFilterCount] = useState(0);
   const [focusStopCoordinate, setFocusStopCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
   const [focusStopId, setFocusStopId] = useState<string | null>(null);
+  const [tripPlannerRoute, setTripPlannerRoute] = useState<TripRouteGeoJSON | null>(null);
+  const [plannerInitialFrom, setPlannerInitialFrom] = useState<TripLocation | null>(null);
+  const [plannerInitialTo, setPlannerInitialTo] = useState<TripLocation | null>(null);
+  const [plannerInitialFromToken, setPlannerInitialFromToken] = useState(0);
   const handleFilterCountChange = useCallback((count: number) => setFilterCount(count), []);
 
   return (
@@ -32,7 +38,10 @@ export default function App() {
       <View style={styles.screenWrap}>
         <MapScreen
           highlightedRoute={selectedRoute}
+          onClearHighlightedRoute={() => setSelectedRoute(null)}
+          showReportButton={activeTab === 'map'}
           filterPanelVisible={mapFiltersVisible}
+          onCloseFilterPanel={() => setMapFiltersVisible(false)}
           searchRequestToken={openSearchToken}
           favoritesRequestToken={toggleFavoritesToken}
           recenterRequestToken={recenterToken}
@@ -40,6 +49,26 @@ export default function App() {
           onFilterCountChange={handleFilterCountChange}
           focusStopCoordinate={focusStopCoordinate}
           focusStopId={focusStopId}
+          tripPlannerRoute={tripPlannerRoute}
+          onClearTripRoute={() => setTripPlannerRoute(null)}
+          onBuildRouteFromCoordinate={(destinationLatitude, destinationLongitude, currentLatitude, currentLongitude) => {
+            if (Number.isFinite(currentLatitude) && Number.isFinite(currentLongitude)) {
+              setPlannerInitialFrom({
+                latitude: currentLatitude as number,
+                longitude: currentLongitude as number,
+                name: 'Моята локация',
+              });
+            }
+            setPlannerInitialTo({
+              latitude: destinationLatitude,
+              longitude: destinationLongitude,
+              name: `${destinationLatitude.toFixed(5)}, ${destinationLongitude.toFixed(5)}`,
+            });
+            setPlannerInitialFromToken((v) => v + 1);
+            setMapFiltersVisible(false);
+            setDismissTransientPanelsToken((value) => value + 1);
+            setActiveTab('planner');
+          }}
         />
         <View style={[styles.schedulesOverlay, activeTab !== 'schedules' && { display: 'none' }]}>
           <SchedulesScreen
@@ -55,9 +84,21 @@ export default function App() {
             }}
           />
         </View>
+        <View style={[styles.schedulesOverlay, activeTab !== 'planner' && { display: 'none' }]}>
+          <TripPlannerScreen
+            onClose={() => setActiveTab('map')}
+            initialFromLocation={plannerInitialFrom}
+            initialToLocation={plannerInitialTo}
+            initialFromToken={plannerInitialFromToken}
+            onShowOnMap={(route) => {
+              setTripPlannerRoute(route);
+              setActiveTab('map');
+            }}
+          />
+        </View>
       </View>
 
-      {activeTab !== 'schedules' && <View style={styles.floatingMenu}>
+      {activeTab !== 'schedules' && activeTab !== 'planner' && <View style={styles.floatingMenu}>
         <TouchableOpacity
           style={[
             styles.floatingButton,
@@ -89,17 +130,6 @@ export default function App() {
           )}
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.floatingButton, activeTab === 'map' && styles.floatingButtonActive]}
-          onPress={() => {
-            setActiveTab('map');
-            setSelectedRoute(null);
-            setMapFiltersVisible(false);
-            setDismissTransientPanelsToken((value) => value + 1);
-          }}
-        >
-          <Text style={styles.floatingIcon}>🗺️</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
           style={styles.floatingButton}
           onPress={() => {
             setActiveTab((prev) => (prev === 'schedules' ? 'map' : 'schedules'));
@@ -108,6 +138,16 @@ export default function App() {
           }}
         >
           <Text style={styles.floatingIcon}>🕒</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.floatingButton}
+          onPress={() => {
+            setActiveTab((prev) => (prev === 'planner' ? 'map' : 'planner'));
+            setMapFiltersVisible(false);
+            setDismissTransientPanelsToken((value) => value + 1);
+          }}
+        >
+          <Text style={styles.floatingIcon}>🧭</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.floatingButton, activeTab !== 'map' && styles.floatingButtonDisabled]}

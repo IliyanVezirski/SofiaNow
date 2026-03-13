@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { getVehicleIcon, VehicleType } from '../services/transitUtils';
 import { AvailableLine, fetchAvailableLines, fetchLineRouteGeometryByRouteId, fetchLineRouteGeometry, fetchStopById, fetchAllStops, LineRouteGeometry, Stop } from '../services/stopsApi';
-import { getStaticStopSchedule, getStaticLineSchedule, getScheduleBasedDirections, resolveScheduleRouteId, StaticScheduleEntry, LineScheduleDirection, DayType, getDayTypeForDate } from '../services/cgmApi';
+import { getStaticStopSchedule, getScheduleBasedDirections, resolveScheduleRouteId, StaticScheduleEntry, DayType, getDayTypeForDate } from '../services/cgmApi';
 import { RouteSelection } from '../types/routes';
 
 type ScheduleKind = 'bus' | 'trolley' | 'tram' | 'subway' | 'night';
@@ -43,7 +43,6 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
     const [expandedStopId, setExpandedStopId] = useState<string | null>(null);
     const [stopSchedule, setStopSchedule] = useState<StaticScheduleEntry[]>([]);
     const [selectedDayType, setSelectedDayType] = useState<DayType>(getDayTypeForDate());
-    const [lineSchedule, setLineSchedule] = useState<LineScheduleDirection[]>([]);
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
 
     const toggleSection = (key: string) => {
@@ -82,17 +81,6 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
         });
         return () => sub.remove();
     }, [onClose]);
-
-    useEffect(() => {
-        if (!routeGeometry || !schedRouteId) {
-            setLineSchedule([]);
-            return;
-        }
-        const dirStops = routeGeometry.directions.map((dir) =>
-            dir.stops.map((s) => ({ id: s.id, name: s.name }))
-        );
-        setLineSchedule(getStaticLineSchedule(schedRouteId, dirStops, selectedDayType));
-    }, [routeGeometry, schedRouteId, selectedDayType]);
 
     const linesForKind = useMemo(
         () => allLines.filter((line) => getLineKind(line) === selectedKind),
@@ -344,187 +332,137 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                     </View>
                 </ScrollView>
             ) : (
-            <>
-            <View style={styles.filtersPanel}>
-                <View style={styles.kindRow}>
-                    {SCHEDULE_KIND_ORDER.map((kind) => (
-                        <TouchableOpacity
-                            key={kind}
-                            style={[styles.chip, selectedKind === kind && styles.chipActive]}
-                            onPress={() => { setSelectedKind(kind); setSelectedLine(null); }}
-                        >
-                            <Text style={[styles.chipText, selectedKind === kind && styles.chipTextActive]}>
-                                {SCHEDULE_KIND_META[kind].icon} {SCHEDULE_KIND_META[kind].label} ({kindCounts[kind]})
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
-
-                <ScrollView style={styles.linesScroll} showsVerticalScrollIndicator={false}>
-                    <View style={styles.linesGrid}>
-                        {linesForKind.map((line, index) => {
-                            const isActive = selectedLine?.routeId === line.routeId && selectedLine?.line === line.line;
-                            return (
+                <>
+                    <View style={styles.filtersPanel}>
+                        <View style={styles.kindRow}>
+                            {SCHEDULE_KIND_ORDER.map((kind) => (
                                 <TouchableOpacity
-                                    key={`schedule-line-${line.routeId || line.line}-${index}`}
-                                    style={[styles.lineChip, isActive && styles.chipActive]}
-                                    onPress={() => setSelectedLine(isActive ? null : line)}
+                                    key={kind}
+                                    style={[styles.chip, selectedKind === kind && styles.chipActive]}
+                                    onPress={() => { setSelectedKind(kind); setSelectedLine(null); }}
                                 >
-                                    <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{line.line}</Text>
+                                    <Text style={[styles.chipText, selectedKind === kind && styles.chipTextActive]}>
+                                        {SCHEDULE_KIND_META[kind].icon} {SCHEDULE_KIND_META[kind].label} ({kindCounts[kind]})
+                                    </Text>
                                 </TouchableOpacity>
-                            );
-                        })}
-                    </View>
-                </ScrollView>
-            </View>
-
-            <ScrollView style={styles.routeArea} contentContainerStyle={styles.routeAreaContent}>
-                {!selectedLine ? (
-                    <View style={styles.placeholder}>
-                        <Text style={styles.placeholderIcon}>{SCHEDULE_KIND_META[selectedKind].icon}</Text>
-                        <Text style={styles.placeholderText}>Избери линия, за да видиш маршрута</Text>
-                    </View>
-                ) : routeLoading ? (
-                    <View style={styles.inlineLoader}>
-                        <ActivityIndicator size="small" color="#1D4ED8" />
-                        <Text style={styles.inlineLoaderText}>Зареждам маршрут...</Text>
-                    </View>
-                ) : routeGeometry ? (
-                    <View style={styles.routeCard}>
-                        <View style={styles.routeCardHeader}>
-                            <Text style={styles.routeCardTitle}>
-                                {getVehicleIcon(selectedLine.type)} Линия {selectedLine.line}
-                            </Text>
-                            <TouchableOpacity
-                                style={styles.mapButton}
-                                onPress={() => {
-                                    onOpenRoute?.({
-                                        line: selectedLine.line,
-                                        type: selectedLine.isNight ? 'bus' : selectedLine.type,
-                                        isNight: selectedLine.isNight,
-                                        routeId: selectedLine.routeId || undefined,
-                                    });
-                                }}
-                            >
-                                <Text style={styles.mapButtonText}>🗺️ Маршрут</Text>
-                            </TouchableOpacity>
+                            ))}
                         </View>
 
-                        {lineSchedule.length > 0 && (
-                            <View style={styles.accordionSection}>
-                                <TouchableOpacity
-                                    style={styles.accordionHeader}
-                                    activeOpacity={0.7}
-                                    onPress={() => toggleSection('schedule')}
-                                >
-                                    <Text style={styles.accordionHeaderText}>🕒 Разписание на линията</Text>
-                                    <Text style={styles.accordionArrow}>{expandedSections.has('schedule') ? '▲' : '▼'}</Text>
-                                </TouchableOpacity>
-                                {expandedSections.has('schedule') && (
-                                    <View style={styles.accordionBody}>
-                                        <View style={styles.dayTypeRow}>
+                        <ScrollView style={styles.linesScroll} showsVerticalScrollIndicator={false}>
+                            <View style={styles.linesGrid}>
+                                {linesForKind.map((line, index) => {
+                                    const isActive = selectedLine?.routeId === line.routeId && selectedLine?.line === line.line;
+                                    return (
+                                        <TouchableOpacity
+                                            key={`schedule-line-${line.routeId || line.line}-${index}`}
+                                            style={[styles.lineChip, isActive && styles.chipActive]}
+                                            onPress={() => setSelectedLine(isActive ? null : line)}
+                                        >
+                                            <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{line.line}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        </ScrollView>
+                    </View>
+
+                    <ScrollView style={styles.routeArea} contentContainerStyle={styles.routeAreaContent}>
+                        {!selectedLine ? (
+                            <View style={styles.placeholder}>
+                                <Text style={styles.placeholderIcon}>{SCHEDULE_KIND_META[selectedKind].icon}</Text>
+                                <Text style={styles.placeholderText}>Избери линия, за да видиш маршрута</Text>
+                            </View>
+                        ) : routeLoading ? (
+                            <View style={styles.inlineLoader}>
+                                <ActivityIndicator size="small" color="#1D4ED8" />
+                                <Text style={styles.inlineLoaderText}>Зареждам маршрут...</Text>
+                            </View>
+                        ) : routeGeometry ? (
+                            <View style={styles.routeCard}>
+                                <View style={styles.routeCardHeader}>
+                                    <Text style={styles.routeCardTitle}>
+                                        {getVehicleIcon(selectedLine.type)} Линия {selectedLine.line}
+                                    </Text>
+                                    <TouchableOpacity
+                                        style={styles.mapButton}
+                                        onPress={() => {
+                                            onOpenRoute?.({
+                                                line: selectedLine.line,
+                                                type: selectedLine.isNight ? 'bus' : selectedLine.type,
+                                                isNight: selectedLine.isNight,
+                                                routeId: selectedLine.routeId || undefined,
+                                            });
+                                        }}
+                                    >
+                                        <Text style={styles.mapButtonText}>🗺️ Маршрут</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                {filteredDirections.map((direction, dirIndex) => {
+                                    const dirKey = `dir-${dirIndex}`;
+                                    const isExpanded = expandedSections.has(dirKey);
+                                    return (
+                                        <View key={dirKey} style={styles.accordionSection}>
                                             <TouchableOpacity
-                                                style={[styles.dayTypeChip, selectedDayType === 'w' && styles.dayTypeChipActive]}
-                                                onPress={() => setSelectedDayType('w')}
+                                                style={styles.accordionHeader}
+                                                activeOpacity={0.7}
+                                                onPress={() => toggleSection(dirKey)}
                                             >
-                                                <Text style={[styles.dayTypeChipText, selectedDayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                                style={[styles.dayTypeChip, selectedDayType === 'h' && styles.dayTypeChipActive]}
-                                                onPress={() => setSelectedDayType('h')}
-                                            >
-                                                <Text style={[styles.dayTypeChipText, selectedDayType === 'h' && styles.dayTypeChipTextActive]}>Празник</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                        {lineSchedule.map((dir) => (
-                                            <View key={`ls-${dir.firstStopId}`} style={styles.lineScheduleDir}>
-                                                <Text style={styles.lineScheduleDirTitle}>{`→ ${dir.directionName}`}</Text>
-                                                <Text style={styles.lineScheduleStop}>{`от ${dir.firstStopName}`}</Text>
-                                                <View style={styles.lineGroupTimes}>
-                                                    {dir.times.map((m) => {
-                                                        const past = isToday && m < nowMinutes;
-                                                        return (
-                                                            <Text
-                                                                key={m}
-                                                                style={[styles.lineGroupTime, past && styles.stopEtaPast]}
-                                                            >
-                                                                {formatMinutes(m)}
-                                                            </Text>
-                                                        );
-                                                    })}
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={styles.accordionHeaderText} numberOfLines={2}>
+                                                        {`🚏 ${direction.name || `Посока ${dirIndex + 1}`}`}
+                                                    </Text>
+                                                    <Text style={styles.accordionSubText}>{`${direction.stops.length} спирки`}</Text>
                                                 </View>
-                                            </View>
-                                        ))}
-                                    </View>
+                                                <Text style={styles.accordionArrow}>{isExpanded ? '▲' : '▼'}</Text>
+                                            </TouchableOpacity>
+                                            {isExpanded && (
+                                                <View style={styles.accordionBody}>
+                                                    {direction.stops.map((stop, stopIndex) => (
+                                                        <TouchableOpacity
+                                                            key={`${dirIndex}-${stop.id}-${stopIndex}`}
+                                                            style={[
+                                                                styles.stopRow,
+                                                                expandedStopId === stop.id && styles.stopRowActive,
+                                                            ]}
+                                                            activeOpacity={0.7}
+                                                            onPress={() => { void handleStopPress(stop.id); }}
+                                                        >
+                                                            <Text style={styles.stopIndex}>{`${stopIndex + 1}.`}</Text>
+                                                            <View style={styles.stopInfo}>
+                                                                <Text style={styles.stopName}>{stop.name}</Text>
+                                                                <Text style={styles.stopMeta}>{`ID: ${stop.id}`}</Text>
+                                                                {expandedStopId === stop.id && (
+                                                                    <View style={styles.stopEtaPanel}>
+                                                                        {renderStopSchedule()}
+                                                                    </View>
+                                                                )}
+                                                            </View>
+                                                            {onFocusStop && (
+                                                                <TouchableOpacity
+                                                                    style={styles.stopMapBtn}
+                                                                    onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
+                                                                >
+                                                                    <Text style={styles.stopMapBtnText}>{"\uD83D\uDCCD"}</Text>
+                                                                </TouchableOpacity>
+                                                            )}
+                                                        </TouchableOpacity>
+                                                    ))}
+                                                </View>
+                                            )}
+                                        </View>
+                                    );
+                                })}
+
+                                {filteredDirections.length === 0 && stopSearch.trim() !== '' && (
+                                    <Text style={styles.emptyText}>Няма спирки, съвпадащи с търсенето</Text>
                                 )}
                             </View>
+                        ) : (
+                            <Text style={styles.emptyText}>Няма данни за маршрута.</Text>
                         )}
-
-                        {filteredDirections.map((direction, dirIndex) => {
-                            const dirKey = `dir-${dirIndex}`;
-                            const isExpanded = expandedSections.has(dirKey);
-                            return (
-                                <View key={dirKey} style={styles.accordionSection}>
-                                    <TouchableOpacity
-                                        style={styles.accordionHeader}
-                                        activeOpacity={0.7}
-                                        onPress={() => toggleSection(dirKey)}
-                                    >
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.accordionHeaderText} numberOfLines={2}>
-                                                {`🚏 ${direction.name || `Посока ${dirIndex + 1}`}`}
-                                            </Text>
-                                            <Text style={styles.accordionSubText}>{`${direction.stops.length} спирки`}</Text>
-                                        </View>
-                                        <Text style={styles.accordionArrow}>{isExpanded ? '▲' : '▼'}</Text>
-                                    </TouchableOpacity>
-                                    {isExpanded && (
-                                        <View style={styles.accordionBody}>
-                                            {direction.stops.map((stop, stopIndex) => (
-                                                <TouchableOpacity
-                                                    key={`${dirIndex}-${stop.id}-${stopIndex}`}
-                                                    style={[
-                                                        styles.stopRow,
-                                                        expandedStopId === stop.id && styles.stopRowActive,
-                                                    ]}
-                                                    activeOpacity={0.7}
-                                                    onPress={() => { void handleStopPress(stop.id); }}
-                                                >
-                                                    <Text style={styles.stopIndex}>{`${stopIndex + 1}.`}</Text>
-                                                    <View style={styles.stopInfo}>
-                                                        <Text style={styles.stopName}>{stop.name}</Text>
-                                                        <Text style={styles.stopMeta}>{`ID: ${stop.id}`}</Text>
-                                                        {expandedStopId === stop.id && (
-                                                            <View style={styles.stopEtaPanel}>
-                                                                {renderStopSchedule()}
-                                                            </View>
-                                                        )}
-                                                    </View>
-                                                    {onFocusStop && (
-                                                        <TouchableOpacity
-                                                            style={styles.stopMapBtn}
-                                                            onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
-                                                        >
-                                                            <Text style={styles.stopMapBtnText}>{"\uD83D\uDCCD"}</Text>
-                                                        </TouchableOpacity>
-                                                    )}
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-                                    )}
-                                </View>
-                            );
-                        })}
-
-                        {filteredDirections.length === 0 && stopSearch.trim() !== '' && (
-                            <Text style={styles.emptyText}>Няма спирки, съвпадащи с търсенето</Text>
-                        )}
-                    </View>
-                ) : (
-                    <Text style={styles.emptyText}>Няма данни за маршрута.</Text>
-                )}
-            </ScrollView>
-            </>
+                    </ScrollView>
+                </>
             )}
         </View>
     );
@@ -754,21 +692,6 @@ const styles = StyleSheet.create({
     accordionBody: {
         padding: 10,
         backgroundColor: '#FFFFFF',
-    },
-    lineScheduleDir: {
-        marginBottom: 10,
-    },
-    lineScheduleDirTitle: {
-        color: '#1E293B',
-        fontSize: 13,
-        fontWeight: '700',
-        marginBottom: 2,
-    },
-    lineScheduleStop: {
-        color: '#64748B',
-        fontSize: 11,
-        fontWeight: '600',
-        marginBottom: 6,
     },
     directionTitle: {
         color: '#1E293B',

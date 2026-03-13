@@ -5,6 +5,7 @@ import bundledRouteNames from '../data/routeNames.static.json';
 import bundledStops from '../data/stops.static.json';
 import bundledLinesData from '../data/lines-data.static.json';
 import bundledSchedule from '../data/schedule.weekly.static.json';
+import bundledStopOrder from '../data/stopOrder.static.json';
 
 export interface Vehicle {
     id: string;
@@ -661,6 +662,7 @@ export const getDayTypeForDate = (date: Date = new Date()): DayType => {
 };
 
 const scheduleIndex = bundledSchedule as Record<string, Record<string, { w: number[]; h: number[] }>>;
+const stopOrderIndex = bundledStopOrder as Record<string, string[]>;
 
 // Inverse index: routeId → Map<destination, stopId[]> — built lazily
 let _routeStopsIndex: Record<string, Map<string, string[]>> | null = null;
@@ -700,29 +702,43 @@ export const getScheduleBasedDirections = (routeId: string): ScheduleBasedDirect
     const dt = getDayTypeForDate();
     const directions: ScheduleBasedDirection[] = [];
     for (const [destination, stopIds] of dirMap.entries()) {
-        // Sort stops by their first scheduled departure time (approximates route order)
-        const stopsWithTime = stopIds
-            .map((sid) => {
-                const coords = stopCoordinatesById[sid];
-                if (!coords) return null;
-                const schedData = scheduleIndex[sid]?.[routeId + '|' + destination];
-                const times = schedData?.[dt] || schedData?.w || [];
-                const firstTime = times.length > 0 ? times[0] : 9999;
-                return {
-                    id: sid,
-                    name: stopNameById[sid] || sid,
-                    latitude: coords.latitude,
-                    longitude: coords.longitude,
-                    firstTime,
-                };
-            })
-            .filter((s): s is NonNullable<typeof s> => s !== null);
-        stopsWithTime.sort((a, b) => a.firstTime - b.firstTime);
-        if (stopsWithTime.length > 0) {
-            directions.push({
-                name: destination,
-                stops: stopsWithTime.map(({ firstTime, ...rest }) => rest),
+        const stopSet = new Set(stopIds);
+        const stopsById = new Map<string, ScheduleBasedStop>();
+        for (const sid of stopIds) {
+            const coords = stopCoordinatesById[sid];
+            if (!coords) continue;
+            stopsById.set(sid, {
+                id: sid,
+                name: stopNameById[sid] || sid,
+                latitude: coords.latitude,
+                longitude: coords.longitude,
             });
+        }
+        if (stopsById.size === 0) continue;
+
+        // Use canonical GTFS stop_sequence order when available
+        const canonicalOrder = stopOrderIndex[routeId + '|' + destination];
+        let ordered: ScheduleBasedStop[];
+        if (canonicalOrder) {
+            ordered = canonicalOrder
+                .filter((sid) => stopsById.has(sid))
+                .map((sid) => stopsById.get(sid)!);
+            // Append any stops present in schedule but missing from canonical order
+            const inCanonical = new Set(canonicalOrder);
+            for (const [sid, stop] of stopsById) {
+                if (!inCanonical.has(sid)) ordered.push(stop);
+            }
+        } else {
+            // Fallback: sort by first departure time
+            ordered = [...stopsById.values()].sort((a, b) => {
+                const aTime = (scheduleIndex[a.id]?.[routeId + '|' + destination]?.[dt] || [])[0] ?? 9999;
+                const bTime = (scheduleIndex[b.id]?.[routeId + '|' + destination]?.[dt] || [])[0] ?? 9999;
+                return aTime - bTime;
+            });
+        }
+
+        if (ordered.length > 0) {
+            directions.push({ name: destination, stops: ordered });
         }
     }
     return directions;
