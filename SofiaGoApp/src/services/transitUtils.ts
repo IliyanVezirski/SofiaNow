@@ -18,11 +18,11 @@ export const getVehicleTypeLabel = (type: VehicleType) => {
 export const inferLineTypeFromToken = (lineToken: string | undefined | null): VehicleType => {
     const normalized = String(lineToken || '').trim().toUpperCase();
 
-    if (normalized.includes('ТБ') || normalized.includes('TB')) {
+    if (normalized.startsWith('ТБ') || normalized.startsWith('TB')) {
         return 'trolley';
     }
 
-    if (normalized.includes('ТМ') || normalized.includes('TM')) {
+    if (normalized.startsWith('ТМ') || normalized.startsWith('TM')) {
         return 'tram';
     }
 
