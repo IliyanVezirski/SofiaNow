@@ -18,6 +18,7 @@ export const MIN_BOUNDS_DELTA_FOR_REFRESH = 0.0008;
 
 export const MAP_STYLE = {
     version: 8,
+    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
     sources: {
         osm: {
             type: 'raster',

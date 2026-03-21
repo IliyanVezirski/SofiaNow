@@ -12,6 +12,7 @@ export interface Stop {
     longitude: number;
     lines: string[];
     directions: string[];
+    vehicleTypes?: VehicleType[];
 }
 
 
@@ -57,8 +58,15 @@ let availableLinesCache: AvailableLine[] | null = null;
 const routeShortNameByRouteId: Record<string, string> = bundledRouteNames;
 const metroRoutesByLine = bundledMetroRoutes as unknown as Record<string, any>;
 
-const sortStopLines = (lines: string[]) => lines.sort((left, right) => left.localeCompare(right, 'bg', { numeric: true }));
-const sortStopDirections = (directions: string[]) => directions.sort((left, right) => left.localeCompare(right, 'bg'));
+const fastNumericCompare = (a: string, b: string): number => {
+    const aNum = parseInt(a, 10);
+    const bNum = parseInt(b, 10);
+    if (!isNaN(aNum) && !isNaN(bNum) && aNum !== bNum) return aNum - bNum;
+    return a < b ? -1 : a > b ? 1 : 0;
+};
+
+const sortStopLines = (lines: string[]) => lines.sort(fastNumericCompare);
+const sortStopDirections = (directions: string[]) => directions.sort();
 
 const getDirectionLabel = (line: string, direction: any) => {
     const explicitDirectionName = typeof direction?.name === 'string' ? direction.name.trim() : '';
@@ -80,19 +88,116 @@ export const summarizeStopDirections = (stop: Stop, maxDirections = 2) => {
     return `Посока: ${visibleDirections.join(' • ')}${suffix}`;
 };
 
+let _cachedMetroStops: Stop[] | null = null;
+const extractMetroStops = (): Stop[] => {
+    if (_cachedMetroStops) return _cachedMetroStops;
+    const stopMap = new Map<string, Stop>();
+    Object.values(bundledMetroRoutes).forEach((route: any) => {
+        route.directions.forEach((dir: any) => {
+            dir.stops.forEach((stop: any) => {
+                if (!stopMap.has(stop.id)) {
+                    stopMap.set(stop.id, {
+                        id: stop.id,
+                        name: stop.name,
+                        latitude: stop.latitude,
+                        longitude: stop.longitude,
+                        lines: [route.line],
+                        directions: [dir.name],
+                        vehicleTypes: ['subway']
+                    });
+                } else {
+                    const existing = stopMap.get(stop.id)!;
+                    if (!existing.lines.includes(route.line)) existing.lines.push(route.line);
+                    if (!existing.directions.includes(dir.name)) existing.directions.push(dir.name);
+                }
+            });
+        });
+    });
+    _cachedMetroStops = Array.from(stopMap.values());
+    return _cachedMetroStops;
+};
+
+const groupStops = (stops: Stop[]): Stop[] => {
+    type GroupEntry = {
+        id: string;
+        name: string;
+        latitude: number;
+        longitude: number;
+        lineSet: Set<string>;
+        directionSet: Set<string>;
+        typeSet: Set<string>;
+        idParts: string[];
+    };
+
+    const groupMap = new Map<string, GroupEntry>();
+
+    for (let i = 0; i < stops.length; i++) {
+        const stop = stops[i];
+        const id = stop.id;
+
+        const isSubway = (stop.vehicleTypes && stop.vehicleTypes.includes('subway')) || id.charCodeAt(0) === 77; // 'M'
+        let coreCode: string;
+        if (isSubway) {
+            coreCode = `S_${id}`;
+        } else {
+            let numStart = id.length;
+            while (numStart > 0 && id.charCodeAt(numStart - 1) >= 48 && id.charCodeAt(numStart - 1) <= 57) numStart--;
+            coreCode = numStart < id.length ? id.substring(numStart) : id;
+        }
+
+        const existing = groupMap.get(coreCode);
+        if (existing) {
+            for (const l of stop.lines) existing.lineSet.add(l);
+            for (const d of stop.directions) existing.directionSet.add(d);
+            if (stop.vehicleTypes) for (const t of stop.vehicleTypes) existing.typeSet.add(t);
+            existing.idParts.push(id);
+        } else {
+            const entry: GroupEntry = {
+                id,
+                name: stop.name,
+                latitude: stop.latitude,
+                longitude: stop.longitude,
+                lineSet: new Set(stop.lines),
+                directionSet: new Set(stop.directions),
+                typeSet: new Set(stop.vehicleTypes || []),
+                idParts: [id],
+            };
+            groupMap.set(coreCode, entry);
+        }
+    }
+
+    const result: Stop[] = [];
+    for (const entry of groupMap.values()) {
+        result.push({
+            id: entry.idParts.join(','),
+            name: entry.name,
+            latitude: entry.latitude,
+            longitude: entry.longitude,
+            lines: Array.from(entry.lineSet).sort(fastNumericCompare),
+            directions: Array.from(entry.directionSet).sort(),
+            vehicleTypes: Array.from(entry.typeSet).sort() as VehicleType[],
+        });
+    }
+    return result;
+};
+
+let _cachedBundledStops: Stop[] | null = null;
 const normalizeBundledStops = (): Stop[] => {
-    return (bundledStops as Stop[]).map((stop) => ({
+    if (_cachedBundledStops) return _cachedBundledStops;
+    const raw = (bundledStops as Stop[]).map((stop) => ({
         id: stop.id,
         name: stop.name,
         latitude: Number(stop.latitude),
         longitude: Number(stop.longitude),
-        lines: sortStopLines([...(stop.lines || [])]),
-        directions: sortStopDirections([...(stop.directions || [])]),
+        lines: [...(stop.lines || [])],
+        directions: [...(stop.directions || [])],
     }));
+    _cachedBundledStops = groupStops([...raw, ...extractMetroStops()]);
+    return _cachedBundledStops;
 };
 
 const buildStopsFromLinesData = (linesData: any[]): Stop[] => {
-    const stopIndex = new Map<string, Stop & { lineSet: Set<string>; directionSet: Set<string> }>();
+    const stopIndex = new Map<string, Stop & { lineSet: Set<string>; directionSet: Set<string>; typeSet: Set<VehicleType> }>();
 
     linesData.forEach((lineData: any) => {
         const routeMetadata = getRouteMetadata(lineData.line);
@@ -110,6 +215,7 @@ const buildStopsFromLinesData = (linesData: any[]): Stop[] => {
                 if (existing) {
                     existing.lineSet.add(routeMetadata.line);
                     existing.directionSet.add(directionLabel);
+                    existing.typeSet.add(routeMetadata.type);
                     return;
                 }
 
@@ -122,19 +228,22 @@ const buildStopsFromLinesData = (linesData: any[]): Stop[] => {
                     lineSet: new Set([routeMetadata.line]),
                     directions: [],
                     directionSet: new Set([directionLabel]),
+                    typeSet: new Set([routeMetadata.type]),
                 });
             });
         });
     });
 
-    return Array.from(stopIndex.values()).map((stop) => ({
+    const raw = Array.from(stopIndex.values()).map((stop) => ({
         id: stop.id,
         name: stop.name,
         latitude: stop.latitude,
         longitude: stop.longitude,
         lines: sortStopLines(Array.from(stop.lineSet)),
         directions: sortStopDirections(Array.from(stop.directionSet)),
+        vehicleTypes: Array.from(stop.typeSet).sort(),
     }));
+    return groupStops([...raw, ...extractMetroStops()]);
 };
 
 const buildAvailableLinesFromLinesData = (linesData: any[]): AvailableLine[] => {

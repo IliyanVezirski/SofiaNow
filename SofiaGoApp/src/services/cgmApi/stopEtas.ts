@@ -11,7 +11,16 @@ export const fetchStopEtas = async (stopIds: string[]): Promise<Record<string, S
 
     try {
         const entities = await getTripUpdateEntities();
-        const relevantStopIds = new Set(stopIds);
+        const expandedStopIds = new Set<string>();
+        const originalIdMap = new Map<string, string>();
+
+        stopIds.forEach(compoundId => {
+            compoundId.split(',').forEach(id => {
+                expandedStopIds.add(id);
+                originalIdMap.set(id, compoundId);
+            });
+        });
+
         const etasByStopId: Record<string, StopEta[]> = {};
         const nowUnix = Math.floor(Date.now() / 1000);
 
@@ -24,13 +33,15 @@ export const fetchStopEtas = async (stopIds: string[]): Promise<Record<string, S
             const resolvedType = inferLineTypeFromToken(resolvedLine);
 
             (tripUpdate.stopTimeUpdate || []).forEach((stu: any) => {
-                const stopId = stu.stopId;
-                if (!relevantStopIds.has(stopId)) return;
+                const gtfsStopId = stu.stopId;
+                if (!expandedStopIds.has(gtfsStopId)) return;
                 const arrivalTimestamp = Number(stu.arrival?.time || stu.departure?.time || 0);
                 if (!arrivalTimestamp || arrivalTimestamp < nowUnix) return;
 
+                const compoundId = originalIdMap.get(gtfsStopId)!;
+
                 const eta: StopEta = {
-                    stopId,
+                    stopId: compoundId, // Present the ETA associated with the unified stop
                     tripId: tripUpdate.trip.tripId || entity.id,
                     routeId: routeMetadata.routeId,
                     line: resolvedLine,
@@ -39,8 +50,8 @@ export const fetchStopEtas = async (stopIds: string[]): Promise<Record<string, S
                     minutesAway: Math.max(0, Math.round((arrivalTimestamp - nowUnix) / 60)),
                 };
 
-                if (!etasByStopId[stopId]) etasByStopId[stopId] = [];
-                etasByStopId[stopId].push(eta);
+                if (!etasByStopId[compoundId]) etasByStopId[compoundId] = [];
+                etasByStopId[compoundId].push(eta);
             });
         });
 
@@ -62,6 +73,7 @@ export const fetchFullStopSchedule = async (stopId: string): Promise<StopEta[]> 
         const entities = await getTripUpdateEntities();
         const nowUnix = Math.floor(Date.now() / 1000);
         const results: StopEta[] = [];
+        const expandedStopIds = new Set(stopId.split(','));
 
         entities.forEach((entity: any) => {
             const tripUpdate = entity.tripUpdate;
@@ -78,12 +90,12 @@ export const fetchFullStopSchedule = async (stopId: string): Promise<StopEta[]> 
             const lastTripStopId = lastTripStopUpdate?.stopId || '';
 
             stopTimeUpdates.forEach((stu: any) => {
-                if (stu.stopId !== stopId) return;
+                if (!expandedStopIds.has(stu.stopId)) return;
                 const arrivalTimestamp = Number(stu.arrival?.time || stu.departure?.time || 0);
                 if (!arrivalTimestamp) return;
 
                 results.push({
-                    stopId,
+                    stopId, // Preserve the compound ID 
                     tripId: tripUpdate.trip.tripId || entity.id,
                     routeId: routeMetadata.routeId,
                     line: resolvedLine,

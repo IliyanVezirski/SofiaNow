@@ -90,20 +90,26 @@ export const resolveScheduleRouteId = (line: string, type: string, linesDataRout
 
 export const getStaticStopSchedule = (stopId: string, dayType?: DayType): StaticScheduleEntry[] => {
     const dt = dayType ?? getDayTypeForDate();
-    const stopData = scheduleIndex[stopId];
-    if (!stopData) return [];
+    const expandedStopIds = stopId.split(',');
     const results: StaticScheduleEntry[] = [];
-    for (const [key, dayTimes] of Object.entries(stopData)) {
-        const sepIdx = key.indexOf('|');
-        const routeId = key.slice(0, sepIdx);
-        const destination = key.slice(sepIdx + 1);
-        const meta = getRouteMetadata(routeId);
-        const line = resolveLineByRouteShortName(routeId);
-        const inferredType = inferLineTypeFromToken(line);
-        const type = inferredType === 'bus' ? meta.type : inferredType;
-        const times = dayTimes[dt] || [];
-        if (times.length > 0) results.push({ line, type, destination, times, routeId });
+    
+    for (const id of expandedStopIds) {
+        const stopData = scheduleIndex[id];
+        if (!stopData) continue;
+        
+        for (const [key, dayTimes] of Object.entries(stopData)) {
+            const sepIdx = key.indexOf('|');
+            const routeId = key.slice(0, sepIdx);
+            const destination = key.slice(sepIdx + 1);
+            const meta = getRouteMetadata(routeId);
+            const line = resolveLineByRouteShortName(routeId);
+            const inferredType = inferLineTypeFromToken(line);
+            const type = inferredType === 'bus' ? meta.type : inferredType;
+            const times = dayTimes[dt] || [];
+            if (times.length > 0) results.push({ line, type, destination, times, routeId });
+        }
     }
+    
     return results.sort((a, b) => {
         const lineCmp = a.line.localeCompare(b.line, 'bg', { numeric: true });
         if (lineCmp !== 0) return lineCmp;
@@ -137,11 +143,19 @@ export const getStaticLineSchedule = (
 
 export const getEtaScheduleInfo = (eta: { stopId: string; routeId: string; arrivalTimestamp: number }): { scheduledMinSinceMidnight: number | null; delayMinutes: number | null } => {
     const dt = getDayTypeForDate();
-    const stopSched = scheduleIndex[eta.stopId];
-    if (!stopSched) return { scheduledMinSinceMidnight: null, delayMinutes: null };
-    const lineKey = Object.keys(stopSched).find((k) => k.startsWith(eta.routeId + '|'));
-    if (!lineKey) return { scheduledMinSinceMidnight: null, delayMinutes: null };
-    const schedMins = stopSched[lineKey]?.[dt];
+    const expandedStopIds = eta.stopId.split(',');
+    
+    let schedMins: number[] | undefined;
+    for (const id of expandedStopIds) {
+        const stopSched = scheduleIndex[id];
+        if (!stopSched) continue;
+        const lineKey = Object.keys(stopSched).find((k) => k.startsWith(eta.routeId + '|'));
+        if (lineKey && stopSched[lineKey]?.[dt]?.length) {
+            schedMins = stopSched[lineKey][dt];
+            break;
+        }
+    }
+    
     if (!schedMins?.length) return { scheduledMinSinceMidnight: null, delayMinutes: null };
 
     const d = new Date(eta.arrivalTimestamp * 1000);

@@ -42,12 +42,127 @@ import { RouteStopsPanel } from '../features/routing/components/RouteStopsPanel'
 import { ReportModal } from '../features/reporting/components/ReportModal';
 import { DroppedPinPanel } from '../features/droppedPin/components/DroppedPinPanel';
 
-import {
-    MAP_STYLE, INITIAL_ZOOM_LEVEL, MAX_RENDERED_STOPS,
-    createFallbackBounds, getDirectionAccentColor, getDirectionArrowSamples,
-} from '../features/map/constants';
+import { INITIAL_ZOOM_LEVEL, MAP_STYLE, MAX_RENDERED_STOPS, DEFAULT_CENTER_COORDINATE, createFallbackBounds, getDirectionAccentColor, getDirectionArrowSamples } from '../features/map/constants';
 
-LogBox.ignoreLogs(["Can't update annotation"]);
+const createCirclePolygon = (centerLon: number, centerLat: number, radiusMeters: number, label: string) => {
+    const coords: [number, number][] = [];
+    const km = radiusMeters / 1000;
+    const distanceX = km / (111.32 * Math.cos(centerLat * Math.PI / 180));
+    const distanceY = km / 110.574;
+    for (let i = 0; i < 64; i++) {
+        const theta = (i / 64) * (2 * Math.PI);
+        const x = distanceX * Math.cos(theta);
+        const y = distanceY * Math.sin(theta);
+        coords.push([centerLon + x, centerLat + y]);
+    }
+    coords.push([...coords[0]]); // Perfectly close the geometry ring to prevent invalid GeoJSON
+
+    // Multiple label points to ensure visibility at high zoom
+    const labelPoints = [
+        { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [centerLon, centerLat + distanceY] }, properties: { customType: 'circle_label', label } },
+        { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [centerLon, centerLat - distanceY] }, properties: { customType: 'circle_label', label } },
+        { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [centerLon + distanceX, centerLat] }, properties: { customType: 'circle_label', label } },
+        { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [centerLon - distanceX, centerLat] }, properties: { customType: 'circle_label', label } }
+    ];
+
+    return {
+        polygon: { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: coords }, properties: { customType: 'circle_line' } },
+        labelPoints
+    };
+};
+
+const getStopTypeInfo = (type: VehicleType) => {
+    switch (type) {
+        case 'bus': return { color: '#DC2626', text: 'А' };
+        case 'trolley': return { color: '#2563EB', text: 'ТР' };
+        case 'tram': return { color: '#F97316', text: 'ТМ' };
+        default: return { color: '#9CA3AF', text: '' };
+    }
+};
+
+const StopDot = ({ stop, selected }: { stop: Stop; selected: boolean }) => {
+    const types = useMemo(() => {
+        if (stop.vehicleTypes && stop.vehicleTypes.length > 0) {
+            const typesSet = new Set(stop.vehicleTypes);
+            const sorted = Array.from(typesSet);
+            sorted.sort();
+            return sorted;
+        }
+
+        const tSet = new Set<VehicleType>();
+        stop.lines.forEach(l => {
+            const t = inferLineTypeFromToken(l);
+            tSet.add(t);
+        });
+        const sorted = Array.from(tSet);
+        sorted.sort();
+        return sorted;
+    }, [stop.lines, stop.vehicleTypes]);
+
+    if (types.length === 0) {
+        return <View style={[styles.stopDot, selected && styles.stopDotSelected]} />;
+    }
+
+    const hasSubway = types.includes('subway');
+
+    if (hasSubway) {
+        return (
+            <View style={[
+                styles.stopDotBase,
+                { backgroundColor: '#FFFFFF', borderColor: '#0056A4', borderWidth: 2 },
+                selected && { transform: [{ scale: 1.3 }], borderColor: '#000', borderWidth: 2.5 }
+            ]}>
+                <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: -1 }}>
+                    <Text style={{ color: '#0056A4', fontWeight: '900', fontSize: 11, lineHeight: 11 }}>M</Text>
+                    <View style={{
+                        width: 5, height: 5,
+                        borderBottomWidth: 1.5, borderRightWidth: 1.5,
+                        borderColor: '#0056A4',
+                        transform: [{ rotate: '45deg' }],
+                        marginTop: 0
+                    }} />
+                </View>
+            </View>
+        );
+    }
+
+    if (types.length === 1) {
+        const { color, text } = getStopTypeInfo(types[0]);
+        return (
+            <View style={[
+                styles.stopDotBase,
+                { backgroundColor: color, borderColor: '#000000', borderWidth: 1.5 },
+                selected && { transform: [{ scale: 1.3 }], borderColor: '#000', borderWidth: 2 }
+            ]}>
+                <Text style={styles.stopDotText}>{text}</Text>
+            </View>
+        );
+    }
+
+    return (
+        <View style={[
+            styles.stopDotBase,
+            { backgroundColor: '#CCC', borderColor: '#000000', borderWidth: 1.5, overflow: 'hidden', flexDirection: 'row', alignItems: 'stretch' },
+            selected && { transform: [{ scale: 1.3 }], borderColor: '#000', borderWidth: 2 }
+        ]}>
+            {types.map(t => {
+                const info = getStopTypeInfo(t);
+                const isSubway = t === 'subway';
+                return (
+                    <View key={t} style={{ flex: 1, backgroundColor: info.color, alignItems: 'center', justifyContent: 'center' }}>
+                        <Text 
+                            numberOfLines={1} 
+                            style={[
+                                styles.stopDotText, 
+                                { fontSize: types.length > 2 ? 6 : 7.5, letterSpacing: -0.5 },
+                                isSubway && { color: '#0056A4' }
+                            ]}>{info.text}</Text>
+                    </View>
+                );
+            })}
+        </View>
+    );
+};
 
 interface MapScreenProps {
     highlightedRoute?: RouteSelection | null;
@@ -88,6 +203,22 @@ export default function MapScreen({
     const { location, refresh: refreshLocation } = useUserLocation();
     const camera = useMapCamera();
     const bounds = useMapBounds();
+
+    const walkingRadiiGeoJSON = useMemo(() => {
+        if (!location) return null;
+        const lon = location.coords.longitude;
+        const lat = location.coords.latitude;
+        const walk5 = createCirclePolygon(lon, lat, 416, '5 мин');
+        const walk10 = createCirclePolygon(lon, lat, 833, '10 мин');
+        const walk15 = createCirclePolygon(lon, lat, 1250, '15 мин');
+        return {
+            type: 'FeatureCollection' as const,
+            features: [
+                walk5.polygon, walk10.polygon, walk15.polygon,
+                ...walk5.labelPoints, ...walk10.labelPoints, ...walk15.labelPoints
+            ]
+        };
+    }, [location]);
 
     // ── Filters ──
     const filters = useFilters(highlightedRoute, onFilterCountChange);
@@ -304,10 +435,11 @@ export default function MapScreen({
                     onPress={onMapPress}
                     onRegionDidChange={handleRegionDidChange}
                     onLongPress={onMapLongPress}
+
                 >
                     <MapboxGL.Camera
-                        zoomLevel={!camera.tripCameraBounds && camera.cameraLockedToInitialView && camera.hasInitialCameraTarget ? INITIAL_ZOOM_LEVEL : undefined}
-                        centerCoordinate={!camera.tripCameraBounds && camera.cameraLockedToInitialView && camera.hasInitialCameraTarget ? camera.mapCenterCoordinate : undefined}
+                        zoomLevel={camera.tripCameraBounds ? undefined : (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget ? INITIAL_ZOOM_LEVEL : (!camera.hasInitialCameraTarget ? INITIAL_ZOOM_LEVEL : undefined))}
+                        centerCoordinate={camera.tripCameraBounds ? undefined : (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget ? camera.mapCenterCoordinate : (!camera.hasInitialCameraTarget ? DEFAULT_CENTER_COORDINATE : undefined))}
                         bounds={camera.tripCameraBounds ? { ne: camera.tripCameraBounds.ne, sw: camera.tripCameraBounds.sw, paddingTop: 60, paddingBottom: 80, paddingLeft: 60, paddingRight: 60 } : undefined}
                         animationDuration={camera.tripCameraBounds ? 800 : 0}
                     />
@@ -316,6 +448,20 @@ export default function MapScreen({
                         <MapboxGL.PointAnnotation id="user-location" coordinate={[location.coords.longitude, location.coords.latitude]}>
                             <View style={styles.userDot} />
                         </MapboxGL.PointAnnotation>
+                    )}
+
+                    {walkingRadiiGeoJSON && (
+                        <MapboxGL.ShapeSource id="walking-radii" shape={walkingRadiiGeoJSON as any}>
+                            <MapboxGL.LineLayer id="walking-radii-line" filter={['==', ['get', 'customType'], 'circle_line']} style={{ lineColor: '#9CA3AF', lineWidth: 1.5, lineOpacity: 0.8 }} />
+                            <MapboxGL.SymbolLayer id="walking-radii-label" filter={['==', ['get', 'customType'], 'circle_label']} style={{
+                                textField: ['get', 'label'],
+                                textSize: 10,
+                                textColor: '#4B5563',
+                                textHaloColor: 'rgba(255,255,255,0.85)',
+                                textHaloWidth: 1.5,
+                                textAnchor: 'center',
+                            }} />
+                        </MapboxGL.ShapeSource>
                     )}
 
                     {/* Stops */}
@@ -334,7 +480,7 @@ export default function MapScreen({
                                 if (selectedStop.selectedStopIdRef.current === stop.id) selectedStop.closeSelectedStop();
                             }}
                         >
-                            <View style={[styles.stopDot, selectedStop.selectedStopAnnotationId === `stop-${stop.id}` && styles.stopDotSelected]} />
+                            <StopDot stop={stop} selected={selectedStop.selectedStopAnnotationId === `stop-${stop.id}`} />
                         </MapboxGL.PointAnnotation>
                     ))}
 
@@ -735,6 +881,8 @@ const styles = StyleSheet.create({
     map: { flex: 1 },
     userDot: { width: 20, height: 20, backgroundColor: '#007AFF', borderRadius: 10, borderWidth: 3, borderColor: 'white' },
     vehicleMarkerWrap: { alignItems: 'center', justifyContent: 'center', zIndex: 10, elevation: 10 },
+    stopDotBase: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.3, shadowRadius: 1 },
+    stopDotText: { color: '#FFFFFF', fontSize: 11, fontWeight: 'bold' },
     stopDot: { backgroundColor: 'rgba(0, 122, 255, 0.35)', borderWidth: 2, borderColor: 'rgba(0, 122, 255, 0.6)', borderRadius: 12, width: 24, height: 24 },
     stopDotSelected: { backgroundColor: '#F59E0B', borderColor: '#D97706', borderWidth: 3, transform: [{ scale: 1.2 }] },
     routeStopDot: { width: 26, height: 26, borderRadius: 13, borderWidth: 2.5, alignItems: 'center', justifyContent: 'center' },

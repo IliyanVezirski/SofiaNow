@@ -6,10 +6,11 @@ import { Ionicons } from '@expo/vector-icons';
 import MapScreen from './src/screens/MapScreen';
 import SchedulesScreen from './src/screens/SchedulesScreen';
 import TripPlannerScreen, { TripRouteGeoJSON } from './src/screens/TripPlannerScreen';
+import NearbyScreen from './src/screens/NearbyScreen';
 import { RouteSelection } from './src/types/routes';
 import { TripLocation } from './src/services/tripPlanner';
 
-type BottomTab = 'map' | 'schedules' | 'planner';
+type BottomTab = 'map' | 'schedules' | 'planner' | 'nearby';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<BottomTab>('map');
@@ -96,9 +97,37 @@ export default function App() {
             }}
           />
         </View>
+        <View style={[styles.schedulesOverlay, activeTab !== 'nearby' && { display: 'none' }]}>
+          <NearbyScreen
+            onClose={() => setActiveTab('map')}
+            onFocusStop={(stopId, latitude, longitude) => {
+              setFocusStopId(stopId);
+              setFocusStopCoordinate({ latitude, longitude });
+              setActiveTab('map');
+            }}
+            onBuildRoute={(dstLat, dstLon, curLat, curLon) => {
+              if (Number.isFinite(curLat) && Number.isFinite(curLon)) {
+                setPlannerInitialFrom({
+                  latitude: curLat as number,
+                  longitude: curLon as number,
+                  name: 'Моята локация',
+                });
+              }
+              setPlannerInitialTo({
+                latitude: dstLat,
+                longitude: dstLon,
+                name: `${dstLat.toFixed(5)}, ${dstLon.toFixed(5)}`,
+              });
+              setPlannerInitialFromToken((v) => v + 1);
+              setMapFiltersVisible(false);
+              setDismissTransientPanelsToken((value) => value + 1);
+              setActiveTab('planner');
+            }}
+          />
+        </View>
       </View>
 
-      {activeTab !== 'schedules' && activeTab !== 'planner' && <View style={styles.floatingMenu}>
+      {activeTab !== 'schedules' && activeTab !== 'planner' && activeTab !== 'nearby' && <View style={styles.floatingMenu}>
         <TouchableOpacity
           style={[
             styles.floatingButton,
@@ -148,6 +177,16 @@ export default function App() {
           }}
         >
           <Text style={styles.floatingIcon}>🧭</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.floatingButton}
+          onPress={() => {
+            setActiveTab((prev) => (prev === 'nearby' ? 'map' : 'nearby'));
+            setMapFiltersVisible(false);
+            setDismissTransientPanelsToken((value) => value + 1);
+          }}
+        >
+          <Text style={styles.floatingIcon}>👣</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.floatingButton, activeTab !== 'map' && styles.floatingButtonDisabled]}
