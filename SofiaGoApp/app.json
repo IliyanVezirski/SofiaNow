@@ -34,7 +34,9 @@
       ],
       "expo-localization",
       "expo-dev-client",
-      "@maplibre/maplibre-react-native"
+      "@maplibre/maplibre-react-native",
+      "expo-asset",
+      "expo-font"
     ],
     "extra": {
       "eas": {
