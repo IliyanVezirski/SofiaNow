@@ -1,28 +1,30 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
     ActivityIndicator, BackHandler, ScrollView, StyleSheet,
-    Text, TouchableOpacity, View,
+    Text, TouchableOpacity, View, Linking, Platform
 } from 'react-native';
 import { useUserLocation } from '../features/map/hooks/useUserLocation';
 import { fetchAllStops, Stop } from '../services/stopsApi';
 import { haversineDistanceMeters, inferLineTypeFromToken, getVehicleIcon, formatUnixTime, VehicleType } from '../services/transitUtils';
 import { fetchStopEtas, StopEta } from '../services/cgmApi';
+import { getEtaScheduleInfo } from '../services/cgmApi/schedules';
+import { formatMinSinceMidnight } from '../features/map/constants';
 
 // ── Walking‑radius config ──
 const RADIUS_BUCKETS = [
-    { key: '5min',  label: '🟢 5 мин',  maxMeters: 416,  color: '#22C55E' },
-    { key: '10min', label: '🟡 10 мин', maxMeters: 833,  color: '#EAB308' },
-    { key: '15min', label: '🔴 15 мин', maxMeters: 1250, color: '#EF4444' },
+    { key: '5min', label: '🟢 5 мин', maxMeters: 208, color: '#22C55E' },
+    { key: '10min', label: '🟡 10 мин', maxMeters: 416, color: '#EAB308' },
+    { key: '15min', label: '🔴 15 мин', maxMeters: 625, color: '#EF4444' },
 ] as const;
 
 // ── Transport‑type helpers (mirrors MapScreen StopDot) ──
 const getStopTypeInfo = (type: string): { color: string; text: string } => {
     switch (type) {
-        case 'bus':     return { color: '#DC2626', text: 'Б' };
+        case 'bus': return { color: '#DC2626', text: 'А' };
         case 'trolley': return { color: '#2563EB', text: 'ТР' };
-        case 'tram':    return { color: '#EA580C', text: 'ТМ' };
-        case 'subway':  return { color: '#FFFFFF', text: 'M' };
-        default:        return { color: '#9CA3AF', text: '' };
+        case 'tram': return { color: '#EA580C', text: 'ТМ' };
+        case 'subway': return { color: '#FFFFFF', text: 'M' };
+        default: return { color: '#9CA3AF', text: '' };
     }
 };
 
@@ -214,33 +216,68 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                             ) : liveEtas.length === 0 ? (
                                                                 <Text style={st.emptyText}>Няма живи данни за тази спирка</Text>
                                                             ) : (
-                                                                liveEtas.map((eta, idx) => (
-                                                                    <View key={`${eta.tripId}-${idx}`} style={st.etaRow}>
-                                                                        <Text style={st.etaIcon}>{getVehicleIcon(eta.type)}</Text>
-                                                                        <Text style={st.etaLine}>{eta.line}</Text>
-                                                                        {eta.destination ? (
-                                                                            <Text style={st.etaDest} numberOfLines={1}>→ {eta.destination}</Text>
-                                                                        ) : null}
-                                                                        <View style={{ flex: 1 }} />
-                                                                        <Text style={st.etaTime}>{eta.minutesAway} мин</Text>
-                                                                        <Text style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
-                                                                    </View>
-                                                                ))
+                                                                liveEtas.map((eta, idx) => {
+                                                                    const info = getEtaScheduleInfo(eta);
+                                                                    const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
+                                                                    const isEarly = info.delayMinutes != null && info.delayMinutes < 0;
+                                                                    const delayText = info.delayMinutes != null
+                                                                        ? (info.delayMinutes > 0 ? `+${info.delayMinutes}` : info.delayMinutes < 0 ? `${info.delayMinutes}` : 'навреме')
+                                                                        : null;
+                                                                    const schedText = info.scheduledMinSinceMidnight != null ? formatMinSinceMidnight(info.scheduledMinSinceMidnight) : null;
+
+                                                                    return (
+                                                                        <View key={`${eta.tripId}-${idx}`} style={st.etaRow}>
+                                                                            <Text style={st.etaIcon}>{getVehicleIcon(eta.type)}</Text>
+                                                                            <Text style={st.etaLine}>{eta.line}</Text>
+                                                                            {eta.destination ? (
+                                                                                <Text style={st.etaDest} numberOfLines={1}>→ {eta.destination}</Text>
+                                                                            ) : null}
+
+                                                                            <View style={{ flex: 1 }} />
+
+                                                                            <View style={{ alignItems: 'flex-end' }}>
+                                                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                                                    <Text style={st.etaTime}>{eta.minutesAway} мин</Text>
+                                                                                    <Text style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
+                                                                                </View>
+                                                                                {(schedText || delayText) && (
+                                                                                    <Text style={{ fontSize: 10, color: '#64748B', marginTop: 1 }}>
+                                                                                        {schedText ? `разп. ${schedText} ` : ''}
+                                                                                        {delayText ? (
+                                                                                            <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
+                                                                                                {delayText}
+                                                                                            </Text>
+                                                                                        ) : null}
+                                                                                    </Text>
+                                                                                )}
+                                                                            </View>
+                                                                        </View>
+                                                                    );
+                                                                })
                                                             )}
                                                         </View>
                                                     )}
                                                 </View>
-                                                {onBuildRoute && (
+                                                <TouchableOpacity
+                                                    style={st.routeBtn}
+                                                    onPress={() => {
+                                                        const url = Platform.OS === 'ios'
+                                                            ? `maps://?daddr=${stop.latitude},${stop.longitude}&dirflg=w`
+                                                            : `google.navigation:q=${stop.latitude},${stop.longitude}&mode=w`;
+                                                        Linking.canOpenURL(url).then(supported => {
+                                                            if (supported) Linking.openURL(url);
+                                                            else Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${stop.latitude},${stop.longitude}&travelmode=walking`);
+                                                        });
+                                                    }}
+                                                >
+                                                    <Text style={st.routeBtnText}>🧭</Text>
+                                                </TouchableOpacity>
+                                                {onFocusStop && (
                                                     <TouchableOpacity
-                                                        style={st.routeBtn}
-                                                        onPress={() => onBuildRoute(
-                                                            stop.latitude,
-                                                            stop.longitude,
-                                                            location?.coords.latitude,
-                                                            location?.coords.longitude,
-                                                        )}
+                                                        style={st.mapBtn}
+                                                        onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
                                                     >
-                                                        <Text style={st.routeBtnText}>🧭</Text>
+                                                        <Text style={st.mapBtnText}>🗺️</Text>
                                                     </TouchableOpacity>
                                                 )}
                                             </TouchableOpacity>
@@ -317,6 +354,12 @@ const st = StyleSheet.create({
         borderWidth: 1, borderColor: '#93C5FD',
     },
     routeBtnText: { fontSize: 14 },
+    mapBtn: {
+        width: 30, height: 30, borderRadius: 15,
+        backgroundColor: '#F0FDF4', alignItems: 'center', justifyContent: 'center', marginLeft: 4,
+        borderWidth: 1, borderColor: '#86EFAC',
+    },
+    mapBtnText: { fontSize: 14 },
 
     // ETA panel
     etaPanel: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0' },

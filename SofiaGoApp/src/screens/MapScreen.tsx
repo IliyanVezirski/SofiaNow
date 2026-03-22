@@ -110,7 +110,7 @@ const StopDot = ({ stop, selected }: { stop: Stop; selected: boolean }) => {
             <View style={[
                 styles.stopDotBase,
                 { backgroundColor: '#FFFFFF', borderColor: '#0056A4', borderWidth: 2 },
-                selected && { transform: [{ scale: 1.3 }], borderColor: '#000', borderWidth: 2.5 }
+                selected && { transform: [{ scale: 1.4 }], borderColor: '#F59E0B', borderWidth: 3, zIndex: 10 }
             ]}>
                 <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: -1 }}>
                     <Text style={{ color: '#0056A4', fontWeight: '900', fontSize: 11, lineHeight: 11 }}>M</Text>
@@ -122,6 +122,11 @@ const StopDot = ({ stop, selected }: { stop: Stop; selected: boolean }) => {
                         marginTop: 0
                     }} />
                 </View>
+                {selected && (
+                    <View style={styles.stopLabelContainer}>
+                        <Text style={styles.stopLabelText}>{stop.name}</Text>
+                    </View>
+                )}
             </View>
         );
     }
@@ -132,9 +137,14 @@ const StopDot = ({ stop, selected }: { stop: Stop; selected: boolean }) => {
             <View style={[
                 styles.stopDotBase,
                 { backgroundColor: color, borderColor: '#000000', borderWidth: 1.5 },
-                selected && { transform: [{ scale: 1.3 }], borderColor: '#000', borderWidth: 2 }
+                selected && { transform: [{ scale: 1.4 }], borderColor: '#F59E0B', borderWidth: 3, zIndex: 10 }
             ]}>
                 <Text style={styles.stopDotText}>{text}</Text>
+                {selected && (
+                    <View style={styles.stopLabelContainer}>
+                        <Text style={styles.stopLabelText}>{stop.name}</Text>
+                    </View>
+                )}
             </View>
         );
     }
@@ -143,7 +153,7 @@ const StopDot = ({ stop, selected }: { stop: Stop; selected: boolean }) => {
         <View style={[
             styles.stopDotBase,
             { backgroundColor: '#CCC', borderColor: '#000000', borderWidth: 1.5, overflow: 'hidden', flexDirection: 'row', alignItems: 'stretch' },
-            selected && { transform: [{ scale: 1.3 }], borderColor: '#000', borderWidth: 2 }
+            selected && { transform: [{ scale: 1.4 }], borderColor: '#F59E0B', borderWidth: 3, zIndex: 10 }
         ]}>
             {types.map(t => {
                 const info = getStopTypeInfo(t);
@@ -160,6 +170,11 @@ const StopDot = ({ stop, selected }: { stop: Stop; selected: boolean }) => {
                     </View>
                 );
             })}
+            {selected && (
+                <View style={styles.stopLabelContainer}>
+                    <Text style={styles.stopLabelText}>{stop.name}</Text>
+                </View>
+            )}
         </View>
     );
 };
@@ -208,9 +223,10 @@ export default function MapScreen({
         if (!location) return null;
         const lon = location.coords.longitude;
         const lat = location.coords.latitude;
-        const walk5 = createCirclePolygon(lon, lat, 416, '5 мин');
-        const walk10 = createCirclePolygon(lon, lat, 833, '10 мин');
-        const walk15 = createCirclePolygon(lon, lat, 1250, '15 мин');
+        // Radii match NearbyScreen: 5min=208m, 10min=416m, 15min=625m
+        const walk5 = createCirclePolygon(lon, lat, 208, '5 мин');
+        const walk10 = createCirclePolygon(lon, lat, 416, '10 мин');
+        const walk15 = createCirclePolygon(lon, lat, 625, '15 мин');
         return {
             type: 'FeatureCollection' as const,
             features: [
@@ -322,7 +338,10 @@ export default function MapScreen({
 
     // ── Focus stop from outside ──
     useEffect(() => {
-        if (focusStopCoordinate) camera.focusOnCoordinate(focusStopCoordinate.latitude, focusStopCoordinate.longitude);
+        if (focusStopCoordinate) {
+            camera.focusOnCoordinate(focusStopCoordinate.latitude, focusStopCoordinate.longitude);
+            bounds.setMapBounds(createFallbackBounds(focusStopCoordinate.latitude, focusStopCoordinate.longitude));
+        }
         if (!focusStopCoordinate || !focusStopId) return;
         let cancelled = false;
         (async () => {
@@ -885,6 +904,8 @@ const styles = StyleSheet.create({
     stopDotText: { color: '#FFFFFF', fontSize: 11, fontWeight: 'bold' },
     stopDot: { backgroundColor: 'rgba(0, 122, 255, 0.35)', borderWidth: 2, borderColor: 'rgba(0, 122, 255, 0.6)', borderRadius: 12, width: 24, height: 24 },
     stopDotSelected: { backgroundColor: '#F59E0B', borderColor: '#D97706', borderWidth: 3, transform: [{ scale: 1.2 }] },
+    stopLabelContainer: { position: 'absolute', bottom: 28, left: -60, width: 140, backgroundColor: '#1F2937', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
+    stopLabelText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700', textAlign: 'center' },
     routeStopDot: { width: 26, height: 26, borderRadius: 13, borderWidth: 2.5, alignItems: 'center', justifyContent: 'center' },
     routeStopDotSelected: { borderColor: '#F59E0B', borderWidth: 4, transform: [{ scale: 1.18 }] },
     routeStopText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },

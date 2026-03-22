@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,7 +40,7 @@ export default function App() {
         <MapScreen
           highlightedRoute={selectedRoute}
           onClearHighlightedRoute={() => setSelectedRoute(null)}
-          showReportButton={activeTab === 'map'}
+          showReportButton={false}
           filterPanelVisible={mapFiltersVisible}
           onCloseFilterPanel={() => setMapFiltersVisible(false)}
           searchRequestToken={openSearchToken}
@@ -97,7 +97,8 @@ export default function App() {
             }}
           />
         </View>
-        <View style={[styles.schedulesOverlay, activeTab !== 'nearby' && { display: 'none' }]}>
+        {activeTab === 'nearby' && (
+        <View style={styles.schedulesOverlay}>
           <NearbyScreen
             onClose={() => setActiveTab('map')}
             onFocusStop={(stopId, latitude, longitude) => {
@@ -125,106 +126,124 @@ export default function App() {
             }}
           />
         </View>
+        )}
       </View>
 
-      {activeTab !== 'schedules' && activeTab !== 'planner' && activeTab !== 'nearby' && <View style={styles.floatingMenu}>
-        <TouchableOpacity
-          style={[
-            styles.floatingButton,
-            activeTab === 'map' && mapFiltersVisible && styles.floatingButtonActive,
-            activeTab !== 'map' && styles.floatingButtonDisabled,
-          ]}
-          onPress={() => {
-            if (activeTab === 'map') {
-              setMapFiltersVisible((prev) => {
-                const next = !prev;
-                if (next) {
-                  setDismissTransientPanelsToken((value) => value + 1);
+      {activeTab !== 'schedules' && activeTab !== 'planner' && activeTab !== 'nearby' && (
+        <View style={styles.carouselContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.carouselScrollContent}
+            snapToInterval={78}
+            decelerationRate="fast"
+          >
+            <TouchableOpacity
+              style={styles.carouselButton}
+              onPress={() => {
+                setActiveTab((prev) => (prev === 'nearby' ? 'map' : 'nearby'));
+                setMapFiltersVisible(false);
+                setDismissTransientPanelsToken((value) => value + 1);
+              }}
+            >
+              <Text style={styles.carouselIcon}>👣</Text>
+              <Text style={styles.carouselLabel}>До мен</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.carouselButton}
+              onPress={() => {
+                setActiveTab((prev) => (prev === 'schedules' ? 'map' : 'schedules'));
+                setMapFiltersVisible(false);
+                setDismissTransientPanelsToken((value) => value + 1);
+              }}
+            >
+              <Text style={styles.carouselIcon}>🕒</Text>
+              <Text style={styles.carouselLabel}>Спирки</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.carouselButton}
+              onPress={() => {
+                setActiveTab((prev) => (prev === 'planner' ? 'map' : 'planner'));
+                setMapFiltersVisible(false);
+                setDismissTransientPanelsToken((value) => value + 1);
+              }}
+            >
+              <Text style={styles.carouselIcon}>🧭</Text>
+              <Text style={styles.carouselLabel}>Маршрут</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.carouselButton, activeTab !== 'map' && styles.carouselButtonDisabled]}
+              onPress={() => {
+                if (activeTab === 'map') {
+                  setMapFiltersVisible(false);
+                  setOpenSearchToken((prev) => prev + 1);
                 }
-                return next;
-              });
-            }
-          }}
-          disabled={activeTab !== 'map'}
-        >
-          <Ionicons
-            name="filter-outline"
-            size={24}
-            color={activeTab === 'map' && mapFiltersVisible ? '#1E3A8A' : '#0F172A'}
-          />
-          {filterCount > 0 && (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{filterCount}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.floatingButton}
-          onPress={() => {
-            setActiveTab((prev) => (prev === 'schedules' ? 'map' : 'schedules'));
-            setMapFiltersVisible(false);
-            setDismissTransientPanelsToken((value) => value + 1);
-          }}
-        >
-          <Text style={styles.floatingIcon}>🕒</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.floatingButton}
-          onPress={() => {
-            setActiveTab((prev) => (prev === 'planner' ? 'map' : 'planner'));
-            setMapFiltersVisible(false);
-            setDismissTransientPanelsToken((value) => value + 1);
-          }}
-        >
-          <Text style={styles.floatingIcon}>🧭</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.floatingButton}
-          onPress={() => {
-            setActiveTab((prev) => (prev === 'nearby' ? 'map' : 'nearby'));
-            setMapFiltersVisible(false);
-            setDismissTransientPanelsToken((value) => value + 1);
-          }}
-        >
-          <Text style={styles.floatingIcon}>👣</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.floatingButton, activeTab !== 'map' && styles.floatingButtonDisabled]}
-          onPress={() => {
-            if (activeTab === 'map') {
-              setMapFiltersVisible(false);
-              setOpenSearchToken((prev) => prev + 1);
-            }
-          }}
-          disabled={activeTab !== 'map'}
-        >
-          <Text style={styles.floatingIcon}>🔎</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.floatingButton, activeTab !== 'map' && styles.floatingButtonDisabled]}
-          onPress={() => {
-            if (activeTab === 'map') {
-              setMapFiltersVisible(false);
-              setToggleFavoritesToken((prev) => prev + 1);
-            }
-          }}
-          disabled={activeTab !== 'map'}
-        >
-          <Text style={styles.floatingIcon}>⭐</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.floatingButton, activeTab !== 'map' && styles.floatingButtonDisabled]}
-          onPress={() => {
-            if (activeTab === 'map') {
-              setMapFiltersVisible(false);
-              setRecenterToken((prev) => prev + 1);
-            }
-          }}
-          disabled={activeTab !== 'map'}
-        >
-          <Text style={styles.floatingIcon}>📍</Text>
-        </TouchableOpacity>
-      </View>}
+              }}
+              disabled={activeTab !== 'map'}
+            >
+              <Text style={styles.carouselIcon}>🔎</Text>
+              <Text style={styles.carouselLabel}>Търсене</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.carouselButton,
+                activeTab === 'map' && mapFiltersVisible && styles.carouselButtonActive,
+                activeTab !== 'map' && styles.carouselButtonDisabled,
+              ]}
+              onPress={() => {
+                if (activeTab === 'map') {
+                  setMapFiltersVisible((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      setDismissTransientPanelsToken((value) => value + 1);
+                    }
+                    return next;
+                  });
+                }
+              }}
+              disabled={activeTab !== 'map'}
+            >
+              <Ionicons
+                name="filter-outline"
+                size={24}
+                color={activeTab === 'map' && mapFiltersVisible ? '#1E3A8A' : '#0F172A'}
+              />
+              {filterCount > 0 && (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{filterCount}</Text>
+                </View>
+              )}
+              <Text style={styles.carouselLabel}>Филтър</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.carouselButton, activeTab !== 'map' && styles.carouselButtonDisabled]}
+              onPress={() => {
+                if (activeTab === 'map') {
+                  setMapFiltersVisible(false);
+                  setToggleFavoritesToken((prev) => prev + 1);
+                }
+              }}
+              disabled={activeTab !== 'map'}
+            >
+              <Text style={styles.carouselIcon}>⭐</Text>
+              <Text style={styles.carouselLabel}>Любими</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.carouselButton, activeTab !== 'map' && styles.carouselButtonDisabled]}
+              onPress={() => {
+                if (activeTab === 'map') {
+                  setMapFiltersVisible(false);
+                  setRecenterToken((prev) => prev + 1);
+                }
+              }}
+              disabled={activeTab !== 'map'}
+            >
+              <Text style={styles.carouselIcon}>📍</Text>
+              <Text style={styles.carouselLabel}>Локация</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      )}
       <StatusBar style="auto" />
     </View>
   );
@@ -244,45 +263,54 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     zIndex: 20,
   },
-  floatingMenu: {
+  // Carousel styles - bottom horizontal scrollable menu
+  carouselContainer: {
     position: 'absolute',
-    right: 16,
-    top: 62,
-    gap: 12,
+    bottom: 30,
+    left: 0,
+    right: 0,
     zIndex: 999,
     elevation: 999,
   },
-  floatingButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  carouselScrollContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  carouselButton: {
+    width: 70,
+    height: 70,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.95)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#E2E8F0',
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
   },
-  floatingButtonActive: {
+  carouselButtonActive: {
     backgroundColor: '#DBEAFE',
     borderColor: '#93C5FD',
   },
-  floatingButtonDisabled: {
+  carouselButtonDisabled: {
     opacity: 0.45,
   },
-  floatingIcon: {
+  carouselIcon: {
     fontSize: 24,
-    lineHeight: 30,
-    textAlignVertical: 'center',
-    includeFontPadding: false,
+    lineHeight: 28,
+  },
+  carouselLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#475569',
+    marginTop: 4,
   },
   filterBadge: {
     position: 'absolute',
-    top: -4,
-    right: -4,
+    top: -6,
+    right: -6,
     minWidth: 20,
     height: 20,
     borderRadius: 10,

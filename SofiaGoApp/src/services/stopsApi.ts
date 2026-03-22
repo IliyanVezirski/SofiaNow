@@ -1,9 +1,16 @@
 import { Platform } from 'react-native';
-import bundledStops from '../data/stops.static.json';
 import bundledRouteNames from '../data/routeNames.static.json';
-import bundledLinesData from '../data/lines-data.static.json';
-import bundledMetroRoutes from '../data/metroRoutes.static.json';
 import { getRouteMetadata, haversineDistanceMeters, inferLineTypeFromToken, VehicleType } from './transitUtils';
+
+// ── Lazy JSON loaders (defer parsing of large files) ──
+let _bundledStops: any[] | null = null;
+const getBundledStops = () => { if (!_bundledStops) _bundledStops = require('../data/stops.static.json'); return _bundledStops!; };
+
+let _bundledLinesData: any[] | null = null;
+const getBundledLinesData = () => { if (!_bundledLinesData) _bundledLinesData = require('../data/lines-data.static.json'); return _bundledLinesData!; };
+
+let _bundledMetroRoutes: Record<string, any> | null = null;
+const getBundledMetroRoutes = () => { if (!_bundledMetroRoutes) _bundledMetroRoutes = require('../data/metroRoutes.static.json'); return _bundledMetroRoutes!; };
 
 export interface Stop {
     id: string;
@@ -56,7 +63,6 @@ let stopsCachePromise: Promise<Stop[]> | null = null;
 let availableLinesCache: AvailableLine[] | null = null;
 
 const routeShortNameByRouteId: Record<string, string> = bundledRouteNames;
-const metroRoutesByLine = bundledMetroRoutes as unknown as Record<string, any>;
 
 const fastNumericCompare = (a: string, b: string): number => {
     const aNum = parseInt(a, 10);
@@ -92,7 +98,7 @@ let _cachedMetroStops: Stop[] | null = null;
 const extractMetroStops = (): Stop[] => {
     if (_cachedMetroStops) return _cachedMetroStops;
     const stopMap = new Map<string, Stop>();
-    Object.values(bundledMetroRoutes).forEach((route: any) => {
+    Object.values(getBundledMetroRoutes()).forEach((route: any) => {
         route.directions.forEach((dir: any) => {
             dir.stops.forEach((stop: any) => {
                 if (!stopMap.has(stop.id)) {
@@ -184,7 +190,7 @@ const groupStops = (stops: Stop[]): Stop[] => {
 let _cachedBundledStops: Stop[] | null = null;
 const normalizeBundledStops = (): Stop[] => {
     if (_cachedBundledStops) return _cachedBundledStops;
-    const raw = (bundledStops as Stop[]).map((stop) => ({
+    const raw = (getBundledStops() as Stop[]).map((stop) => ({
         id: stop.id,
         name: stop.name,
         latitude: Number(stop.latitude),
@@ -374,7 +380,7 @@ const loadAllStops = async (): Promise<Stop[]> => {
             }
 
             if (Platform.OS !== 'web') {
-                return buildStopsFromLinesData(bundledLinesData as any[]);
+                return buildStopsFromLinesData(getBundledLinesData() as any[]);
             }
 
             return bundled;
@@ -388,7 +394,7 @@ const loadAllStops = async (): Promise<Stop[]> => {
 };
 
 const loadRawLinesData = (): any[] => {
-    return bundledLinesData as any[];
+    return getBundledLinesData() as any[];
 };
 
 const getDisplayLineFromRouteId = (routeId: string | undefined) => {
@@ -407,7 +413,7 @@ const getBundledMetroRouteGeometry = (lineToken: string | undefined | null): Lin
         return null;
     }
 
-    const metro = metroRoutesByLine[normalizedLine];
+    const metro = (getBundledMetroRoutes() as any)[normalizedLine];
     if (!metro?.directions?.length) {
         return null;
     }
@@ -663,7 +669,7 @@ export const fetchAvailableLines = async (): Promise<AvailableLine[]> => {
         return availableLinesCache;
     }
 
-    availableLinesCache = buildAvailableLinesFromLinesData(bundledLinesData as any[]);
+    availableLinesCache = buildAvailableLinesFromLinesData(getBundledLinesData() as any[]);
     return availableLinesCache;
 };
 

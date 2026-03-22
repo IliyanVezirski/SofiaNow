@@ -1,11 +1,19 @@
 import { StaticScheduleEntry, DayType, ScheduleBasedStop, ScheduleBasedDirection, LineScheduleDirection } from '../../types/vehicles';
 import { getRouteMetadata, inferLineTypeFromToken } from '../transitUtils';
 import { resolveLineByRouteShortName, stopCoordinatesById, stopNameById } from './routeResolver';
-import bundledSchedule from '../../data/schedule.weekly.static.json';
-import bundledStopOrder from '../../data/stopOrder.static.json';
 
-const scheduleIndex = bundledSchedule as Record<string, Record<string, { w: number[]; h: number[] }>>;
-const stopOrderIndex = bundledStopOrder as Record<string, string[]>;
+// ── Lazy schedule data ──
+let _scheduleIndex: Record<string, Record<string, { w: number[]; h: number[] }>> | null = null;
+const getScheduleIndex = () => {
+    if (!_scheduleIndex) _scheduleIndex = require('../../data/schedule.weekly.static.json');
+    return _scheduleIndex!;
+};
+
+let _stopOrderIndex: Record<string, string[]> | null = null;
+const getStopOrderIndex = () => {
+    if (!_stopOrderIndex) _stopOrderIndex = require('../../data/stopOrder.static.json');
+    return _stopOrderIndex!;
+};
 
 export const getDayTypeForDate = (date: Date = new Date()): DayType => {
     const day = date.getDay();
@@ -16,7 +24,7 @@ let _routeStopsIndex: Record<string, Map<string, string[]>> | null = null;
 const getRouteStopsIndex = () => {
     if (_routeStopsIndex) return _routeStopsIndex;
     _routeStopsIndex = {};
-    for (const [stopId, stopData] of Object.entries(scheduleIndex)) {
+    for (const [stopId, stopData] of Object.entries(getScheduleIndex())) {
         for (const key of Object.keys(stopData)) {
             const sepIdx = key.indexOf('|');
             const routeId = key.slice(0, sepIdx);
@@ -45,7 +53,7 @@ export const getScheduleBasedDirections = (routeId: string): ScheduleBasedDirect
         }
         if (stopsById.size === 0) continue;
 
-        const canonicalOrder = stopOrderIndex[routeId + '|' + destination];
+        const canonicalOrder = getStopOrderIndex()[routeId + '|' + destination];
         let ordered: ScheduleBasedStop[];
         if (canonicalOrder) {
             ordered = canonicalOrder.filter((sid) => stopsById.has(sid)).map((sid) => stopsById.get(sid)!);
@@ -55,8 +63,8 @@ export const getScheduleBasedDirections = (routeId: string): ScheduleBasedDirect
             }
         } else {
             ordered = [...stopsById.values()].sort((a, b) => {
-                const aTime = (scheduleIndex[a.id]?.[routeId + '|' + destination]?.[dt] || [])[0] ?? 9999;
-                const bTime = (scheduleIndex[b.id]?.[routeId + '|' + destination]?.[dt] || [])[0] ?? 9999;
+                const aTime = (getScheduleIndex()[a.id]?.[routeId + '|' + destination]?.[dt] || [])[0] ?? 9999;
+                const bTime = (getScheduleIndex()[b.id]?.[routeId + '|' + destination]?.[dt] || [])[0] ?? 9999;
                 return aTime - bTime;
             });
         }
@@ -94,7 +102,7 @@ export const getStaticStopSchedule = (stopId: string, dayType?: DayType): Static
     const results: StaticScheduleEntry[] = [];
     
     for (const id of expandedStopIds) {
-        const stopData = scheduleIndex[id];
+        const stopData = getScheduleIndex()[id];
         if (!stopData) continue;
         
         for (const [key, dayTimes] of Object.entries(stopData)) {
@@ -127,7 +135,7 @@ export const getStaticLineSchedule = (
     for (const dirStops of stops) {
         if (!dirStops.length) continue;
         for (const stop of dirStops.slice(0, 3)) {
-            const stopData = scheduleIndex[stop.id];
+            const stopData = getScheduleIndex()[stop.id];
             if (!stopData) continue;
             const matchingKey = Object.keys(stopData).find((k) => k.startsWith(routeId + '|'));
             if (!matchingKey) continue;
@@ -147,7 +155,7 @@ export const getEtaScheduleInfo = (eta: { stopId: string; routeId: string; arriv
     
     let schedMins: number[] | undefined;
     for (const id of expandedStopIds) {
-        const stopSched = scheduleIndex[id];
+        const stopSched = getScheduleIndex()[id];
         if (!stopSched) continue;
         const lineKey = Object.keys(stopSched).find((k) => k.startsWith(eta.routeId + '|'));
         if (lineKey && stopSched[lineKey]?.[dt]?.length) {
