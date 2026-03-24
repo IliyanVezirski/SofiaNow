@@ -47,6 +47,7 @@ export interface StaticScheduleEntry {
     destination: string;
     times: number[];
     routeId: string;
+    partialTimeKinds?: Record<string, 'start' | 'final'>;
 }
 
 export type DayType = 'w' | 'h';
@@ -72,5 +73,6 @@ export interface ScheduleBasedStop {
 
 export interface ScheduleBasedDirection {
     name: string;
+    mergedDirectionNames?: string[];
     stops: ScheduleBasedStop[];
 }

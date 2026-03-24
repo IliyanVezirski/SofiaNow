@@ -29,6 +29,7 @@ import { useFavorites } from '../features/favorites/hooks/useFavorites';
 import { useRouteGeometry } from '../features/routing/hooks/useRouteGeometry';
 import { useTripOverlay, resolveTripPlannerStopToKnownStop } from '../features/tripPlanner/hooks/useTripOverlay';
 import { useReporting } from '../features/reporting/hooks/useReporting';
+import { Ionicons } from '@expo/vector-icons';
 
 import { VehicleMarkerContent } from '../features/vehicles/components/VehicleMarker';
 import { VehicleInfoPanel } from '../features/vehicles/components/VehicleInfoPanel';
@@ -73,10 +74,14 @@ const createCirclePolygon = (centerLon: number, centerLat: number, radiusMeters:
 
 const getStopTypeInfo = (type: VehicleType) => {
     switch (type) {
-        case 'bus': return { color: '#DC2626', text: 'А' };
-        case 'trolley': return { color: '#2563EB', text: 'ТР' };
-        case 'tram': return { color: '#F97316', text: 'ТМ' };
-        default: return { color: '#9CA3AF', text: '' };
+        case 'bus':
+            return { color: '#DC2626', text: 'А' };
+        case 'trolley':
+            return { color: '#2563EB', text: 'ТР' };
+        case 'tram':
+            return { color: '#F97316', text: 'ТМ' };
+        default:
+            return { color: '#9CA3AF', text: '' };
     }
 };
 
@@ -188,7 +193,6 @@ interface MapScreenProps {
     onBuildRouteFromCoordinate?: (dstLat: number, dstLon: number, curLat?: number, curLon?: number) => void;
     searchRequestToken?: number;
     favoritesRequestToken?: number;
-    recenterRequestToken?: number;
     dismissTransientPanelsToken?: number;
     onFilterCountChange?: (count: number) => void;
     focusStopCoordinate?: { latitude: number; longitude: number } | null;
@@ -206,7 +210,6 @@ export default function MapScreen({
     onBuildRouteFromCoordinate,
     searchRequestToken,
     favoritesRequestToken,
-    recenterRequestToken,
     dismissTransientPanelsToken,
     onFilterCountChange,
     focusStopCoordinate,
@@ -214,6 +217,9 @@ export default function MapScreen({
     tripPlannerRoute,
     onClearTripRoute,
 }: MapScreenProps) {
+    const stopAnnotationRefs = useRef<Record<string, { refresh: () => void } | null>>({});
+    const previousSelectedStopAnnotationIdRef = useRef<string | null>(null);
+
     // ── Core map hooks ──
     const { location, refresh: refreshLocation } = useUserLocation();
     const camera = useMapCamera();
@@ -271,6 +277,7 @@ export default function MapScreen({
     const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
     const selectedVehicleIdRef = useRef<string | null>(null);
     const [droppedPin, setDroppedPin] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [userLocationVisible, setUserLocationVisible] = useState(true);
 
     const selectedVehicle = useMemo(() => {
         if (!selectedVehicleId) return null;
@@ -288,6 +295,7 @@ export default function MapScreen({
         if (location && !highlightedRoute) {
             camera.lockCamera(location.coords.latitude, location.coords.longitude);
             bounds.setMapBounds(createFallbackBounds(location.coords.latitude, location.coords.longitude));
+            setUserLocationVisible(true);
         }
     }, [location]);
 
@@ -316,18 +324,22 @@ export default function MapScreen({
     }, [favoritesRequestToken]);
 
     useEffect(() => {
-        if (typeof recenterRequestToken === 'number' && recenterRequestToken > 0) {
-            if (location) camera.focusOnCoordinate(location.coords.latitude, location.coords.longitude);
-            else void refreshLocation();
-        }
-    }, [recenterRequestToken]);
-
-    useEffect(() => {
         if (typeof dismissTransientPanelsToken === 'number' && dismissTransientPanelsToken > 0) {
             search.setSearchModalVisible(false);
             favorites.setFavoritesVisible(false);
         }
     }, [dismissTransientPanelsToken]);
+
+    useEffect(() => {
+        const previousAnnotationId = previousSelectedStopAnnotationIdRef.current;
+        if (previousAnnotationId && previousAnnotationId !== selectedStop.selectedStopAnnotationId) {
+            stopAnnotationRefs.current[previousAnnotationId]?.refresh();
+        }
+        if (selectedStop.selectedStopAnnotationId) {
+            stopAnnotationRefs.current[selectedStop.selectedStopAnnotationId]?.refresh();
+        }
+        previousSelectedStopAnnotationIdRef.current = selectedStop.selectedStopAnnotationId;
+    }, [selectedStop.selectedStopAnnotationId]);
 
     useEffect(() => {
         if (filterPanelVisible) {
@@ -383,6 +395,17 @@ export default function MapScreen({
         selectedStop.closeSelectedStop();
     }, []);
 
+    const recenterToUserLocation = useCallback(async () => {
+        if (location) {
+            camera.focusOnCoordinate(location.coords.latitude, location.coords.longitude);
+            bounds.setMapBounds(createFallbackBounds(location.coords.latitude, location.coords.longitude));
+            setUserLocationVisible(true);
+            return;
+        }
+
+        await refreshLocation();
+    }, [bounds, camera, location, refreshLocation]);
+
     const handleRegionDidChange = useCallback((event: any) => {
         if (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget) camera.unlockCamera();
 
@@ -393,6 +416,14 @@ export default function MapScreen({
             const north = Math.max(Number(visibleBounds[0][1]), Number(visibleBounds[1][1]));
             const south = Math.min(Number(visibleBounds[0][1]), Number(visibleBounds[1][1]));
             if ([north, south, east, west].every(Number.isFinite)) {
+                if (location) {
+                    setUserLocationVisible(
+                        location.coords.latitude <= north &&
+                        location.coords.latitude >= south &&
+                        location.coords.longitude <= east &&
+                        location.coords.longitude >= west
+                    );
+                }
                 camera.setMapCenterCoordinate([(east + west) / 2, (north + south) / 2]);
                 bounds.scheduleBoundsUpdate({ north, south, east, west });
                 return;
@@ -401,9 +432,20 @@ export default function MapScreen({
         const center = event?.geometry?.coordinates;
         if (Array.isArray(center) && center.length >= 2) {
             const [lon, lat] = [Number(center[0]), Number(center[1])];
-            if (Number.isFinite(lon) && Number.isFinite(lat)) bounds.scheduleBoundsUpdate(createFallbackBounds(lat, lon));
+            if (Number.isFinite(lon) && Number.isFinite(lat)) {
+                const fallbackBounds = createFallbackBounds(lat, lon);
+                if (location) {
+                    setUserLocationVisible(
+                        location.coords.latitude <= fallbackBounds.north &&
+                        location.coords.latitude >= fallbackBounds.south &&
+                        location.coords.longitude <= fallbackBounds.east &&
+                        location.coords.longitude >= fallbackBounds.west
+                    );
+                }
+                bounds.scheduleBoundsUpdate(fallbackBounds);
+            }
         }
-    }, [camera.cameraLockedToInitialView, camera.hasInitialCameraTarget]);
+    }, [camera.cameraLockedToInitialView, camera.hasInitialCameraTarget, location]);
 
     // ── Search callbacks ──
     const onSelectSearchResult = useCallback((result: CentralSearchResult & { kind: 'place' }) => {
@@ -486,9 +528,11 @@ export default function MapScreen({
                     {/* Stops */}
                     {!routing.routeGeometry && !vehicleRoute.hasVehicleRoute && !hasTripRoute && stopsHook.renderedStops.map((stop) => (
                         <MapboxGL.PointAnnotation
-                            key={`stop-${stop.id}`}
+                            key={`stop-${stop.id}-${selectedStop.selectedStopAnnotationId === `stop-${stop.id}` ? 'selected' : 'idle'}`}
                             id={`stop-${stop.id}`}
+                            ref={(ref) => { stopAnnotationRefs.current[`stop-${stop.id}`] = ref; }}
                             coordinate={[stop.longitude, stop.latitude]}
+                            selected={selectedStop.selectedStopAnnotationId === `stop-${stop.id}`}
                             onSelected={() => {
                                 void (async () => {
                                     await selectedStop.openStopDetails(stop);
@@ -532,7 +576,9 @@ export default function MapScreen({
                             const annId = `route-stop-v${routing.routeGeometryVersion}-${dirIdx}-${stop.id}-${stopIdx}`;
                             return (
                                 <MapboxGL.PointAnnotation
-                                    key={annId} id={annId} coordinate={[stop.longitude, stop.latitude]}
+                                    key={`${annId}-${selectedStop.selectedStopAnnotationId === annId ? 'selected' : 'idle'}`} id={annId} coordinate={[stop.longitude, stop.latitude]}
+                                    ref={(ref) => { stopAnnotationRefs.current[annId] = ref; }}
+                                    selected={selectedStop.selectedStopAnnotationId === annId}
                                     onSelected={() => {
                                         void (async () => {
                                             await selectedStop.openRouteStopDetails(stop, direction.name || `Посока ${dirIdx + 1}`, annId, stopsHook.stopById, routing.routeGeometry?.line, highlightedRoute?.line);
@@ -599,9 +645,11 @@ export default function MapScreen({
                                     const annId = `vr-stop-${stop.stopId}-${idx}`;
                                     return (
                                         <MapboxGL.PointAnnotation
-                                            key={annId}
+                                            key={`${annId}-${selectedStop.selectedStopAnnotationId === annId ? 'selected' : 'idle'}`}
                                             id={annId}
+                                            ref={(ref) => { stopAnnotationRefs.current[annId] = ref; }}
                                             coordinate={[stop.longitude, stop.latitude]}
+                                            selected={selectedStop.selectedStopAnnotationId === annId}
                                             onSelected={async () => {
                                                 selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
                                                 selectedStop.selectedStopIdRef.current = stop.stopId;
@@ -705,8 +753,10 @@ export default function MapScreen({
                     {/* Trip planner stops */}
                     {tripPlannerRoute && tripPlannerRoute.transitStops.map((stop, idx) => (
                         <MapboxGL.PointAnnotation
-                            key={`trip-stop-${idx}-${stop.stopCode ?? stop.lat}`} id={`trip-stop-${idx}`}
+                            key={`trip-stop-${idx}-${stop.stopCode ?? stop.lat}-${selectedStop.selectedStopAnnotationId === `trip-stop-${idx}` ? 'selected' : 'idle'}`} id={`trip-stop-${idx}`}
+                            ref={(ref) => { stopAnnotationRefs.current[`trip-stop-${idx}`] = ref; }}
                             coordinate={[stop.lon, stop.lat]}
+                            selected={selectedStop.selectedStopAnnotationId === `trip-stop-${idx}`}
                             onSelected={async () => {
                                 selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
                                 const resolved = resolveTripPlannerStopToKnownStop(stop, stopsHook.searchableStops);
@@ -757,6 +807,12 @@ export default function MapScreen({
                     </TouchableOpacity>
                 )}
 
+                {location && !userLocationVisible && (
+                    <TouchableOpacity style={styles.recenterFloatingButton} onPress={() => void recenterToUserLocation()}>
+                        <Ionicons name="locate" size={24} color="#0F172A" />
+                    </TouchableOpacity>
+                )}
+
                 {/* Feature panels */}
                 <SearchModal
                     visible={search.searchModalVisible}
@@ -774,7 +830,25 @@ export default function MapScreen({
                 <FavoritesPanel
                     visible={favorites.favoritesVisible}
                     places={favorites.favoritePlaces}
+                    searchableStops={stopsHook.searchableStops}
+                    currentPin={droppedPin}
+                    currentLocation={location ? { latitude: location.coords.latitude, longitude: location.coords.longitude } : null}
+                    onOpenCentralPlanner={(fav) => {
+                        if (!Number.isFinite(fav.latitude) || !Number.isFinite(fav.longitude)) {
+                            return;
+                        }
+                        onBuildRouteFromCoordinate?.(
+                            fav.latitude,
+                            fav.longitude,
+                            location?.coords.latitude,
+                            location?.coords.longitude,
+                        );
+                        favorites.setFavoritesVisible(false);
+                    }}
                     onSelect={(fav) => {
+                        if (!Number.isFinite(fav.latitude) || !Number.isFinite(fav.longitude)) {
+                            return;
+                        }
                         camera.focusOnCoordinate(fav.latitude, fav.longitude);
                         setDroppedPin({ latitude: fav.latitude, longitude: fav.longitude });
                         selectedVehicleIdRef.current = null;
@@ -782,6 +856,7 @@ export default function MapScreen({
                         selectedStop.closeSelectedStop();
                         favorites.setFavoritesVisible(false);
                     }}
+                    onUpdate={favorites.updateFavorite}
                     onRemove={favorites.removeFavorite}
                     onClose={() => favorites.setFavoritesVisible(false)}
                 />
@@ -896,7 +971,7 @@ export default function MapScreen({
 
 const styles = StyleSheet.create({
     page: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    container: { height: '100%', width: '100%', backgroundColor: 'tomato' },
+    container: { height: '100%', width: '100%', backgroundColor: '#F8FAFC' },
     map: { flex: 1 },
     userDot: { width: 20, height: 20, backgroundColor: '#007AFF', borderRadius: 10, borderWidth: 3, borderColor: 'white' },
     vehicleMarkerWrap: { alignItems: 'center', justifyContent: 'center', zIndex: 10, elevation: 10 },
@@ -924,6 +999,25 @@ const styles = StyleSheet.create({
     tripEndpointText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
     clearRouteButton: { position: 'absolute', top: 50, left: 16, backgroundColor: 'white', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 10, zIndex: 30 },
     clearRouteButtonText: { fontSize: 20, color: '#E63946', fontWeight: '700' },
+    recenterFloatingButton: {
+        position: 'absolute',
+        right: 16,
+        bottom: 122,
+        width: 52,
+        height: 52,
+        borderRadius: 26,
+        backgroundColor: 'rgba(255,255,255,0.96)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.22,
+        shadowRadius: 8,
+        elevation: 12,
+        zIndex: 30,
+    },
     bottomOverlay: { position: 'absolute', bottom: 40, width: '100%', alignItems: 'center', zIndex: 5, elevation: 5 },
     reportButton: { backgroundColor: '#E63946', paddingHorizontal: 25, paddingVertical: 15, borderRadius: 30, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 6 },
     reportText: { color: 'white', fontSize: 16, fontWeight: 'bold' },

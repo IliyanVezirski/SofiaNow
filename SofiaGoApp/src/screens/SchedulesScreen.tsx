@@ -3,6 +3,7 @@ import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, TextInput
 import { getVehicleIcon, VehicleType } from '../services/transitUtils';
 import { AvailableLine, fetchAvailableLines, fetchLineRouteGeometryByRouteId, fetchLineRouteGeometry, fetchStopById, fetchAllStops, LineRouteGeometry, Stop } from '../services/stopsApi';
 import { getStaticStopSchedule, getScheduleBasedDirections, resolveScheduleRouteId, StaticScheduleEntry, DayType, getDayTypeForDate } from '../services/cgmApi';
+import { convertTripApiScheduleToRouteGeometry, fetchTripApiAvailableLines, fetchTripApiLineSchedule, getTripApiStopScheduleEntries, TripApiLineSchedule } from '../services/cgmApi/tripScheduleApi';
 import { RouteSelection } from '../types/routes';
 
 type ScheduleKind = 'bus' | 'trolley' | 'tram' | 'subway' | 'night';
@@ -41,9 +42,63 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
     const [stopSearch, setStopSearch] = useState('');
     const [allStops, setAllStops] = useState<Stop[]>([]);
     const [expandedStopId, setExpandedStopId] = useState<string | null>(null);
+    const [expandedDirectionId, setExpandedDirectionId] = useState<string | null>(null);
+    const [expandedDirectionName, setExpandedDirectionName] = useState<string | null>(null);
+    const [expandedDirectionAliases, setExpandedDirectionAliases] = useState<string[]>([]);
     const [stopSchedule, setStopSchedule] = useState<StaticScheduleEntry[]>([]);
     const [selectedDayType, setSelectedDayType] = useState<DayType>(getDayTypeForDate());
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+    const [tripApiLineSchedule, setTripApiLineSchedule] = useState<TripApiLineSchedule | null>(null);
+
+    const normalizeScheduleText = (value: string) => value
+        .trim()
+        .toLocaleUpperCase('bg-BG')
+        .replace(/\s+/g, ' ')
+        .replace(/[.\-–—,;:()]/g, '');
+
+    const getFilteredScheduleEntries = (
+        stopId: string,
+        directionId?: string | null,
+        directionName?: string | null,
+        directionAliases: string[] = [],
+    ) => {
+        const tripApiEntries = getTripApiStopScheduleEntries(
+            tripApiLineSchedule,
+            stopId,
+            directionId,
+            directionName,
+            selectedDayType,
+        );
+        if (tripApiEntries) {
+            return tripApiEntries;
+        }
+
+        let schedule = getStaticStopSchedule(stopId, selectedDayType);
+        if (!selectedLine) {
+            return schedule;
+        }
+
+        const lineMatches = schedule.filter((entry) => entry.line === selectedLine.line && entry.type === selectedLine.type);
+        const normalizedTargets = Array.from(new Set([
+            directionName,
+            ...directionAliases,
+        ].filter((value): value is string => Boolean(value)).map((value) => normalizeScheduleText(value))));
+
+        if (normalizedTargets.length === 0) {
+            return lineMatches;
+        }
+
+        const destinationMatches = lineMatches.filter((entry) => {
+            const normalizedDestination = normalizeScheduleText(entry.destination);
+            return normalizedTargets.some((normalizedTarget) => (
+                normalizedDestination === normalizedTarget
+                || normalizedDestination.includes(normalizedTarget)
+                || normalizedTarget.includes(normalizedDestination)
+            ));
+        });
+
+        return destinationMatches.length > 0 ? destinationMatches : lineMatches;
+    };
 
     const toggleSection = (key: string) => {
         setExpandedSections((prev) => {
@@ -62,7 +117,10 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
     useEffect(() => {
         (async () => {
             try {
-                const [lines, stops] = await Promise.all([fetchAvailableLines(), fetchAllStops()]);
+                const [lines, stops] = await Promise.all([
+                    fetchTripApiAvailableLines().catch(() => fetchAvailableLines()),
+                    fetchAllStops(),
+                ]);
                 setAllLines(lines);
                 setAllStops(stops);
             } catch (error) {
@@ -95,13 +153,21 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
 
     const filteredDirections = useMemo(() => {
         if (!routeGeometry) return [];
+        const visibleDirections = routeGeometry.directions.filter((direction) => {
+            if (!direction.availableDayTypes || direction.availableDayTypes.length === 0) {
+                return true;
+            }
+
+            return direction.availableDayTypes.includes(selectedDayType);
+        });
+
         const q = stopSearch.trim().toLowerCase();
-        if (!q) return routeGeometry.directions;
-        return routeGeometry.directions.map((dir) => ({
+        if (!q) return visibleDirections;
+        return visibleDirections.map((dir) => ({
             ...dir,
             stops: dir.stops.filter((s) => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q)),
         })).filter((dir) => dir.stops.length > 0);
-    }, [routeGeometry, stopSearch]);
+    }, [routeGeometry, selectedDayType, stopSearch]);
 
     const globalSearchResults = useMemo(() => {
         const q = stopSearch.trim().toLowerCase();
@@ -111,29 +177,32 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
             .slice(0, 30);
     }, [allStops, stopSearch, selectedLine]);
 
-    const handleStopPress = (stopId: string, filterByLine = !!selectedLine) => {
+    const handleStopPress = (
+        stopId: string,
+        directionId?: string | null,
+        directionName?: string | null,
+        directionAliases: string[] = [],
+    ) => {
         if (expandedStopId === stopId) {
             setExpandedStopId(null);
+            setExpandedDirectionId(null);
+            setExpandedDirectionName(null);
+            setExpandedDirectionAliases([]);
             setStopSchedule([]);
             return;
         }
         setExpandedStopId(stopId);
-        let schedule = getStaticStopSchedule(stopId, selectedDayType);
-        if (filterByLine && schedRouteId) {
-            schedule = schedule.filter((e) => e.routeId === schedRouteId);
-        }
-        setStopSchedule(schedule);
+        setExpandedDirectionId(directionId ?? null);
+        setExpandedDirectionName(directionName ?? null);
+        setExpandedDirectionAliases(directionAliases);
+        setStopSchedule(getFilteredScheduleEntries(stopId, directionId, directionName, directionAliases));
     };
 
     useEffect(() => {
         if (expandedStopId) {
-            let schedule = getStaticStopSchedule(expandedStopId, selectedDayType);
-            if (schedRouteId) {
-                schedule = schedule.filter((e) => e.routeId === schedRouteId);
-            }
-            setStopSchedule(schedule);
+            setStopSchedule(getFilteredScheduleEntries(expandedStopId, expandedDirectionId, expandedDirectionName, expandedDirectionAliases));
         }
-    }, [selectedDayType]);
+    }, [expandedDirectionAliases, expandedDirectionId, expandedDirectionName, expandedStopId, selectedDayType, selectedLine, tripApiLineSchedule]);
 
     const formatMinutes = (m: number) => {
         const h = Math.floor(m / 60);
@@ -162,7 +231,7 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                         style={[styles.dayTypeChip, selectedDayType === 'h' && styles.dayTypeChipActive]}
                         onPress={() => setSelectedDayType('h')}
                     >
-                        <Text style={[styles.dayTypeChipText, selectedDayType === 'h' && styles.dayTypeChipTextActive]}>Празник</Text>
+                        <Text style={[styles.dayTypeChipText, selectedDayType === 'h' && styles.dayTypeChipTextActive]}>Почивен ден</Text>
                     </TouchableOpacity>
                 </View>
                 {stopSchedule.length === 0 ? (
@@ -176,10 +245,16 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                 <View style={styles.lineGroupTimes}>
                                     {entry.times.map((m) => {
                                         const isPast = isToday && m < nowMinutes;
+                                        const partialTimeKind = entry.partialTimeKinds?.[String(m)];
                                         return (
                                             <Text
                                                 key={m}
-                                                style={[styles.lineGroupTime, isPast && styles.stopEtaPast]}
+                                                style={[
+                                                    styles.lineGroupTime,
+                                                    partialTimeKind === 'start' && styles.lineGroupTimePartialStart,
+                                                    partialTimeKind === 'final' && styles.lineGroupTimePartialFinal,
+                                                    isPast && styles.stopEtaPast,
+                                                ]}
                                             >
                                                 {formatMinutes(m)}
                                             </Text>
@@ -200,8 +275,12 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
         if (!selectedLine) {
             setRouteGeometry(null);
             setRouteLoading(false);
+            setTripApiLineSchedule(null);
             setStopSearch('');
             setExpandedStopId(null);
+            setExpandedDirectionId(null);
+            setExpandedDirectionName(null);
+            setExpandedDirectionAliases([]);
             setStopSchedule([]);
             setExpandedSections(new Set());
             return;
@@ -210,6 +289,21 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
         setRouteLoading(true);
 
         (async () => {
+            let loadedTripApiSchedule: TripApiLineSchedule | null = null;
+
+            try {
+                const tripApiSchedule = await fetchTripApiLineSchedule(selectedLine);
+                if (!cancelled) {
+                    loadedTripApiSchedule = tripApiSchedule?.directions.length ? tripApiSchedule : null;
+                    setTripApiLineSchedule(loadedTripApiSchedule);
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    setTripApiLineSchedule(null);
+                }
+                console.warn('Falling back to bundled schedules for line:', selectedLine.line, error);
+            }
+
             let route = selectedLine.routeId
                 ? await fetchLineRouteGeometryByRouteId(selectedLine.routeId)
                 : await fetchLineRouteGeometry(selectedLine.line, selectedLine.type, selectedLine.isNight);
@@ -249,10 +343,13 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                         isNight: selectedLine.isNight,
                         directions: schedDirs.map((d) => ({
                             name: d.name,
+                            mergedDirectionNames: d.mergedDirectionNames,
                             coordinates: d.stops.map((s) => [s.longitude, s.latitude] as [number, number]),
                             stops: d.stops,
                         })),
                     };
+                } else if (loadedTripApiSchedule?.directions.length) {
+                    route = convertTripApiScheduleToRouteGeometry(loadedTripApiSchedule);
                 }
             }
             if (!cancelled) {
@@ -298,6 +395,8 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                     onChangeText={(text) => {
                         setStopSearch(text);
                         setExpandedStopId(null);
+                        setExpandedDirectionId(null);
+                        setExpandedDirectionAliases([]);
                         setStopSchedule([]);
                     }}
                 />
@@ -356,7 +455,12 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                         <TouchableOpacity
                                             key={`schedule-line-${line.routeId || line.line}-${index}`}
                                             style={[styles.lineChip, isActive && styles.chipActive]}
-                                            onPress={() => setSelectedLine(isActive ? null : line)}
+                                            onPress={() => {
+                                                setExpandedDirectionId(null);
+                                                setExpandedDirectionName(null);
+                                                setExpandedDirectionAliases([]);
+                                                setSelectedLine(isActive ? null : line);
+                                            }}
                                         >
                                             <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{line.line}</Text>
                                         </TouchableOpacity>
@@ -426,7 +530,7 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                                                 expandedStopId === stop.id && styles.stopRowActive,
                                                             ]}
                                                             activeOpacity={0.7}
-                                                            onPress={() => { void handleStopPress(stop.id); }}
+                                                            onPress={() => { void handleStopPress(stop.id, direction.id, direction.name, direction.mergedDirectionNames || []); }}
                                                         >
                                                             <Text style={styles.stopIndex}>{`${stopIndex + 1}.`}</Text>
                                                             <View style={styles.stopInfo}>
@@ -809,6 +913,14 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#1E293B',
         overflow: 'hidden',
+    },
+    lineGroupTimePartialStart: {
+        backgroundColor: '#FDE68A',
+        color: '#1E293B',
+    },
+    lineGroupTimePartialFinal: {
+        backgroundColor: '#DC2626',
+        color: '#FFFFFF',
     },
     emptyText: {
         color: '#475569',

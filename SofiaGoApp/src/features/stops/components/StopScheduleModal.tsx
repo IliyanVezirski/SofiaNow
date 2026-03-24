@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Pressable, ScrollView, TouchableOpacity, Modal, StyleSheet } from 'react-native';
 import { StopEta, StaticScheduleEntry, DayType } from '../../../types/vehicles';
 import { getEtaScheduleInfo } from '../../../services/cgmApi/schedules';
-import { getVehicleIcon, formatUnixTime } from '../../../services/transitUtils';
+import { getVehicleAccentColor, getVehicleIcon, formatUnixTime } from '../../../services/transitUtils';
 import { formatMinutesSinceMidnight, formatMinSinceMidnight } from '../../map/constants';
 
 interface Props {
@@ -39,28 +39,33 @@ export const StopScheduleModal: React.FC<Props> = ({
                         <>
                             <Text style={styles.sectionTitle}>{'\uD83D\uDD34'} В реално време</Text>
                             {realtime.map((eta) => {
-                                const info = getEtaScheduleInfo(eta);
-                                const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
-                                const isEarly = info.delayMinutes != null && info.delayMinutes < 0;
-                                const delayText = info.delayMinutes != null
-                                    ? (info.delayMinutes > 0 ? `+${info.delayMinutes} мин` : info.delayMinutes < 0 ? `${info.delayMinutes} мин (по-рано)` : 'навреме')
-                                    : null;
-                                const schedText = info.scheduledMinSinceMidnight != null ? formatMinSinceMidnight(info.scheduledMinSinceMidnight) : null;
-                                return (
-                                    <View key={`rt-${eta.tripId}-${eta.arrivalTimestamp}`} style={styles.row}>
-                                        <Text style={styles.eta}>
-                                            {`${getVehicleIcon(eta.type)} ${eta.line} \u2192 ${eta.destination || 'н/д'} \u2022 ${eta.minutesAway} мин \u2022 ${formatUnixTime(eta.arrivalTimestamp)}`}
-                                            {schedText ? ` (разп. ${schedText})` : ''}
-                                            {delayText ? ' ' : ''}
-                                            {delayText ? (
-                                                <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
-                                                    {delayText}
-                                                </Text>
-                                            ) : null}
-                                        </Text>
-                                    </View>
-                                );
-                            })}
+                                        const info = getEtaScheduleInfo(eta);
+                                        const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
+                                        const isEarly = info.delayMinutes != null && info.delayMinutes < 0;
+                                        const delayText = info.delayMinutes != null
+                                            ? (info.delayMinutes > 0 ? `+${info.delayMinutes} мин` : info.delayMinutes < 0 ? `${info.delayMinutes} мин (по-рано)` : 'навреме')
+                                            : null;
+                                        const schedText = info.scheduledMinSinceMidnight != null ? formatMinSinceMidnight(info.scheduledMinSinceMidnight) : null;
+                                        return (
+                                            <View key={`rt-${eta.tripId}-${eta.arrivalTimestamp}`} style={styles.row}>
+                                                <View style={styles.etaHeaderRow}>
+                                                    <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
+                                                        <Text style={styles.vehicleBadgeText}>{getVehicleIcon(eta.type)}</Text>
+                                                    </View>
+                                                    <Text style={styles.eta}>
+                                                        {`${eta.line} \u2192 ${eta.destination || 'н/д'} \u2022 ${eta.minutesAway} мин \u2022 ${formatUnixTime(eta.arrivalTimestamp)}`}
+                                                        {schedText ? ` (разп. ${schedText})` : ''}
+                                                        {delayText ? ' ' : ''}
+                                                        {delayText ? (
+                                                            <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
+                                                                {delayText}
+                                                            </Text>
+                                                        ) : null}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        );
+                                    })}
                         </>
                     )}
                     {staticSchedule.length > 0 && (
@@ -71,12 +76,17 @@ export const StopScheduleModal: React.FC<Props> = ({
                                     <Text style={[styles.dayTypeChipText, dayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity style={[styles.dayTypeChip, dayType === 'h' && styles.dayTypeChipActive]} onPress={() => onChangeDayType('h')}>
-                                    <Text style={[styles.dayTypeChipText, dayType === 'h' && styles.dayTypeChipTextActive]}>Празник</Text>
+                                    <Text style={[styles.dayTypeChipText, dayType === 'h' && styles.dayTypeChipTextActive]}>Почивен ден</Text>
                                 </TouchableOpacity>
                             </View>
                             {staticSchedule.map((entry) => (
                                 <View key={`st-${entry.line}-${entry.destination}`} style={styles.row}>
-                                    <Text style={styles.eta}>{`${getVehicleIcon(entry.type)} ${entry.line} \u2192 ${entry.destination}`}</Text>
+                                    <View style={styles.etaHeaderRow}>
+                                        <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(entry.type) }]}>
+                                            <Text style={styles.vehicleBadgeText}>{getVehicleIcon(entry.type)}</Text>
+                                        </View>
+                                        <Text style={styles.eta}>{`${entry.line} \u2192 ${entry.destination}`}</Text>
+                                    </View>
                                     <Text style={styles.meta}>{entry.times.map(formatMinutesSinceMidnight).join(', ')}</Text>
                                 </View>
                             ))}
@@ -103,6 +113,9 @@ const styles = StyleSheet.create({
     eta: { color: '#1F2937', fontSize: 13, marginBottom: 8 },
     sectionTitle: { color: '#1F2937', fontSize: 13, fontWeight: '700', marginBottom: 8 },
     row: { backgroundColor: '#F3F4F6', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8 },
+    etaHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    vehicleBadge: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    vehicleBadgeText: { fontSize: 15 },
     dayTypeRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
     dayTypeChip: { backgroundColor: '#F1F5F9', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: '#E2E8F0' },
     dayTypeChipActive: { backgroundColor: '#1E293B', borderColor: '#1E293B' },

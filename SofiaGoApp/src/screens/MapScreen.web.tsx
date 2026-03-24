@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Modal, Pressable, ScrollView, TextInput } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import L from 'leaflet';
 import * as Location from 'expo-location';
 import { MapContainer, Popup, TileLayer, CircleMarker, Marker, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import { fetchStopEtas, fetchVehiclesInBounds, StopEta, Vehicle } from '../services/cgmApi';
 import { fetchLineRouteGeometry, fetchLineRouteGeometryByRouteId, fetchStopById, fetchStopsInBounds, LineRouteGeometry, MapBounds, Stop, summarizeStopDirections } from '../services/stopsApi';
-import { addFavoritePlace, FavoritePlace, loadFavoritePlaces, PlaceSearchResult, removeFavoritePlace, searchLocations, updateFavoritePlaceName } from '../services/places';
+import { addFavoritePlace, FavoritePlace, loadFavoritePlaces, PlaceSearchResult, removeFavoritePlace, searchLocations, updateFavoritePlace, updateFavoritePlaceName } from '../services/places';
 import 'leaflet/dist/leaflet.css';
 import { VehicleType, formatUnixTime, getVehicleAccentColor, getVehicleIcon, getVehicleTypeLabel, inferLineTypeFromToken, VEHICLE_TYPE_ORDER } from '../services/transitUtils';
 import { RouteSelection } from '../types/routes';
+import { FavoritesPanel } from '../features/favorites/components/FavoritesPanel';
 
 type LatLngTuple = [number, number];
 
@@ -285,8 +287,8 @@ interface MapScreenProps {
     filterPanelVisible?: boolean;
     searchRequestToken?: number;
     favoritesRequestToken?: number;
-    recenterRequestToken?: number;
     dismissTransientPanelsToken?: number;
+    onBuildRouteFromCoordinate?: (dstLat: number, dstLon: number, curLat?: number, curLon?: number) => void;
 }
 
 export default function MapScreen({
@@ -294,8 +296,8 @@ export default function MapScreen({
     filterPanelVisible = true,
     searchRequestToken,
     favoritesRequestToken,
-    recenterRequestToken,
     dismissTransientPanelsToken,
+    onBuildRouteFromCoordinate,
 }: MapScreenProps) {
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -321,6 +323,7 @@ export default function MapScreen({
     const [pendingFavoritePoint, setPendingFavoritePoint] = useState<{ latitude: number; longitude: number } | null>(null);
     const [pendingFavoriteName, setPendingFavoriteName] = useState('');
     const [savedPinCoordinate, setSavedPinCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [userLocationVisible, setUserLocationVisible] = useState(true);
     const [editingFavoriteId, setEditingFavoriteId] = useState<string | null>(null);
     const [editingFavoriteName, setEditingFavoriteName] = useState('');
     const lastHeadingByVehicleRef = useRef<Record<string, number>>({});
@@ -401,12 +404,6 @@ export default function MapScreen({
             setFavoritesVisible((prev) => !prev);
         }
     }, [favoritesRequestToken]);
-
-    useEffect(() => {
-        if (typeof recenterRequestToken === 'number' && recenterRequestToken > 0) {
-            void recenterToUserLocation();
-        }
-    }, [recenterRequestToken]);
 
     useEffect(() => {
         if (typeof dismissTransientPanelsToken === 'number' && dismissTransientPanelsToken > 0) {
@@ -914,6 +911,7 @@ export default function MapScreen({
             setMapCenter(nextCenter);
             setMapBounds(createFallbackBounds(nextLocation.coords.latitude, nextLocation.coords.longitude));
             setApplyInitialRecenter(true);
+            setUserLocationVisible(true);
         } catch (error) {
             console.warn('Failed to recenter to user location:', error);
         }
@@ -987,6 +985,21 @@ export default function MapScreen({
         onCancelRenameFavorite();
     };
 
+    const onUpdateFavorite = async (
+        favoriteId: string,
+        updates: {
+            name?: string;
+            latitude: number | null;
+            longitude: number | null;
+            selectedStopId: string | null;
+            selectedStopName: string | null;
+            selectedLines: FavoritePlace['selectedLines'];
+        },
+    ) => {
+        const nextFavorites = await updateFavoritePlace(favoriteId, updates);
+        setFavoritePlaces(nextFavorites);
+    };
+
     const renderStopEtaSummary = (stopId: string, textStyle: any = styles.popupSecondary, maxItems?: number) => {
         const stopEtas = etasByStopId[stopId] || [];
         if (!stopEtas.length) {
@@ -997,7 +1010,7 @@ export default function MapScreen({
 
         return visibleEtas.map((eta) => (
             <Text key={`${eta.tripId}-${eta.stopId}-${eta.arrivalTimestamp}`} style={textStyle}>
-                {`${getVehicleIcon(eta.type)} ${eta.line} • ${eta.minutesAway} мин • ${formatUnixTime(eta.arrivalTimestamp)}`}
+                {`${getVehicleIcon(eta.type)} ${eta.destination ? `${eta.line} → ${eta.destination}` : eta.line} • ${eta.minutesAway} мин • ${formatUnixTime(eta.arrivalTimestamp)}`}
             </Text>
         ));
     };
@@ -1031,10 +1044,11 @@ export default function MapScreen({
                 .slice()
                 .sort((left, right) => left.arrivalTimestamp - right.arrivalTimestamp)
                 .slice(0, 3);
+            const destination = lineEtas.find((eta) => eta.destination)?.destination;
 
             return (
                 <View key={`${stop.id}-${line}`} style={styles.stopLineBoardRow}>
-                    <Text style={styles.stopLineBoardLine}>{line}</Text>
+                    <Text style={styles.stopLineBoardLine}>{destination ? `${line} → ${destination}` : line}</Text>
                     <Text style={styles.stopLineBoardEta}>
                         {lineEtas.length
                             ? lineEtas.map((eta) => `${eta.minutesAway} мин (${formatUnixTime(eta.arrivalTimestamp)})`).join(' · ')
@@ -1059,6 +1073,14 @@ export default function MapScreen({
                         onViewportChanged={(center, bounds) => {
                             void center;
                             setMapBounds(bounds);
+                            if (location) {
+                                setUserLocationVisible(
+                                    location.coords.latitude <= bounds.north &&
+                                    location.coords.latitude >= bounds.south &&
+                                    location.coords.longitude <= bounds.east &&
+                                    location.coords.longitude >= bounds.west
+                                );
+                            }
                         }}
                         onMapLongPress={onMapLongPress}
                     />
@@ -1115,7 +1137,6 @@ export default function MapScreen({
                                 <View style={styles.popupCard}>
                                     <Text style={styles.popupTitle}>{stop.name}</Text>
                                     <Text style={styles.popupSecondary}>{`Спирка: ${stop.id}`}</Text>
-                                    <Text style={styles.popupSecondary}>{summarizeStopDirections(stop, 1)}</Text>
                                     <Text style={styles.popupSecondary}>{`Линии: ${stop.lines.slice(0, 8).join(', ') || 'н/д'}`}</Text>
                                     {renderStopEtaSummary(stop.id, styles.popupSecondary, STOP_ETA_PREVIEW_COUNT)}
                                 </View>
@@ -1210,44 +1231,37 @@ export default function MapScreen({
                     )}
                 </WebMapContainer>
 
-                {favoritesVisible && (
-                    <View style={styles.quickFavoritesPanel}>
-                        <View style={styles.quickFavoritesHeader}>
-                            <Text style={styles.quickFavoritesTitle}>Любими места</Text>
-                            <TouchableOpacity
-                                style={styles.quickFavoritesCloseButton}
-                                onPress={() => setFavoritesVisible(false)}
-                            >
-                                <Text style={styles.quickFavoritesCloseButtonText}>✕</Text>
-                            </TouchableOpacity>
-                        </View>
-                        <ScrollView style={styles.quickFavoritesList} showsVerticalScrollIndicator={false}>
-                            {!favoritePlaces.length && (
-                                <Text style={styles.favoritesEmptyText}>Няма запазени места</Text>
-                            )}
-                            {favoritePlaces.map((favorite) => (
-                                <View key={favorite.id} style={styles.quickFavoriteRow}>
-                                    <TouchableOpacity
-                                        style={styles.quickFavoriteMain}
-                                        onPress={() => {
-                                            focusMapOnCoordinate(favorite.latitude, favorite.longitude);
-                                            setSavedPinCoordinate({ latitude: favorite.latitude, longitude: favorite.longitude });
-                                        }}
-                                    >
-                                        <Text style={styles.favoriteRowName} numberOfLines={1}>{favorite.name}</Text>
-                                        <Text style={styles.favoriteRowCoords} numberOfLines={1}>{`${favorite.latitude.toFixed(5)}, ${favorite.longitude.toFixed(5)}`}</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={styles.favoriteRemoveButton}
-                                        onPress={() => { void onRemoveFavorite(favorite.id); }}
-                                    >
-                                        <Text style={styles.favoriteRemoveButtonText}>✕</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            ))}
-                        </ScrollView>
-                    </View>
-                )}
+                <FavoritesPanel
+                    visible={favoritesVisible}
+                    places={favoritePlaces}
+                    searchableStops={stops}
+                    currentPin={savedPinCoordinate}
+                    currentLocation={location ? { latitude: location.coords.latitude, longitude: location.coords.longitude } : null}
+                    onOpenCentralPlanner={(favorite) => {
+                        if (!Number.isFinite(favorite.latitude) || !Number.isFinite(favorite.longitude)) {
+                            return;
+                        }
+                        onBuildRouteFromCoordinate?.(
+                            favorite.latitude,
+                            favorite.longitude,
+                            location?.coords.latitude,
+                            location?.coords.longitude,
+                        );
+                        setFavoritesVisible(false);
+                    }}
+                    onSelect={(favorite) => {
+                        if (!Number.isFinite(favorite.latitude) || !Number.isFinite(favorite.longitude)) {
+                            return;
+                        }
+
+                        focusMapOnCoordinate(favorite.latitude, favorite.longitude);
+                        setSavedPinCoordinate({ latitude: favorite.latitude, longitude: favorite.longitude });
+                        setFavoritesVisible(false);
+                    }}
+                    onUpdate={onUpdateFavorite}
+                    onRemove={onRemoveFavorite}
+                    onClose={() => setFavoritesVisible(false)}
+                />
 
                 <Modal
                     animationType="fade"
@@ -1437,7 +1451,7 @@ export default function MapScreen({
                                 onPress={() => { void openStopDetails(stop); }}
                             >
                                 <Text style={styles.nearbyStopButtonText} numberOfLines={1}>{stop.name}</Text>
-                                <Text style={styles.nearbyStopDirectionText} numberOfLines={2}>{summarizeStopDirections(stop, 1)}</Text>
+                                <Text style={styles.nearbyStopDirectionText} numberOfLines={2}>{`Линии: ${stop.lines.slice(0, 5).join(', ')}${stop.lines.length > 5 ? '...' : ''}`}</Text>
                             </TouchableOpacity>
                         ))}
                     </View>
@@ -1495,7 +1509,6 @@ export default function MapScreen({
                             <View style={styles.stopScheduleTitleWrap}>
                                 <Text style={styles.stopScheduleTitle}>{selectedStop.name}</Text>
                                 <Text style={styles.stopScheduleMeta}>{`Спирка: ${selectedStop.id}`}</Text>
-                                <Text style={styles.stopScheduleMeta}>{summarizeStopDirections(selectedStop, 2)}</Text>
                                 <Text style={styles.stopScheduleMeta}>{`Линии: ${selectedStop.lines.slice(0, 10).join(', ') || 'н/д'}`}</Text>
                             </View>
                             <Pressable onPress={() => setSelectedStop(null)} style={styles.stopScheduleClose}>
@@ -1507,6 +1520,12 @@ export default function MapScreen({
                             {renderStopEtaByLine(selectedStop)}
                         </ScrollView>
                     </View>
+                )}
+
+                {location && !userLocationVisible && (
+                    <TouchableOpacity style={styles.locationButton} onPress={() => { void recenterToUserLocation(); }}>
+                        <Ionicons name="locate" size={24} color="#0F172A" />
+                    </TouchableOpacity>
                 )}
 
                 <Modal

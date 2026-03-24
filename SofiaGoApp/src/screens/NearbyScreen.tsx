@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useUserLocation } from '../features/map/hooks/useUserLocation';
 import { fetchAllStops, Stop } from '../services/stopsApi';
-import { haversineDistanceMeters, inferLineTypeFromToken, getVehicleIcon, formatUnixTime, VehicleType } from '../services/transitUtils';
+import { haversineDistanceMeters, inferLineTypeFromToken, getVehicleAccentColor, getVehicleIcon, formatUnixTime, VehicleType } from '../services/transitUtils';
 import { fetchStopEtas, StopEta } from '../services/cgmApi';
 import { getEtaScheduleInfo } from '../services/cgmApi/schedules';
 import { formatMinSinceMidnight } from '../features/map/constants';
@@ -224,24 +224,17 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                                         ? (info.delayMinutes > 0 ? `+${info.delayMinutes}` : info.delayMinutes < 0 ? `${info.delayMinutes}` : 'навреме')
                                                                         : null;
                                                                     const schedText = info.scheduledMinSinceMidnight != null ? formatMinSinceMidnight(info.scheduledMinSinceMidnight) : null;
+                                                                    const lineLabel = eta.destination ? `${eta.line} → ${eta.destination}` : eta.line;
 
                                                                     return (
                                                                         <View key={`${eta.tripId}-${idx}`} style={st.etaRow}>
-                                                                            <Text style={st.etaIcon}>{getVehicleIcon(eta.type)}</Text>
-                                                                            <Text style={st.etaLine}>{eta.line}</Text>
-                                                                            {eta.destination ? (
-                                                                                <Text style={st.etaDest} numberOfLines={1}>→ {eta.destination}</Text>
-                                                                            ) : null}
-
-                                                                            <View style={{ flex: 1 }} />
-
-                                                                            <View style={{ alignItems: 'flex-end' }}>
-                                                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                                                                    <Text style={st.etaTime}>{eta.minutesAway} мин</Text>
-                                                                                    <Text style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
-                                                                                </View>
+                                                                            <View style={[st.etaVehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
+                                                                                <Text style={st.etaIcon}>{getVehicleIcon(eta.type)}</Text>
+                                                                            </View>
+                                                                            <View style={st.etaMainInfo}>
+                                                                                <Text style={st.etaLine} numberOfLines={2}>{lineLabel}</Text>
                                                                                 {(schedText || delayText) && (
-                                                                                    <Text style={{ fontSize: 10, color: '#64748B', marginTop: 1 }}>
+                                                                                    <Text style={st.etaStatusText}>
                                                                                         {schedText ? `разп. ${schedText} ` : ''}
                                                                                         {delayText ? (
                                                                                             <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
@@ -250,6 +243,11 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                                                         ) : null}
                                                                                     </Text>
                                                                                 )}
+                                                                            </View>
+
+                                                                            <View style={st.etaTimeWrap}>
+                                                                                <Text style={st.etaTime}>{eta.minutesAway} мин</Text>
+                                                                                <Text style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
                                                                             </View>
                                                                         </View>
                                                                     );
@@ -364,14 +362,17 @@ const st = StyleSheet.create({
     // ETA panel
     etaPanel: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0' },
     etaRow: {
-        flexDirection: 'row', alignItems: 'center', gap: 4,
+        flexDirection: 'row', alignItems: 'flex-start', gap: 6,
         paddingVertical: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#EDF2F7',
     },
+    etaVehicleBadge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
     etaIcon: { fontSize: 14, width: 20 },
-    etaLine: { color: '#1E293B', fontSize: 13, fontWeight: '800', minWidth: 30 },
-    etaDest: { color: '#64748B', fontSize: 11, maxWidth: 120 },
+    etaMainInfo: { flex: 1, minWidth: 0, paddingRight: 6 },
+    etaLine: { color: '#1E293B', fontSize: 13, fontWeight: '800', lineHeight: 17, flexShrink: 1 },
+    etaStatusText: { color: '#64748B', fontSize: 10, marginTop: 1 },
+    etaTimeWrap: { width: 70, alignItems: 'flex-end', marginLeft: 2, flexShrink: 0 },
     etaTime: { color: '#1D4ED8', fontSize: 13, fontWeight: '800' },
-    etaClock: { color: '#94A3B8', fontSize: 11, marginLeft: 4, minWidth: 38, textAlign: 'right' },
+    etaClock: { color: '#94A3B8', fontSize: 11, marginTop: 1, textAlign: 'right' },
 
     emptyText: { color: '#94A3B8', fontSize: 12, fontStyle: 'italic', padding: 8 },
 });

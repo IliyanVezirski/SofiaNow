@@ -1,12 +1,37 @@
 import { useState, useEffect, useCallback } from 'react';
-import { FavoritePlace, loadFavoritePlaces, addFavoritePlace, removeFavoritePlace } from '../../../services/places';
+import {
+    FavoriteLinePreference,
+    FavoritePlace,
+    loadFavoritePlaces,
+    addFavoritePlace,
+    removeFavoritePlace,
+    subscribeToFavoritePlaceChanges,
+    updateFavoritePlace,
+} from '../../../services/places';
 
 export const useFavorites = () => {
     const [favoritePlaces, setFavoritePlaces] = useState<FavoritePlace[]>([]);
     const [favoritesVisible, setFavoritesVisible] = useState(false);
 
     useEffect(() => {
-        void loadFavoritePlaces().then(setFavoritePlaces);
+        let cancelled = false;
+
+        const loadFavorites = async () => {
+            const next = await loadFavoritePlaces();
+            if (!cancelled) {
+                setFavoritePlaces(next);
+            }
+        };
+
+        void loadFavorites();
+        const unsubscribe = subscribeToFavoritePlaceChanges(() => {
+            void loadFavorites();
+        });
+
+        return () => {
+            cancelled = true;
+            unsubscribe();
+        };
     }, []);
 
     const saveFavorite = useCallback(async (name: string, latitude: number, longitude: number) => {
@@ -19,5 +44,15 @@ export const useFavorites = () => {
         setFavoritePlaces(next);
     }, []);
 
-    return { favoritePlaces, favoritesVisible, setFavoritesVisible, saveFavorite, removeFavorite: removeFav };
+    const updateFav = useCallback(async (
+        favoriteId: string,
+        updates: Partial<Pick<FavoritePlace, 'latitude' | 'longitude' | 'selectedStopId' | 'selectedStopName' | 'name' | 'defaultCommute'>> & {
+            selectedLines?: FavoriteLinePreference[];
+        },
+    ) => {
+        const next = await updateFavoritePlace(favoriteId, updates);
+        setFavoritePlaces(next);
+    }, []);
+
+    return { favoritePlaces, favoritesVisible, setFavoritesVisible, saveFavorite, removeFavorite: removeFav, updateFavorite: updateFav };
 };

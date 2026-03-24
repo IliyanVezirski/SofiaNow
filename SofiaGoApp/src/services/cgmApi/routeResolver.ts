@@ -73,17 +73,123 @@ const getRouteDirections = (): Record<string, RouteDirectionInfo[]> => {
     return _routeDirections;
 };
 
+const sanitizeToken = (value: string | undefined | null) => String(value || '').trim().toUpperCase();
+
+const buildRouteKeyCandidates = (routeId: string) => {
+    const normalizedRouteId = sanitizeToken(routeId);
+    const baseId = normalizedRouteId.split('-')[0];
+    const metadata = getRouteMetadata(routeId);
+    const resolvedShortName = sanitizeToken(
+        routeShortNameByRouteId[baseId]
+        || routeShortNameByRouteId[normalizedRouteId],
+    );
+    const normalizedLine = resolvedShortName || sanitizeToken(metadata.line);
+    const inferredType = metadata.type || inferLineTypeFromToken(normalizedLine);
+    const candidates = new Set<string>();
+
+    if (normalizedLine) {
+        switch (inferredType) {
+            case 'tram':
+                candidates.add(`TM${normalizedLine}`);
+                break;
+            case 'trolley':
+                candidates.add(`TB${normalizedLine}`);
+                break;
+            case 'subway':
+                candidates.add(normalizedLine.startsWith('M') ? normalizedLine : `M${normalizedLine}`);
+                break;
+            default:
+                candidates.add(`A${normalizedLine}`);
+                break;
+        }
+
+        candidates.add(normalizedLine);
+    }
+
+    candidates.add(baseId);
+    candidates.add(normalizedRouteId);
+
+    return Array.from(candidates).filter(Boolean);
+};
+
+const buildStopIdCandidates = (stopId: string | undefined | null) => {
+    const normalized = sanitizeToken(stopId);
+    if (!normalized) {
+        return [];
+    }
+
+    const suffixMatch = normalized.match(/(\d+)$/);
+    const suffix = suffixMatch?.[1] || '';
+    const candidates = new Set<string>([normalized]);
+
+    if (suffix) {
+        candidates.add(`A${suffix}`);
+        candidates.add(`TB${suffix}`);
+        candidates.add(`TM${suffix}`);
+        candidates.add(`M${suffix}`);
+        candidates.add(suffix);
+    }
+
+    return Array.from(candidates);
+};
+
+const resolveStopNameById = (stopId: string | undefined | null) => {
+    const stopNames = getStopNameById();
+    const candidates = buildStopIdCandidates(stopId);
+
+    for (const candidate of candidates) {
+        if (stopNames[candidate]) {
+            return stopNames[candidate];
+        }
+    }
+
+    const suffix = sanitizeToken(stopId).match(/(\d+)$/)?.[1];
+    if (!suffix) {
+        return '';
+    }
+
+    const fallbackId = Object.keys(stopNames).find((key) => key.endsWith(suffix));
+    return fallbackId ? stopNames[fallbackId] : '';
+};
+
+const normalizeDestinationLabel = (value: string | undefined | null) => sanitizeToken(value).replace(/\s+/g, ' ');
+
 export const getStaticDestination = (routeId: string, stopId: string, lastTripStopId?: string): string => {
-    const baseId = routeId.split('-')[0];
-    const dirs = getRouteDirections()[baseId];
-    if (!dirs) return '';
-    const matching = dirs.filter((dir) => dir.stopIds.has(stopId));
+    const routeDirections = getRouteDirections();
+    const dirs = buildRouteKeyCandidates(routeId)
+        .map((candidate) => routeDirections[candidate])
+        .find((candidate): candidate is RouteDirectionInfo[] => Array.isArray(candidate) && candidate.length > 0);
+
+    const lastTripStopName = resolveStopNameById(lastTripStopId);
+    if (!dirs) {
+        return lastTripStopName;
+    }
+
+    const stopIdCandidates = buildStopIdCandidates(stopId);
+    const matching = dirs.filter((dir) => stopIdCandidates.some((candidate) => dir.stopIds.has(candidate)));
     if (matching.length === 1) return matching[0].destination;
     if (matching.length > 1 && lastTripStopId) {
-        const byLast = matching.find((dir) => dir.stopIds.has(lastTripStopId));
+        const lastTripStopCandidates = buildStopIdCandidates(lastTripStopId);
+        const byLast = matching.find((dir) => lastTripStopCandidates.some((candidate) => dir.stopIds.has(candidate)));
         if (byLast) return byLast.destination;
+
+        const normalizedLastTripStopName = normalizeDestinationLabel(lastTripStopName);
+        if (normalizedLastTripStopName) {
+            const byName = matching.find((dir) => {
+                const normalizedDestination = normalizeDestinationLabel(dir.destination);
+                return normalizedDestination === normalizedLastTripStopName
+                    || normalizedDestination.includes(normalizedLastTripStopName)
+                    || normalizedLastTripStopName.includes(normalizedDestination);
+            });
+            if (byName) return byName.destination;
+        }
     }
-    return matching.length > 0 ? matching[0].destination : '';
+
+    if (matching.length > 0) {
+        return matching[0].destination;
+    }
+
+    return lastTripStopName;
 };
 
 export const resolveLineByRouteShortName = (routeId: string | undefined) => {

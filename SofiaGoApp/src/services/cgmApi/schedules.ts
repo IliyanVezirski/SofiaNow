@@ -1,4 +1,5 @@
 import { StaticScheduleEntry, DayType, ScheduleBasedStop, ScheduleBasedDirection, LineScheduleDirection } from '../../types/vehicles';
+import { collapseContainedDirections } from '../routeDirectionMerge';
 import { getRouteMetadata, inferLineTypeFromToken } from '../transitUtils';
 import { resolveLineByRouteShortName, stopCoordinatesById, stopNameById } from './routeResolver';
 
@@ -68,9 +69,28 @@ export const getScheduleBasedDirections = (routeId: string): ScheduleBasedDirect
                 return aTime - bTime;
             });
         }
-        if (ordered.length > 0) directions.push({ name: destination, stops: ordered });
+        if (ordered.length > 0) {
+            directions.push({
+                name: destination,
+                mergedDirectionNames: [destination],
+                stops: ordered,
+            });
+        }
     }
-    return directions;
+
+    return collapseContainedDirections(
+        directions,
+        (direction) => ({
+            ...direction,
+            mergedDirectionNames: [...(direction.mergedDirectionNames || [direction.name])],
+            stops: direction.stops.map((stop) => ({ ...stop })),
+        }),
+        (master, candidate) => {
+            const mergedNames = new Set(master.mergedDirectionNames || [master.name]);
+            (candidate.mergedDirectionNames || [candidate.name]).forEach((name) => mergedNames.add(name));
+            master.mergedDirectionNames = Array.from(mergedNames);
+        },
+    );
 };
 
 let _scheduleRouteIdMap: Map<string, string> | null = null;

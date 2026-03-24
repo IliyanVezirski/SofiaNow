@@ -162,6 +162,12 @@ export interface TripPlanResponse {
   };
 }
 
+type TripPlanResponseLike = TripPlanResponse & {
+  plan?: TripPlanResponse['data']['plan'];
+  error?: string;
+  message?: string;
+};
+
 // ─── Polyline decoder ──────────────────────────────────────────────────────────
 
 /** Decode a Google-encoded polyline string into [longitude, latitude][] for GeoJSON. */
@@ -232,6 +238,18 @@ export async function planTrip(req: TripRequest): Promise<Itinerary[]> {
     locale: LOCALE,
   };
 
-  const resp = await apiPost<TripPlanResponse>('/trip/trip', payload);
-  return resp.data.plan.itineraries;
+  const resp = await apiPost<TripPlanResponseLike>('/trip/trip', payload);
+  const plan = resp?.data?.plan ?? resp?.plan ?? null;
+
+  if (!plan || !Array.isArray(plan.itineraries)) {
+    const apiMessage = typeof resp?.message === 'string'
+      ? resp.message.trim()
+      : typeof resp?.error === 'string'
+        ? resp.error.trim()
+        : '';
+
+    throw new Error(apiMessage || 'Услугата за маршрути в момента не върна валиден отговор. Опитай отново.');
+  }
+
+  return plan.itineraries;
 }

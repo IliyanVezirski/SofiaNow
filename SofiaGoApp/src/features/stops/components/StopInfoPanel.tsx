@@ -1,10 +1,12 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
-import { Stop, summarizeStopDirections } from '../../../services/stopsApi';
+import { View, Text, Pressable, ScrollView, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import { Stop } from '../../../services/stopsApi';
 import { StopEta } from '../../../types/vehicles';
 import { getEtaScheduleInfo } from '../../../services/cgmApi/schedules';
-import { getVehicleIcon, formatUnixTime } from '../../../services/transitUtils';
+import { getVehicleAccentColor, getVehicleIcon, formatUnixTime } from '../../../services/transitUtils';
 import { STOP_ETA_PREVIEW_COUNT, formatMinSinceMidnight } from '../../map/constants';
+import { ArrivalReminderControl } from '../../notifications/components/ArrivalReminderControl';
+import { ReminderCenterButton } from '../../notifications/components/ReminderCenterButton';
 
 interface Props {
     stop: Stop;
@@ -17,48 +19,83 @@ export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSche
     const visibleEtas = etas.slice(0, STOP_ETA_PREVIEW_COUNT);
 
     return (
-        <View style={styles.panel}>
-            <View style={styles.header}>
-                <Text style={styles.title}>{`\uD83D\uDE8F ${stop.name}`}</Text>
-                <Pressable style={styles.closeBtn} onPress={onClose}>
-                    <Text style={styles.closeBtnText}>{'\u00D7'}</Text>
-                </Pressable>
+        <Modal transparent animationType="fade" visible onRequestClose={onClose} statusBarTranslucent>
+            <View style={styles.modalRoot}>
+                <Pressable style={styles.backdrop} onPress={onClose} />
+                <ReminderCenterButton anchorStyle={styles.reminderCenterAnchor} />
+                <View style={styles.panel}>
+                    <View style={styles.header}>
+                        <Text style={styles.title}>{`\uD83D\uDE8F ${stop.name}`}</Text>
+                        <Pressable style={styles.closeBtn} onPress={onClose}>
+                            <Text style={styles.closeBtnText}>{'\u00D7'}</Text>
+                        </Pressable>
+                    </View>
+                    <ScrollView style={styles.scroll} nestedScrollEnabled>
+                        <Text style={styles.info}>{`Линии: ${stop.lines.slice(0, 8).join(', ') || 'н/д'}`}</Text>
+                        {visibleEtas.length > 0 ? visibleEtas.map((eta) => {
+                            const info = getEtaScheduleInfo(eta);
+                            const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
+                            const isEarly = info.delayMinutes != null && info.delayMinutes < 0;
+                            const delayText = info.delayMinutes != null
+                                ? (info.delayMinutes > 0 ? `+${info.delayMinutes} мин` : info.delayMinutes < 0 ? `${info.delayMinutes} мин (по-рано)` : 'навреме')
+                                : null;
+                            const schedText = info.scheduledMinSinceMidnight != null ? formatMinSinceMidnight(info.scheduledMinSinceMidnight) : null;
+                            const lineLabel = eta.destination ? `${eta.line} → ${eta.destination}` : eta.line;
+                            return (
+                                <View key={`${eta.tripId}-${eta.stopId}-${eta.arrivalTimestamp}`} style={styles.etaCard}>
+                                    <View style={styles.etaRow}>
+                                        <View style={styles.etaInfoWrap}>
+                                            <View style={styles.etaHeaderRow}>
+                                                <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
+                                                    <Text style={styles.vehicleBadgeText}>{getVehicleIcon(eta.type)}</Text>
+                                                </View>
+                                                <View style={styles.etaTextWrap}>
+                                                    <Text style={styles.etaLineText} numberOfLines={2}>
+                                                        {lineLabel}
+                                                    </Text>
+                                                    <Text style={styles.etaMetaText}>
+                                                        {`${eta.minutesAway} мин • ${formatUnixTime(eta.arrivalTimestamp)}`}
+                                                        {schedText ? ` (разп. ${schedText})` : ''}
+                                                        {delayText ? ' ' : ''}
+                                                        {delayText ? (
+                                                            <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
+                                                                {delayText}
+                                                            </Text>
+                                                        ) : null}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        </View>
+                                        <ArrivalReminderControl stopName={stop.name} eta={eta} />
+                                    </View>
+                                </View>
+                            );
+                        }) : <Text style={styles.info}>Няма налични ETA в момента</Text>}
+                    </ScrollView>
+                    <TouchableOpacity style={styles.scheduleBtn} onPress={() => onOpenSchedule(stop.id, stop.name)}>
+                        <Text style={styles.scheduleBtnText}>{'\uD83D\uDCC5'} Разписание</Text>
+                    </TouchableOpacity>
+                </View>
             </View>
-            <ScrollView style={styles.scroll} nestedScrollEnabled>
-                <Text style={styles.info}>{summarizeStopDirections(stop, 2)}</Text>
-                <Text style={styles.info}>{`Линии: ${stop.lines.slice(0, 8).join(', ') || 'н/д'}`}</Text>
-                {visibleEtas.length > 0 ? visibleEtas.map((eta) => {
-                    const info = getEtaScheduleInfo(eta);
-                    const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
-                    const isEarly = info.delayMinutes != null && info.delayMinutes < 0;
-                    const delayText = info.delayMinutes != null
-                        ? (info.delayMinutes > 0 ? `+${info.delayMinutes} мин` : info.delayMinutes < 0 ? `${info.delayMinutes} мин (по-рано)` : 'навреме')
-                        : null;
-                    const schedText = info.scheduledMinSinceMidnight != null ? formatMinSinceMidnight(info.scheduledMinSinceMidnight) : null;
-                    return (
-                        <Text key={`${eta.tripId}-${eta.stopId}-${eta.arrivalTimestamp}`} style={styles.info}>
-                            {`${getVehicleIcon(eta.type)} ${eta.line} \u2022 ${eta.minutesAway} мин \u2022 ${formatUnixTime(eta.arrivalTimestamp)}`}
-                            {schedText ? ` (разп. ${schedText})` : ''}
-                            {delayText ? ' ' : ''}
-                            {delayText ? (
-                                <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
-                                    {delayText}
-                                </Text>
-                            ) : null}
-                        </Text>
-                    );
-                }) : <Text style={styles.info}>Няма налични ETA в момента</Text>}
-            </ScrollView>
-            <TouchableOpacity style={styles.scheduleBtn} onPress={() => onOpenSchedule(stop.id, stop.name)}>
-                <Text style={styles.scheduleBtnText}>{'\uD83D\uDCC5'} Разписание</Text>
-            </TouchableOpacity>
-        </View>
+        </Modal>
     );
 };
 
 const styles = StyleSheet.create({
+    modalRoot: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'transparent',
+    },
+    reminderCenterAnchor: {
+        top: 56,
+        right: 16,
+    },
     panel: {
-        position: 'absolute', bottom: 70, left: 16, right: 16, maxHeight: 280,
+        marginBottom: 110, marginHorizontal: 16, maxHeight: 280,
         backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, zIndex: 25, elevation: 25,
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4,
     },
@@ -68,6 +105,53 @@ const styles = StyleSheet.create({
     closeBtnText: { fontSize: 14, fontWeight: '700', color: '#6B7280' },
     scroll: { maxHeight: 150 },
     info: { fontSize: 13, color: '#374151', marginBottom: 2 },
+    etaCard: {
+        backgroundColor: '#F8FAFC',
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    etaRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 10,
+    },
+    etaInfoWrap: {
+        flex: 1,
+    },
+    etaHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+    },
+    etaTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    etaLineText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#1F2937',
+    },
+    etaMetaText: {
+        marginTop: 2,
+        fontSize: 12,
+        color: '#475569',
+    },
+    vehicleBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    vehicleBadgeText: {
+        fontSize: 15,
+    },
     scheduleBtn: { marginTop: 8, backgroundColor: '#1D4ED8', borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
     scheduleBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 });

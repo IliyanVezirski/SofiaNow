@@ -1,38 +1,93 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+import { AppState, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import * as Notifications from 'expo-notifications';
 import * as NavigationBar from 'expo-navigation-bar';
-import { Ionicons } from '@expo/vector-icons';
 import MapScreen from './src/screens/MapScreen';
 import SchedulesScreen from './src/screens/SchedulesScreen';
 import TripPlannerScreen, { TripRouteGeoJSON } from './src/screens/TripPlannerScreen';
 import NearbyScreen from './src/screens/NearbyScreen';
 import { RouteSelection } from './src/types/routes';
 import { TripLocation } from './src/services/tripPlanner';
+import { initializeTransitArrivalNotifications, refreshTransitArrivalReminders } from './src/services/notifications/transitArrivalNotifications';
+import { ReminderCenterButton } from './src/features/notifications/components/ReminderCenterButton';
+import { reconcileFavoriteCommuteNotifications } from './src/services/places';
 
 type BottomTab = 'map' | 'schedules' | 'planner' | 'nearby';
 
+type OpenedNotification = {
+  id: string;
+  title: string;
+  body: string;
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<BottomTab>('map');
+  const [openedNotification, setOpenedNotification] = useState<OpenedNotification | null>(null);
+  const lastHandledNotificationIdRef = useRef<string | null>(null);
+
+  const openNotificationModal = (response: Notifications.NotificationResponse | null) => {
+    const identifier = response?.notification.request.identifier;
+    if (!identifier || lastHandledNotificationIdRef.current === identifier) {
+      return;
+    }
+
+    lastHandledNotificationIdRef.current = identifier;
+    const { title, body } = response.notification.request.content;
+
+    setOpenedNotification({
+      id: identifier,
+      title: String(title || 'Уведомление'),
+      body: String(body || 'Няма допълнителна информация.'),
+    });
+  };
 
   useEffect(() => {
     void NavigationBar.setVisibilityAsync('hidden');
+    void initializeTransitArrivalNotifications();
+    void refreshTransitArrivalReminders();
+    void reconcileFavoriteCommuteNotifications();
+
+    void Notifications.getLastNotificationResponseAsync()
+      .then(async (response) => {
+        if (!response) {
+          return;
+        }
+
+        openNotificationModal(response);
+        await Notifications.clearLastNotificationResponseAsync();
+      })
+      .catch(() => undefined);
+
+    const notificationResponseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      openNotificationModal(response);
+      void Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+    });
+
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void refreshTransitArrivalReminders();
+        void reconcileFavoriteCommuteNotifications();
+      }
+    });
+
+    return () => {
+      notificationResponseSubscription.remove();
+      appStateSubscription.remove();
+    };
   }, []);
 
   const [selectedRoute, setSelectedRoute] = useState<RouteSelection | null>(null);
   const [mapFiltersVisible, setMapFiltersVisible] = useState(false);
   const [openSearchToken, setOpenSearchToken] = useState(0);
   const [toggleFavoritesToken, setToggleFavoritesToken] = useState(0);
-  const [recenterToken, setRecenterToken] = useState(0);
   const [dismissTransientPanelsToken, setDismissTransientPanelsToken] = useState(0);
-  const [filterCount, setFilterCount] = useState(0);
   const [focusStopCoordinate, setFocusStopCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
   const [focusStopId, setFocusStopId] = useState<string | null>(null);
   const [tripPlannerRoute, setTripPlannerRoute] = useState<TripRouteGeoJSON | null>(null);
   const [plannerInitialFrom, setPlannerInitialFrom] = useState<TripLocation | null>(null);
   const [plannerInitialTo, setPlannerInitialTo] = useState<TripLocation | null>(null);
   const [plannerInitialFromToken, setPlannerInitialFromToken] = useState(0);
-  const handleFilterCountChange = useCallback((count: number) => setFilterCount(count), []);
 
   return (
     <View style={styles.container}>
@@ -45,9 +100,7 @@ export default function App() {
           onCloseFilterPanel={() => setMapFiltersVisible(false)}
           searchRequestToken={openSearchToken}
           favoritesRequestToken={toggleFavoritesToken}
-          recenterRequestToken={recenterToken}
           dismissTransientPanelsToken={dismissTransientPanelsToken}
-          onFilterCountChange={handleFilterCountChange}
           focusStopCoordinate={focusStopCoordinate}
           focusStopId={focusStopId}
           tripPlannerRoute={tripPlannerRoute}
@@ -129,6 +182,8 @@ export default function App() {
         )}
       </View>
 
+      <ReminderCenterButton />
+
       {activeTab !== 'schedules' && activeTab !== 'planner' && activeTab !== 'nearby' && (
         <View style={styles.carouselContainer}>
           <ScrollView
@@ -158,7 +213,7 @@ export default function App() {
               }}
             >
               <Text style={styles.carouselIcon}>🕒</Text>
-              <Text style={styles.carouselLabel}>Спирки</Text>
+              <Text style={styles.carouselLabel}>Разписание</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.carouselButton}
@@ -185,37 +240,6 @@ export default function App() {
               <Text style={styles.carouselLabel}>Търсене</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[
-                styles.carouselButton,
-                activeTab === 'map' && mapFiltersVisible && styles.carouselButtonActive,
-                activeTab !== 'map' && styles.carouselButtonDisabled,
-              ]}
-              onPress={() => {
-                if (activeTab === 'map') {
-                  setMapFiltersVisible((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      setDismissTransientPanelsToken((value) => value + 1);
-                    }
-                    return next;
-                  });
-                }
-              }}
-              disabled={activeTab !== 'map'}
-            >
-              <Ionicons
-                name="filter-outline"
-                size={24}
-                color={activeTab === 'map' && mapFiltersVisible ? '#1E3A8A' : '#0F172A'}
-              />
-              {filterCount > 0 && (
-                <View style={styles.filterBadge}>
-                  <Text style={styles.filterBadgeText}>{filterCount}</Text>
-                </View>
-              )}
-              <Text style={styles.carouselLabel}>Филтър</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
               style={[styles.carouselButton, activeTab !== 'map' && styles.carouselButtonDisabled]}
               onPress={() => {
                 if (activeTab === 'map') {
@@ -226,24 +250,34 @@ export default function App() {
               disabled={activeTab !== 'map'}
             >
               <Text style={styles.carouselIcon}>⭐</Text>
-              <Text style={styles.carouselLabel}>Любими</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.carouselButton, activeTab !== 'map' && styles.carouselButtonDisabled]}
-              onPress={() => {
-                if (activeTab === 'map') {
-                  setMapFiltersVisible(false);
-                  setRecenterToken((prev) => prev + 1);
-                }
-              }}
-              disabled={activeTab !== 'map'}
-            >
-              <Text style={styles.carouselIcon}>📍</Text>
-              <Text style={styles.carouselLabel}>Локация</Text>
+              <Text style={styles.carouselLabel}>Места</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
       )}
+
+      <Modal
+        transparent
+        animationType="fade"
+        visible={!!openedNotification}
+        statusBarTranslucent
+        onRequestClose={() => setOpenedNotification(null)}
+      >
+        <View style={styles.notificationModalWrap}>
+          <Pressable style={styles.notificationModalBackdrop} onPress={() => setOpenedNotification(null)} />
+          <View style={styles.notificationModalCard}>
+            <View style={styles.notificationModalHeader}>
+              <Text style={styles.notificationModalEyebrow}>Известие</Text>
+              <TouchableOpacity style={styles.notificationModalClose} onPress={() => setOpenedNotification(null)}>
+                <Text style={styles.notificationModalCloseText}>Затвори</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.notificationModalTitle}>{openedNotification?.title}</Text>
+            <Text style={styles.notificationModalBody}>{openedNotification?.body}</Text>
+          </View>
+        </View>
+      </Modal>
+
       <StatusBar style="auto" />
     </View>
   );
@@ -290,10 +324,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 6,
   },
-  carouselButtonActive: {
-    backgroundColor: '#DBEAFE',
-    borderColor: '#93C5FD',
-  },
   carouselButtonDisabled: {
     opacity: 0.45,
   },
@@ -307,22 +337,58 @@ const styles = StyleSheet.create({
     color: '#475569',
     marginTop: 4,
   },
-  filterBadge: {
-    position: 'absolute',
-    top: -6,
-    right: -6,
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#1E293B',
-    alignItems: 'center',
+  notificationModalWrap: {
+    flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 20,
   },
-  filterBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 11,
+  notificationModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.36)',
+  },
+  notificationModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    elevation: 16,
+  },
+  notificationModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  notificationModalEyebrow: {
+    fontSize: 12,
     fontWeight: '700',
-    lineHeight: 14,
+    color: '#0F766E',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  notificationModalClose: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#F1F5F9',
+  },
+  notificationModalCloseText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  notificationModalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 10,
+  },
+  notificationModalBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#334155',
   },
 });

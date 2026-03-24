@@ -21,6 +21,8 @@ import {
   PlanType,
 } from '../services/tripPlanner';
 import * as Location from 'expo-location';
+import { ArrivalReminderControl } from '../features/notifications/components/ArrivalReminderControl';
+import { createStopEtaFromTripPlannerLeg } from '../features/notifications/utils/tripPlannerReminder';
 
 export interface TripLocation {
   latitude: number;
@@ -53,6 +55,50 @@ const fmtDuration = (secs: number) => {
   const h = Math.floor(m / 60);
   return `${h} ч ${m % 60} мин`;
 };
+
+const formatDateForApi = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const formatDateForInput = (date: Date) => {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}.${month}.${year}`;
+};
+
+const formatTimeForInput = (date: Date) => (
+  `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+);
+
+const parseInputDate = (value: string) => {
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(value || '').trim());
+  if (!match) {
+    return null;
+  }
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year
+    || parsed.getMonth() !== month - 1
+    || parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
+};
+
+const normalizeDateInput = (value: string) => value.replace(/[^\d.]/g, '').slice(0, 10);
+const normalizeTimeInput = (value: string) => value.replace(/[^\d:]/g, '').slice(0, 5);
+
+const isValidTimeInput = (value: string) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(value || '').trim());
 
 const PLAN_LABELS: Record<PlanType, string> = {
   '0': 'По-малко чакане',
@@ -90,6 +136,10 @@ export interface TripRouteGeoJSON {
 }
 
 function buildRouteGeoJSON(it: Itinerary): TripRouteGeoJSON {
+  if (!Array.isArray(it.legs) || it.legs.length === 0) {
+    throw new Error('Маршрутът няма достатъчно данни за показване на картата.');
+  }
+
   const transitStops: TripRouteStop[] = [];
   const seen = new Set<string>();
 
@@ -150,6 +200,7 @@ interface Props {
 }
 
 export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLocation, initialToLocation, initialFromToken }: Props) {
+  const initialNow = new Date();
   const [fromText, setFromText] = useState('');
   const [toText, setToText] = useState('');
   const [fromLoc, setFromLoc] = useState<TripLocation | null>(null);
@@ -162,6 +213,9 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
   const manualFromEditedRef = useRef(false);
 
   const [planType, setPlanType] = useState<PlanType>('0');
+  const [dateInput, setDateInput] = useState(formatDateForInput(initialNow));
+  const [timeInput, setTimeInput] = useState(formatTimeForInput(initialNow));
+  const [arriveBy, setArriveBy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [itineraries, setItineraries] = useState<Itinerary[] | null>(null);
@@ -283,10 +337,26 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
   /* search */
   const doSearch = async () => {
     if (!fromLoc || !toLoc) { setError('Изберете начална и крайна точка'); return; }
+    const parsedDate = parseInputDate(dateInput);
+    if (!parsedDate) {
+      setError('Датата трябва да е във формат ДД.ММ.ГГГГ');
+      return;
+    }
+    if (!isValidTimeInput(timeInput)) {
+      setError('Часът трябва да е във формат ЧЧ:ММ');
+      return;
+    }
     setError(null); setLoading(true); setItineraries(null); setExpandedIdx(null);
     Keyboard.dismiss();
     try {
-      const result = await planTrip({ from: fromLoc, to: toLoc, type: planType });
+      const result = await planTrip({
+        from: fromLoc,
+        to: toLoc,
+        type: planType,
+        date: formatDateForApi(parsedDate),
+        time: timeInput.trim(),
+        arriveBy,
+      });
       if (result.length === 0) setError('Не е намерен маршрут');
       else setItineraries(result);
     } catch (e: any) {
@@ -361,6 +431,78 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
         ))}
       </View>
 
+      <View style={s.datetimeCard}>
+        <Text style={s.datetimeTitle}>Ден и час</Text>
+        <View style={s.datetimeQuickRow}>
+          <TouchableOpacity
+            style={s.quickDateChip}
+            onPress={() => {
+              const today = new Date();
+              setDateInput(formatDateForInput(today));
+              setTimeInput(formatTimeForInput(today));
+            }}
+          >
+            <Text style={s.quickDateChipText}>Днес</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.quickDateChip}
+            onPress={() => {
+              const tomorrow = new Date();
+              tomorrow.setDate(tomorrow.getDate() + 1);
+              setDateInput(formatDateForInput(tomorrow));
+            }}
+          >
+            <Text style={s.quickDateChipText}>Утре</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.quickDateChip}
+            onPress={() => setTimeInput(formatTimeForInput(new Date()))}
+          >
+            <Text style={s.quickDateChipText}>Сега</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={s.datetimeInputRow}>
+          <View style={s.datetimeInputCol}>
+            <Text style={s.datetimeLabel}>Дата</Text>
+            <TextInput
+              style={s.datetimeInput}
+              value={dateInput}
+              onChangeText={(value) => setDateInput(normalizeDateInput(value))}
+              placeholder="24.03.2026"
+              placeholderTextColor="#94A3B8"
+              keyboardType="number-pad"
+            />
+          </View>
+          <View style={s.datetimeInputColSmall}>
+            <Text style={s.datetimeLabel}>Час</Text>
+            <TextInput
+              style={s.datetimeInput}
+              value={timeInput}
+              onChangeText={(value) => setTimeInput(normalizeTimeInput(value))}
+              placeholder="08:30"
+              placeholderTextColor="#94A3B8"
+              keyboardType="numbers-and-punctuation"
+            />
+          </View>
+        </View>
+
+        <View style={s.arriveByRow}>
+          <TouchableOpacity
+            style={[s.arriveByChip, !arriveBy && s.arriveByChipActive]}
+            onPress={() => setArriveBy(false)}
+          >
+            <Text style={[s.arriveByChipText, !arriveBy && s.arriveByChipTextActive]}>Тръгване в</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.arriveByChip, arriveBy && s.arriveByChipActive]}
+            onPress={() => setArriveBy(true)}
+          >
+            <Text style={[s.arriveByChipText, arriveBy && s.arriveByChipTextActive]}>Пристигане до</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <TouchableOpacity
         style={[s.searchBtn, (!fromLoc || !toLoc) && s.searchBtnDisabled]}
         onPress={doSearch}
@@ -398,7 +540,8 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
 /* ─── Itinerary card ─────────────────────────────────────────── */
 
 function ItineraryCard({ it, expanded, onToggle, onShowOnMap }: { it: Itinerary; expanded: boolean; onToggle: () => void; onShowOnMap?: () => void }) {
-  const transitLegs = it.legs.filter((l) => l.mode !== 'WALK');
+  const safeLegs = Array.isArray(it.legs) ? it.legs : [];
+  const canShowOnMap = !!onShowOnMap && safeLegs.length > 0;
   return (
     <TouchableOpacity style={s.card} onPress={onToggle} activeOpacity={0.7}>
       {/* Summary row */}
@@ -407,7 +550,7 @@ function ItineraryCard({ it, expanded, onToggle, onShowOnMap }: { it: Itinerary;
         <Text style={s.cardDuration}>{fmtDuration(it.duration)}</Text>
       </View>
       <View style={s.cardModes}>
-        {it.legs.map((leg, i) => (
+        {safeLegs.map((leg, i) => (
           <View key={i} style={s.legBadge}>
             <Text style={s.legIcon}>{modeIcon(leg.mode)}</Text>
             {leg.route && <Text style={s.legRoute}>{leg.route.shortName}</Text>}
@@ -418,10 +561,13 @@ function ItineraryCard({ it, expanded, onToggle, onShowOnMap }: { it: Itinerary;
       {/* Expanded details */}
       {expanded && (
         <View style={s.cardDetails}>
-          {it.legs.map((leg, i) => (
+          {safeLegs.map((leg, i) => (
             <LegDetail key={i} leg={leg} />
           ))}
-          {onShowOnMap && (
+          {!safeLegs.length && (
+            <Text style={s.emptyLegsText}>Този маршрут не върна достатъчно детайли.</Text>
+          )}
+          {canShowOnMap && (
             <TouchableOpacity style={s.showOnMapBtn} onPress={onShowOnMap}>
               <Text style={s.showOnMapText}>🗺️ Покажи на картата</Text>
             </TouchableOpacity>
@@ -436,15 +582,19 @@ function LegDetail({ leg }: { leg: ItineraryLeg }) {
   const isWalk = leg.mode === 'WALK';
   const [stopsExpanded, setStopsExpanded] = useState(false);
   const hasStops = leg.intermediatePlaces && leg.intermediatePlaces.length > 0;
+  const reminderEta = createStopEtaFromTripPlannerLeg(leg);
 
   return (
     <View style={s.legRow}>
       <Text style={s.legTime}>{fmtTime(leg.from.departureTime)}</Text>
       <View style={[s.legLine, isWalk && s.legLineDashed]} />
       <View style={s.legInfo}>
-        <Text style={s.legMode}>
-          {modeIcon(leg.mode)} {leg.route ? leg.route.shortName : isWalk ? 'Пешеходно' : leg.mode}
-        </Text>
+        <View style={s.legHeaderRow}>
+          <Text style={s.legMode}>
+            {modeIcon(leg.mode)} {leg.route ? leg.route.shortName : isWalk ? 'Пешеходно' : leg.mode}
+          </Text>
+          {reminderEta ? <ArrivalReminderControl stopName={leg.from.name} eta={reminderEta} /> : null}
+        </View>
         <Text style={s.legPlace}>{leg.from.name}</Text>
         {hasStops && (
           <TouchableOpacity onPress={() => setStopsExpanded(!stopsExpanded)}>
@@ -516,6 +666,54 @@ const s = StyleSheet.create({
   planTypeText: { fontSize: 12, color: '#475569' },
   planTypeTextActive: { color: '#FFF', fontWeight: '600' },
 
+  datetimeCard: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 10,
+  },
+  datetimeTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  datetimeQuickRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  quickDateChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  quickDateChipText: { fontSize: 12, fontWeight: '600', color: '#1D4ED8' },
+  datetimeInputRow: { flexDirection: 'row', gap: 10 },
+  datetimeInputCol: { flex: 1 },
+  datetimeInputColSmall: { width: 112 },
+  datetimeLabel: { fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 6 },
+  datetimeInput: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  arriveByRow: { flexDirection: 'row', gap: 8 },
+  arriveByChip: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#E2E8F0',
+  },
+  arriveByChipActive: { backgroundColor: '#0F766E' },
+  arriveByChipText: { fontSize: 12, fontWeight: '700', color: '#475569' },
+  arriveByChipTextActive: { color: '#FFFFFF' },
+
   searchBtn: {
     marginHorizontal: 16, marginTop: 12, backgroundColor: '#1E3A8A', borderRadius: 10,
     paddingVertical: 12, alignItems: 'center',
@@ -544,6 +742,7 @@ const s = StyleSheet.create({
   legLine: { width: 3, backgroundColor: '#1E3A8A', borderRadius: 1.5, marginHorizontal: 8 },
   legLineDashed: { backgroundColor: '#94A3B8' },
   legInfo: { flex: 1 },
+  legHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
   legMode: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
   legPlace: { fontSize: 13, color: '#334155' },
   legStopsToggle: { fontSize: 12, color: '#1E3A8A', fontWeight: '600', marginVertical: 4, paddingVertical: 2 },
@@ -553,6 +752,7 @@ const s = StyleSheet.create({
   intermediateTime: { fontSize: 11, color: '#64748B', width: 38, fontWeight: '500' },
   intermediateDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#94A3B8' },
   intermediateName: { fontSize: 12, color: '#475569', flex: 1 },
+  emptyLegsText: { color: '#64748B', fontSize: 12, lineHeight: 18 },
 
   showOnMapBtn: {
     marginTop: 8, backgroundColor: '#1E3A8A', borderRadius: 8, paddingVertical: 8, alignItems: 'center',

@@ -23,13 +23,13 @@ export const MAP_STYLE = {
         osm: {
             type: 'raster',
             tiles: [
-                'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
             ],
             tileSize: 256,
             maxzoom: 19,
-            attribution: '\u00A9 OpenStreetMap contributors \u00A9 CARTO',
+            attribution: '\u00A9 OpenStreetMap contributors',
         },
     },
     layers: [

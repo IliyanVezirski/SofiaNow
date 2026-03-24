@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "SofiaGoApp",
+    "name": "SofiaGo",
     "slug": "SofiaGoApp",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -19,6 +19,10 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "notification": {
+        "icon": "./assets/android-icon-monochrome.png",
+        "color": "#0F766E"
+      },
       "package": "com.iliyanvezirski.SofiaGoApp"
     },
     "web": {
@@ -33,10 +37,19 @@
         }
       ],
       "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#0F766E",
+          "defaultChannel": "transit-arrivals"
+        }
+      ],
       "expo-dev-client",
       "@maplibre/maplibre-react-native",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      "expo-background-task"
     ],
     "extra": {
       "eas": {

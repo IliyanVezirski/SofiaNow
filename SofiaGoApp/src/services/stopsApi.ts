@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import type { DayType } from '../types/vehicles';
 import bundledRouteNames from '../data/routeNames.static.json';
 import { getRouteMetadata, haversineDistanceMeters, inferLineTypeFromToken, VehicleType } from './transitUtils';
 
@@ -42,7 +43,10 @@ export interface AvailableLine {
 }
 
 export interface LineRouteDirection {
+    id?: string;
     name: string;
+    mergedDirectionNames?: string[];
+    availableDayTypes?: DayType[];
     coordinates: [number, number][];
     stops: Array<{
         id: string;
@@ -74,6 +78,30 @@ const fastNumericCompare = (a: string, b: string): number => {
 const sortStopLines = (lines: string[]) => lines.sort(fastNumericCompare);
 const sortStopDirections = (directions: string[]) => directions.sort();
 
+const getTerminalDirectionName = (directionLabel: string) => {
+    const normalizedLabel = String(directionLabel || '').trim();
+    if (!normalizedLabel) {
+        return '';
+    }
+
+    const extractLastSegment = (value: string) => {
+        const segments = value.split(/\s[-–]\s/).map((segment) => segment.trim()).filter(Boolean);
+        return segments[segments.length - 1] || value;
+    };
+
+    if (normalizedLabel.includes('=>')) {
+        const segments = normalizedLabel.split('=>').map((segment) => segment.trim()).filter(Boolean);
+        return extractLastSegment(segments[segments.length - 1] || normalizedLabel);
+    }
+
+    const towardIndex = normalizedLabel.toLocaleLowerCase('bg-BG').lastIndexOf(' към ');
+    if (towardIndex >= 0) {
+        return extractLastSegment(normalizedLabel.slice(towardIndex + 5).trim() || normalizedLabel);
+    }
+
+    return extractLastSegment(normalizedLabel);
+};
+
 const getDirectionLabel = (line: string, direction: any) => {
     const explicitDirectionName = typeof direction?.name === 'string' ? direction.name.trim() : '';
     const destinationStopName = Array.isArray(direction?.stops) && direction.stops.length
@@ -88,8 +116,13 @@ export const summarizeStopDirections = (stop: Stop, maxDirections = 2) => {
         return 'Посока: н/д';
     }
 
-    const visibleDirections = stop.directions.slice(0, maxDirections);
-    const remainingCount = stop.directions.length - visibleDirections.length;
+    const normalizedDirections = Array.from(new Set(
+        stop.directions
+            .map((direction) => getTerminalDirectionName(direction))
+            .filter(Boolean),
+    ));
+    const visibleDirections = normalizedDirections.slice(0, maxDirections);
+    const remainingCount = normalizedDirections.length - visibleDirections.length;
     const suffix = remainingCount > 0 ? ` +${remainingCount}` : '';
     return `Посока: ${visibleDirections.join(' • ')}${suffix}`;
 };
@@ -197,6 +230,7 @@ const normalizeBundledStops = (): Stop[] => {
         longitude: Number(stop.longitude),
         lines: [...(stop.lines || [])],
         directions: [...(stop.directions || [])],
+        vehicleTypes: Array.from(new Set((stop.lines || []).map((line) => inferLineTypeFromToken(line)))) as VehicleType[],
     }));
     _cachedBundledStops = groupStops([...raw, ...extractMetroStops()]);
     return _cachedBundledStops;

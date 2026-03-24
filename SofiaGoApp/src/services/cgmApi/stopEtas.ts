@@ -1,5 +1,5 @@
 import { StopEta } from '../../types/vehicles';
-import { getRouteMetadata, inferLineTypeFromToken } from '../transitUtils';
+import { getRouteMetadata } from '../transitUtils';
 import { getTripUpdateEntities } from './gtfsFeed';
 import { resolveLineByRouteShortName, getStaticDestination } from './routeResolver';
 
@@ -30,9 +30,14 @@ export const fetchStopEtas = async (stopIds: string[]): Promise<Record<string, S
 
             const routeMetadata = getRouteMetadata(tripUpdate.trip.routeId);
             const resolvedLine = resolveLineByRouteShortName(tripUpdate.trip.routeId);
-            const resolvedType = inferLineTypeFromToken(resolvedLine);
+            const resolvedType = routeMetadata.type;
+            const stopTimeUpdates = tripUpdate.stopTimeUpdate || [];
+            const lastTripStopUpdate = stopTimeUpdates.length > 0
+                ? stopTimeUpdates.reduce((max: any, s: any) => (s.stopSequence ?? 0) > (max.stopSequence ?? 0) ? s : max, stopTimeUpdates[0])
+                : null;
+            const lastTripStopId = lastTripStopUpdate?.stopId || '';
 
-            (tripUpdate.stopTimeUpdate || []).forEach((stu: any) => {
+            stopTimeUpdates.forEach((stu: any) => {
                 const gtfsStopId = stu.stopId;
                 if (!expandedStopIds.has(gtfsStopId)) return;
                 const arrivalTimestamp = Number(stu.arrival?.time || stu.departure?.time || 0);
@@ -48,6 +53,7 @@ export const fetchStopEtas = async (stopIds: string[]): Promise<Record<string, S
                     type: resolvedType,
                     arrivalTimestamp,
                     minutesAway: Math.max(0, Math.round((arrivalTimestamp - nowUnix) / 60)),
+                    destination: getStaticDestination(routeMetadata.routeId, gtfsStopId, lastTripStopId),
                 };
 
                 if (!etasByStopId[compoundId]) etasByStopId[compoundId] = [];
@@ -81,7 +87,7 @@ export const fetchFullStopSchedule = async (stopId: string): Promise<StopEta[]> 
 
             const routeMetadata = getRouteMetadata(tripUpdate.trip.routeId);
             const resolvedLine = resolveLineByRouteShortName(tripUpdate.trip.routeId);
-            const resolvedType = inferLineTypeFromToken(resolvedLine);
+            const resolvedType = routeMetadata.type;
 
             const stopTimeUpdates = tripUpdate.stopTimeUpdate || [];
             const lastTripStopUpdate = stopTimeUpdates.length > 0
@@ -102,7 +108,7 @@ export const fetchFullStopSchedule = async (stopId: string): Promise<StopEta[]> 
                     type: resolvedType,
                     arrivalTimestamp,
                     minutesAway: Math.max(0, Math.round((arrivalTimestamp - nowUnix) / 60)),
-                    destination: getStaticDestination(routeMetadata.routeId, stopId, lastTripStopId),
+                    destination: getStaticDestination(routeMetadata.routeId, stu.stopId, lastTripStopId),
                 });
             });
         });
