@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StopEta } from '../../../types/vehicles';
 import {
@@ -22,6 +22,7 @@ export const ArrivalReminderControl: React.FC<Props> = ({ stopName, eta }) => {
     const [submitting, setSubmitting] = useState(false);
     const [menuVisible, setMenuVisible] = useState(false);
     const [activeReminder, setActiveReminder] = useState<StoredTransitArrivalReminder | null>(null);
+    const [delayFollowUpEnabled, setDelayFollowUpEnabled] = useState(false);
 
     const canSchedule = useMemo(() => eta.minutesAway > 0, [eta.minutesAway]);
 
@@ -33,6 +34,7 @@ export const ArrivalReminderControl: React.FC<Props> = ({ stopName, eta }) => {
             if (cancelled) return;
             setActiveReminder(reminder);
             if (reminder) setMinutesBefore(reminder.minutesBefore);
+            setDelayFollowUpEnabled(!!reminder?.delayFollowUpEnabled);
         };
 
         void loadReminder();
@@ -52,7 +54,7 @@ export const ArrivalReminderControl: React.FC<Props> = ({ stopName, eta }) => {
         if (submitting) return;
         setSubmitting(true);
         try {
-            const result = await scheduleTransitArrivalReminder({ stopName, eta, minutesBefore });
+            const result = await scheduleTransitArrivalReminder({ stopName, eta, minutesBefore, delayFollowUpEnabled });
             if (result.ok) {
                 const reminder = await getTransitArrivalReminder(eta);
                 setActiveReminder(reminder);
@@ -136,6 +138,18 @@ export const ArrivalReminderControl: React.FC<Props> = ({ stopName, eta }) => {
                                 <Text style={styles.currentReminderText}>{reminderSummary}</Text>
                             </View>
                         ) : null}
+                        <View style={styles.followUpRow}>
+                            <View style={styles.followUpTextWrap}>
+                                <Text style={styles.followUpTitle}>Втори път при голямо закъснение</Text>
+                                <Text style={styles.followUpSubtitle}>Ще изпрати още едно напомняне, ако линията изостава осезаемо от разписанието.</Text>
+                            </View>
+                            <Switch
+                                value={delayFollowUpEnabled}
+                                onValueChange={setDelayFollowUpEnabled}
+                                trackColor={{ false: '#D1D5DB', true: '#86EFAC' }}
+                                thumbColor={delayFollowUpEnabled ? '#16A34A' : '#F9FAFB'}
+                            />
+                        </View>
                         <TouchableOpacity
                             style={[styles.button, !canSchedule && styles.buttonDisabled]}
                             onPress={onSchedule}
@@ -289,6 +303,26 @@ const styles = StyleSheet.create({
         color: '#9A3412',
         fontSize: 12,
         fontWeight: '600',
+    },
+    followUpRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 12,
+    },
+    followUpTextWrap: {
+        flex: 1,
+    },
+    followUpTitle: {
+        color: '#0F172A',
+        fontSize: 12,
+        fontWeight: '700',
+        marginBottom: 2,
+    },
+    followUpSubtitle: {
+        color: '#64748B',
+        fontSize: 11,
+        lineHeight: 15,
     },
     button: {
         backgroundColor: '#0F766E',

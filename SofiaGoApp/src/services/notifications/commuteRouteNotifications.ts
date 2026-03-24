@@ -1,6 +1,10 @@
 import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import { ensureTransitNotificationPermissions } from './transitArrivalNotifications';
 import type { FavoriteCommuteWeekday } from '../places';
+
+const TRANSIT_NOTIFICATION_CHANNEL_ID = 'transit-arrivals-v2';
+const DEFAULT_NOTIFICATION_SOUND = Platform.OS === 'ios' ? 'default' : undefined;
 
 const WEEKDAY_LABELS: Record<FavoriteCommuteWeekday, string> = {
     1: 'Нд',
@@ -104,7 +108,10 @@ export const scheduleCommuteRouteNotification = async ({
         content: {
             title: `Маршрут ${sourceName} → ${destinationName}`,
             body: routeSummary,
-            sound: true,
+            sound: DEFAULT_NOTIFICATION_SOUND,
+            priority: Notifications.AndroidNotificationPriority.MAX,
+            vibrate: [0, 400, 250, 400],
+            color: '#0F766E',
             data: {
                 type: 'favorite-commute-route',
                 sourceName,
@@ -117,7 +124,7 @@ export const scheduleCommuteRouteNotification = async ({
             weekday,
             hour: parsedTime.hour,
             minute: parsedTime.minute,
-            channelId: 'transit-arrivals',
+            channelId: TRANSIT_NOTIFICATION_CHANNEL_ID,
         },
     })));
 

@@ -10,6 +10,7 @@ import {
 
 interface Props {
     anchorStyle?: object;
+    inline?: boolean;
 }
 
 const formatTime = (timestamp: number) => {
@@ -17,7 +18,7 @@ const formatTime = (timestamp: number) => {
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 };
 
-export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle }) => {
+export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = false }) => {
     const [visible, setVisible] = useState(false);
     const [arrivalReminders, setArrivalReminders] = useState<StoredTransitArrivalReminder[]>([]);
     const [submittingKey, setSubmittingKey] = useState<string | null>(null);
@@ -67,7 +68,7 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle }) => {
 
     return (
         <>
-            <View style={[styles.fabWrap, anchorStyle]} pointerEvents="box-none">
+            <View style={[inline ? styles.inlineWrap : styles.fabWrap, anchorStyle]} pointerEvents="box-none">
                 <TouchableOpacity style={styles.fab} onPress={() => setVisible(true)}>
                     <Ionicons name="notifications" size={22} color="#FFFFFF" />
                     <View style={styles.badge}>
@@ -136,6 +137,10 @@ const styles = StyleSheet.create({
         right: 16,
         zIndex: 1,
         elevation: 1,
+    },
+    inlineWrap: {
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     fab: {
         width: 52,

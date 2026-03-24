@@ -67,9 +67,10 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
             stopId,
             directionId,
             directionName,
+            directionAliases,
             selectedDayType,
         );
-        if (tripApiEntries) {
+        if (tripApiEntries && tripApiEntries.length > 0) {
             return tripApiEntries;
         }
 
@@ -225,23 +226,23 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                         style={[styles.dayTypeChip, selectedDayType === 'w' && styles.dayTypeChipActive]}
                         onPress={() => setSelectedDayType('w')}
                     >
-                        <Text style={[styles.dayTypeChipText, selectedDayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
+                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={[styles.dayTypeChipText, selectedDayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.dayTypeChip, selectedDayType === 'h' && styles.dayTypeChipActive]}
                         onPress={() => setSelectedDayType('h')}
                     >
-                        <Text style={[styles.dayTypeChipText, selectedDayType === 'h' && styles.dayTypeChipTextActive]}>Почивен ден</Text>
+                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={[styles.dayTypeChipText, selectedDayType === 'h' && styles.dayTypeChipTextActive]}>Почивен ден</Text>
                     </TouchableOpacity>
                 </View>
                 {stopSchedule.length === 0 ? (
-                    <Text style={styles.stopEtaEmpty}>Няма налично разписание</Text>
+                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.stopEtaEmpty}>Няма налично разписание</Text>
                 ) : (
                     stopSchedule.map((entry) => {
                         const label = `${getVehicleIcon(entry.type)} ${entry.line}${entry.destination ? ` → ${entry.destination}` : ''}`;
                         return (
                             <View key={label} style={styles.lineGroup}>
-                                <Text style={styles.lineGroupHeader}>{label}</Text>
+                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.lineGroupHeader}>{label}</Text>
                                 <View style={styles.lineGroupTimes}>
                                     {entry.times.map((m) => {
                                         const isPast = isToday && m < nowMinutes;
@@ -249,6 +250,8 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                         return (
                                             <Text
                                                 key={m}
+                                                allowFontScaling={false}
+                                                maxFontSizeMultiplier={1}
                                                 style={[
                                                     styles.lineGroupTime,
                                                     partialTimeKind === 'start' && styles.lineGroupTimePartialStart,
@@ -910,6 +913,7 @@ const styles = StyleSheet.create({
         borderRadius: 6,
         paddingHorizontal: 8,
         paddingVertical: 3,
+        textAlign: 'center',
         fontSize: 12,
         color: '#1E293B',
         overflow: 'hidden',

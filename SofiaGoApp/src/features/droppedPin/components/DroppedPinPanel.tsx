@@ -4,7 +4,7 @@ import { View, Text, Pressable, TouchableOpacity, StyleSheet } from 'react-nativ
 interface Props {
     pin: { latitude: number; longitude: number };
     onClose: () => void;
-    onSaveFavorite: () => void;
+    onSaveFavorite?: () => void;
     onBuildRoute?: () => void;
 }
 
@@ -16,9 +16,11 @@ export const DroppedPinPanel: React.FC<Props> = ({ pin, onClose, onSaveFavorite,
                 <Text style={styles.closeBtnText}>{'\u00D7'}</Text>
             </Pressable>
         </View>
-        <TouchableOpacity style={styles.favBtn} onPress={onSaveFavorite}>
-            <Text style={styles.favBtnText}>{'\u2B50'} Добави в любими</Text>
-        </TouchableOpacity>
+        {onSaveFavorite ? (
+            <TouchableOpacity style={styles.favBtn} onPress={onSaveFavorite}>
+                <Text style={styles.favBtnText}>{'\u2B50'} Добави в любими</Text>
+            </TouchableOpacity>
+        ) : null}
         {onBuildRoute && (
             <TouchableOpacity style={styles.routeBtn} onPress={onBuildRoute}>
                 <Text style={styles.routeBtnText}>{'\uD83E\uDDED'} Изгради маршрут</Text>
@@ -29,7 +31,7 @@ export const DroppedPinPanel: React.FC<Props> = ({ pin, onClose, onSaveFavorite,
 
 const styles = StyleSheet.create({
     panel: {
-        position: 'absolute', bottom: 70, left: 16, right: 16,
+        position: 'absolute', bottom: 188, left: 16, right: 16,
         backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, zIndex: 25, elevation: 25,
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4,
     },

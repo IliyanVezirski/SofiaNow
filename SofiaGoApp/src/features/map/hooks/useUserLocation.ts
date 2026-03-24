@@ -6,27 +6,48 @@ export const useUserLocation = () => {
 
     useEffect(() => {
         let isMounted = true;
+        let locationSubscription: Location.LocationSubscription | null = null;
+
         (async () => {
             try {
-                const { status } = await Location.requestForegroundPermissionsAsync();
+                const permission = await Location.getForegroundPermissionsAsync();
+                const status = permission.status === 'granted'
+                    ? permission.status
+                    : (await Location.requestForegroundPermissionsAsync()).status;
+
                 if (status === 'granted') {
-                    const lastKnown = await Location.getLastKnownPositionAsync();
+                    const lastKnown = await Location.getLastKnownPositionAsync({ maxAge: 1000 * 60 * 10 });
                     if (lastKnown && isMounted) setLocation(lastKnown);
-                    const loc = await Location.getCurrentPositionAsync({});
+
+                    locationSubscription = await Location.watchPositionAsync(
+                        {
+                            accuracy: Location.Accuracy.Balanced,
+                            timeInterval: 10000,
+                            distanceInterval: 25,
+                        },
+                        (nextLocation) => {
+                            if (isMounted) setLocation(nextLocation);
+                        },
+                    );
+
+                    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
                     if (isMounted) setLocation(loc);
                 }
             } catch (err) {
                 console.warn('Location unavailable:', err);
             }
         })();
-        return () => { isMounted = false; };
+        return () => {
+            isMounted = false;
+            locationSubscription?.remove();
+        };
     }, []);
 
     const refresh = async () => {
         try {
             const { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') return;
-            const loc = await Location.getCurrentPositionAsync({});
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
             setLocation(loc);
         } catch (err) {
             console.warn('Failed to refresh location:', err);

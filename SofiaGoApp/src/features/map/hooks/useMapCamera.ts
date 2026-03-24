@@ -7,6 +7,7 @@ export const useMapCamera = () => {
     const [cameraLockedToInitialView, setCameraLockedToInitialView] = useState(false);
     const [hasInitialCameraTarget, setHasInitialCameraTarget] = useState(false);
     const [tripCameraBounds, setTripCameraBounds] = useState<{ ne: [number, number]; sw: [number, number] } | null>(null);
+    const [routeCameraBounds, setRouteCameraBounds] = useState<{ ne: [number, number]; sw: [number, number] } | null>(null);
 
     const focusOnCoordinate = useCallback((latitude: number, longitude: number) => {
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
@@ -34,6 +35,8 @@ export const useMapCamera = () => {
         setHasInitialCameraTarget,
         tripCameraBounds,
         setTripCameraBounds,
+        routeCameraBounds,
+        setRouteCameraBounds,
         focusOnCoordinate,
         lockCamera,
         unlockCamera,

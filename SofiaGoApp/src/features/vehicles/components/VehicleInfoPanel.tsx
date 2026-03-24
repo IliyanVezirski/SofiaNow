@@ -62,7 +62,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'transparent',
     },
     panel: {
-        marginBottom: 110, marginHorizontal: 16,
+        marginBottom: 188, marginHorizontal: 16,
         backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, zIndex: 30, elevation: 30,
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4,
     },

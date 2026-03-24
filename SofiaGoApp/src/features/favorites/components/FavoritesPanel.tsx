@@ -5,7 +5,11 @@ import { FavoritePlace, cancelFavoriteCommuteReminder, formatFavoriteCommuteWeek
 import { ReminderCenterButton } from '../../notifications/components/ReminderCenterButton';
 import { Stop } from '../../../services/stopsApi';
 import { FavoriteEditorModal } from './FavoriteEditorModal';
+import type { FavoriteEditorSection } from './FavoriteEditorModal';
 import { FavoriteRoutePlannerModal } from './FavoriteRoutePlannerModal';
+import { TripRouteGeoJSON } from '../../tripPlanner/utils/routeGeoJson';
+
+const NEW_FAVORITE_DRAFT_ID = '__new-favorite__';
 
 interface Props {
     visible: boolean;
@@ -14,6 +18,7 @@ interface Props {
     currentPin?: { latitude: number; longitude: number } | null;
     currentLocation?: { latitude: number; longitude: number } | null;
     onOpenCentralPlanner?: (place: FavoritePlace) => void;
+    onShowRouteOnMap?: (route: TripRouteGeoJSON) => void;
     onSelect: (place: FavoritePlace) => void;
     onUpdate: (favoriteId: string, updates: {
         name?: string;
@@ -24,19 +29,68 @@ interface Props {
         selectedLines: FavoritePlace['selectedLines'];
         defaultCommute?: FavoritePlace['defaultCommute'];
     }) => void | Promise<void>;
+    onCreate: (input: {
+        name: string;
+        latitude: number;
+        longitude: number;
+        selectedStopId: string | null;
+        selectedStopName: string | null;
+        selectedLines: FavoritePlace['selectedLines'];
+    }) => void | Promise<void>;
     onRemove: (id: string) => void;
     onClose: () => void;
 }
 
-export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableStops, currentPin, currentLocation, onOpenCentralPlanner, onSelect, onUpdate, onRemove, onClose }) => {
+export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableStops, currentPin, currentLocation, onOpenCentralPlanner, onShowRouteOnMap, onSelect, onUpdate, onCreate, onRemove, onClose }) => {
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [creatingNewPlace, setCreatingNewPlace] = useState(false);
+    const [editingSection, setEditingSection] = useState<FavoriteEditorSection | null>(null);
     const [activeFavoriteId, setActiveFavoriteId] = useState<string | null>(null);
-    const [routePlannerFavoriteId, setRoutePlannerFavoriteId] = useState<string | null>(null);
     const [submittingFavoriteId, setSubmittingFavoriteId] = useState<string | null>(null);
+    const [editorPrefill, setEditorPrefill] = useState<{
+        favoriteId: string;
+        latitude?: number | null;
+        longitude?: number | null;
+        selectedStopId?: string | null;
+        selectedStopName?: string | null;
+        selectedLines?: FavoritePlace['selectedLines'];
+    } | null>(null);
 
     const editingFavorite = useMemo(() => places.find((place) => place.id === editingId) ?? null, [editingId, places]);
+    const draftFavorite = useMemo<FavoritePlace | null>(() => {
+        if (!creatingNewPlace) {
+            return null;
+        }
+
+        return {
+            id: NEW_FAVORITE_DRAFT_ID,
+            name: 'Ново място',
+            latitude: null,
+            longitude: null,
+            createdAtUnix: Date.now(),
+            presetKey: null,
+            selectedStopId: null,
+            selectedStopName: null,
+            selectedLines: [],
+            defaultCommute: null,
+        };
+    }, [creatingNewPlace]);
+    const editorFavorite = useMemo(() => {
+        const baseFavorite = editingFavorite ?? draftFavorite;
+        if (!baseFavorite || !editingFavorite || !editorPrefill || editorPrefill.favoriteId !== editingFavorite.id) {
+            return baseFavorite;
+        }
+
+        return {
+            ...baseFavorite,
+            latitude: editorPrefill.latitude === undefined ? baseFavorite.latitude : editorPrefill.latitude,
+            longitude: editorPrefill.longitude === undefined ? baseFavorite.longitude : editorPrefill.longitude,
+            selectedStopId: editorPrefill.selectedStopId === undefined ? baseFavorite.selectedStopId : editorPrefill.selectedStopId,
+            selectedStopName: editorPrefill.selectedStopName === undefined ? baseFavorite.selectedStopName : editorPrefill.selectedStopName,
+            selectedLines: editorPrefill.selectedLines === undefined ? baseFavorite.selectedLines : editorPrefill.selectedLines,
+        };
+    }, [draftFavorite, editingFavorite, editorPrefill]);
     const activeFavorite = useMemo(() => places.find((place) => place.id === activeFavoriteId) ?? places[0] ?? null, [activeFavoriteId, places]);
-    const routePlannerFavorite = useMemo(() => places.find((place) => place.id === routePlannerFavoriteId) ?? null, [places, routePlannerFavoriteId]);
 
     useEffect(() => {
         if (!visible) {
@@ -68,6 +122,12 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
         }
     };
 
+    const openFavoriteEditor = (favoriteId: string, section: FavoriteEditorSection) => {
+        setCreatingNewPlace(false);
+        setEditingSection(section);
+        setEditingId(favoriteId);
+    };
+
     if (!visible) return null;
 
     return (
@@ -81,26 +141,47 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                 <Text style={styles.title}>Места</Text>
                                 <Text style={styles.subtitle}>Моите места</Text>
                             </View>
-                            <Pressable style={styles.closeBtn} onPress={onClose}>
-                                <Text style={styles.closeBtnText}>{'×'}</Text>
-                            </Pressable>
+                            <View style={styles.headerActions}>
+                                <TouchableOpacity
+                                    style={styles.addButton}
+                                    onPress={() => {
+                                        setEditingId(null);
+                                        setEditingSection(null);
+                                        setCreatingNewPlace(true);
+                                    }}
+                                >
+                                    <Ionicons name="add" size={16} color="#FFFFFF" />
+                                    <Text style={styles.addButtonText}>Добави място</Text>
+                                </TouchableOpacity>
+                                <Pressable style={styles.closeBtn} onPress={onClose}>
+                                    <Text style={styles.closeBtnText}>{'×'}</Text>
+                                </Pressable>
+                            </View>
                         </View>
 
-                        <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+                        <ScrollView
+                            style={styles.list}
+                            showsVerticalScrollIndicator={false}
+                            nestedScrollEnabled
+                            keyboardShouldPersistTaps="handled"
+                        >
                             {!places.length && <Text style={styles.empty}>Няма запазени места.</Text>}
                             {places.map((fav) => {
                                 const isActive = fav.id === activeFavoriteId;
                                 const favoriteEnabledLines = fav.selectedLines.filter((entry) => entry.enabled);
                                 const notifyCount = favoriteEnabledLines.filter((entry) => entry.notificationsEnabled).length;
                                 const hasCoords = hasFavoriteCoordinates(fav);
-                                const missingStopSetup = hasCoords && !fav.selectedStopId;
+                                const hasSavedRoute = !!fav.defaultCommute?.itinerarySummary;
                                 const missingLineSetup = !!fav.selectedStopId && !favoriteEnabledLines.length;
                                 const hasCommuteReminder = !!fav.defaultCommute?.notificationEnabled && !!fav.defaultCommute?.notificationIds?.length && !!fav.defaultCommute?.reminderTime;
 
                                 return (
                                     <View key={fav.id} style={styles.tabItemWrap}>
                                         <View style={[styles.tabButton, isActive && styles.tabButtonActive]}>
-                                            <TouchableOpacity style={styles.tabButtonMain} onPress={() => setActiveFavoriteId((previous) => previous === fav.id ? null : fav.id)}>
+                                            <TouchableOpacity
+                                                style={styles.tabButtonMain}
+                                                onPress={() => setActiveFavoriteId((previous) => previous === fav.id ? null : fav.id)}
+                                            >
                                                 <View style={styles.tabButtonTitleRow}>
                                                     <Text style={[styles.tabButtonText, isActive && styles.tabButtonTextActive]} numberOfLines={1}>{fav.name}</Text>
                                                     {hasCommuteReminder ? (
@@ -137,59 +218,77 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                     <View style={styles.cardHeaderMain}>
                                                         <Text style={styles.rowName}>{fav.name}</Text>
                                                     </View>
-                                                    {!fav.presetKey && (
-                                                        <TouchableOpacity style={styles.removeBtn} onPress={() => onRemove(fav.id)}>
-                                                            <Text style={styles.removeBtnText}>{'×'}</Text>
+                                                    <View style={styles.cardHeaderActions}>
+                                                        <TouchableOpacity
+                                                            style={styles.collapseBtn}
+                                                            onPress={() => setActiveFavoriteId((previous) => previous === fav.id ? null : previous)}
+                                                        >
+                                                            <Ionicons name="chevron-up" size={16} color="#374151" />
                                                         </TouchableOpacity>
-                                                    )}
+                                                        {!fav.presetKey && (
+                                                            <TouchableOpacity style={styles.removeBtn} onPress={() => onRemove(fav.id)}>
+                                                                <Text style={styles.removeBtnText}>{'×'}</Text>
+                                                            </TouchableOpacity>
+                                                        )}
+                                                    </View>
                                                 </View>
 
-                                                <View style={styles.summaryBox}>
-                                                    <Text style={styles.summaryLabel}>Локация</Text>
+                                                <FavoriteRoutePlannerModal
+                                                    inline
+                                                    targetFavorite={fav}
+                                                    currentLocation={currentLocation}
+                                                    searchableStops={searchableStops}
+                                                    onShowOnMap={onShowRouteOnMap}
+                                                    onOpenPlaceEditor={(favoriteId, prefill) => {
+                                                        setEditorPrefill(prefill ? { favoriteId, ...prefill } : null);
+                                                        openFavoriteEditor(favoriteId, 'location');
+                                                    }}
+                                                    onClose={() => undefined}
+                                                    onSave={async (favoriteId, payload) => {
+                                                        await onUpdate(favoriteId, {
+                                                            latitude: payload.destinationLatitude,
+                                                            longitude: payload.destinationLongitude,
+                                                            selectedStopId: payload.selectedStopId ?? fav.selectedStopId ?? null,
+                                                            selectedStopName: payload.selectedStopName ?? fav.selectedStopName ?? null,
+                                                            selectedLines: payload.selectedLines ?? fav.selectedLines ?? [],
+                                                            defaultCommute: payload.commutePlan,
+                                                        });
+                                                    }}
+                                                />
+
+                                                <TouchableOpacity style={styles.summaryBox} onPress={() => openFavoriteEditor(fav.id, 'location')}>
+                                                    <View style={styles.summaryHeaderRow}>
+                                                        <Text style={styles.summaryLabel}>Локация</Text>
+                                                        <Ionicons name="create-outline" size={14} color="#64748B" />
+                                                    </View>
                                                     <Text style={styles.summaryValue}>{hasCoords ? `${fav.latitude?.toFixed(5)}, ${fav.longitude?.toFixed(5)}` : 'Не е зададена'}</Text>
-                                                </View>
-                                                <View style={styles.summaryBox}>
-                                                    <Text style={styles.summaryLabel}>Спирка</Text>
+                                                    <Text style={styles.summaryEditHint}>Натисни за редакция</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity style={styles.summaryBox} onPress={() => openFavoriteEditor(fav.id, 'stop')}>
+                                                    <View style={styles.summaryHeaderRow}>
+                                                        <Text style={styles.summaryLabel}>Спирка</Text>
+                                                        <Ionicons name="create-outline" size={14} color="#64748B" />
+                                                    </View>
                                                     <Text style={styles.summaryValue}>{fav.selectedStopName || 'Не е избрана'}</Text>
-                                                </View>
-                                                <View style={styles.summaryBox}>
-                                                    <Text style={styles.summaryLabel}>Линии</Text>
+                                                    <Text style={styles.summaryEditHint}>Натисни за редакция</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity style={styles.summaryBox} onPress={() => openFavoriteEditor(fav.id, 'lines')}>
+                                                    <View style={styles.summaryHeaderRow}>
+                                                        <Text style={styles.summaryLabel}>Линии</Text>
+                                                        <Ionicons name="create-outline" size={14} color="#64748B" />
+                                                    </View>
                                                     <Text style={styles.summaryValue}>{favoriteEnabledLines.length ? favoriteEnabledLines.map((entry) => entry.line).join(', ') : 'Няма избрани линии'}</Text>
-                                                </View>
-                                                <View style={styles.summaryBox}>
-                                                    <Text style={styles.summaryLabel}>Известия</Text>
+                                                    <Text style={styles.summaryEditHint}>Натисни за редакция</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity style={styles.summaryBox} onPress={() => openFavoriteEditor(fav.id, 'lines')}>
+                                                    <View style={styles.summaryHeaderRow}>
+                                                        <Text style={styles.summaryLabel}>Известия</Text>
+                                                        <Ionicons name="create-outline" size={14} color="#64748B" />
+                                                    </View>
                                                     <Text style={styles.summaryValue}>{notifyCount ? `${notifyCount} активни по спирки` : 'Няма активни по спирки'}</Text>
                                                     <Text style={styles.summarySubvalue}>{hasCommuteReminder ? 'Маршрутното уведомление е включено за това място.' : 'Няма активно маршрутно уведомление.'}</Text>
-                                                </View>
-                                                <View style={styles.summaryBox}>
-                                                    <Text style={styles.summaryLabel}>Маршрут и час</Text>
-                                                    <Text style={styles.summaryValue}>{fav.defaultCommute?.routeLabel || 'Още не са настроени'}</Text>
-                                                    {fav.defaultCommute?.itinerarySummary ? (
-                                                        <Text style={styles.summarySubvalue}>{fav.defaultCommute.itinerarySummary}</Text>
-                                                    ) : null}
-                                                    {fav.defaultCommute?.reminderTime ? (
-                                                        <Text style={styles.summarySubvalue}>
-                                                            {fav.defaultCommute.arriveBy && fav.defaultCommute.reminderOffsetMinutes
-                                                                ? `Известяване: ${formatFavoriteCommuteWeekdays(fav.defaultCommute.reminderWeekdays)} • ${fav.defaultCommute.reminderOffsetMinutes} мин по-рано (${fav.defaultCommute.reminderTime})`
-                                                                : `Известяване: ${formatFavoriteCommuteWeekdays(fav.defaultCommute.reminderWeekdays)} • ${fav.defaultCommute.reminderTime}`}
-                                                        </Text>
-                                                    ) : null}
-                                                    <View style={styles.routeReminderRow}>
-                                                        <View style={[styles.routeReminderPill, hasCommuteReminder ? styles.routeReminderPillActive : styles.routeReminderPillInactive]}>
-                                                            <Ionicons name={hasCommuteReminder ? 'notifications' : 'notifications-off'} size={13} color={hasCommuteReminder ? '#0F766E' : '#64748B'} />
-                                                            <Text style={[styles.routeReminderPillText, hasCommuteReminder ? styles.routeReminderPillTextActive : styles.routeReminderPillTextInactive]}>
-                                                                {hasCommuteReminder ? 'Активно маршрутно уведомление' : 'Маршрутното уведомление е изключено'}
-                                                            </Text>
-                                                        </View>
-                                                    </View>
-                                                </View>
-
-                                                {missingStopSetup && (
-                                                    <View style={styles.noticeBox}>
-                                                        <Text style={styles.noticeTitle}>Следваща стъпка</Text>
-                                                        <Text style={styles.noticeText}>Имаш локация. Сега натисни „Настрой спирка и линии“, за да избереш откъде тръгваш.</Text>
-                                                    </View>
-                                                )}
+                                                    <Text style={styles.summaryEditHint}>Натисни за редакция</Text>
+                                                </TouchableOpacity>
                                                 {missingLineSetup && (
                                                     <View style={styles.noticeBox}>
                                                         <Text style={styles.noticeTitle}>Линиите още не са настроени</Text>
@@ -198,16 +297,9 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                 )}
 
                                                 <View style={styles.actionsRow}>
-                                                    <TouchableOpacity
-                                                        style={[styles.actionButton, styles.routeSettingsButton, !hasCoords && styles.actionButtonDisabled]}
-                                                        disabled={!hasCoords}
-                                                        onPress={() => setRoutePlannerFavoriteId(fav.id)}
-                                                    >
-                                                        <Text style={styles.actionButtonText}>Създай маршрут</Text>
-                                                    </TouchableOpacity>
                                                     {hasCommuteReminder ? (
                                                         <TouchableOpacity
-                                                            style={[styles.actionButton, styles.stopReminderButton, submittingFavoriteId === fav.id && styles.actionButtonDisabled]}
+                                                            style={[styles.actionButton, styles.stopReminderButton, submittingFavoriteId === fav.id && styles.actionButtonDisabled, !hasCommuteReminder && styles.actionButtonFullWidth]}
                                                             disabled={submittingFavoriteId === fav.id}
                                                             onPress={() => void onDisableCommuteReminder(fav)}
                                                         >
@@ -224,19 +316,13 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                     >
                                                         <Text style={styles.actionButtonText}>Отвори на карта</Text>
                                                     </TouchableOpacity>
-                                                    <TouchableOpacity
-                                                        style={[styles.actionButton, styles.actionButtonSecondary]}
-                                                        onPress={() => setEditingId(fav.id)}
-                                                    >
-                                                        <Text style={styles.actionButtonText}>Настрой спирка и линии</Text>
-                                                    </TouchableOpacity>
                                                 </View>
 
                                                 <TouchableOpacity
                                                     style={styles.renameButton}
-                                                    onPress={() => setEditingId(fav.id)}
+                                                    onPress={() => openFavoriteEditor(fav.id, 'name')}
                                                 >
-                                                    <Text style={styles.renameButtonText}>Преименувай и редактирай</Text>
+                                                    <Text style={styles.renameButtonText}>Преименувай и редактирай мястото</Text>
                                                 </TouchableOpacity>
                                             </View>
                                         )}
@@ -249,39 +335,50 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
             </Modal>
 
             <FavoriteEditorModal
-                visible={!!editingFavorite}
-                favorite={editingFavorite}
+                visible={!!editorFavorite}
+                favorite={editorFavorite}
+                isDraft={creatingNewPlace}
+                initialSection={editingSection}
                 searchableStops={searchableStops}
                 currentPin={currentPin}
                 currentLocation={currentLocation}
-                onClose={() => setEditingId(null)}
+                onClose={() => {
+                    setEditingId(null);
+                    setCreatingNewPlace(false);
+                    setEditingSection(null);
+                    setEditorPrefill(null);
+                }}
                 onConfigureRoute={async (favoriteId, updates) => {
                     await onUpdate(favoriteId, updates);
                     setActiveFavoriteId(favoriteId);
-                    setRoutePlannerFavoriteId(favoriteId);
                 }}
                 onSave={async (favoriteId, updates) => {
+                    if (creatingNewPlace) {
+                        if (updates.latitude == null || updates.longitude == null) {
+                            return;
+                        }
+
+                        await onCreate({
+                            name: updates.name?.trim() || 'Ново място',
+                            latitude: updates.latitude,
+                            longitude: updates.longitude,
+                            selectedStopId: updates.selectedStopId,
+                            selectedStopName: updates.selectedStopName,
+                            selectedLines: updates.selectedLines,
+                        });
+                        setCreatingNewPlace(false);
+                        setEditingSection(null);
+                        setActiveFavoriteId(null);
+                        setEditorPrefill(null);
+                        return;
+                    }
+
                     await onUpdate(favoriteId, updates);
+                    setEditingSection(null);
+                    setEditorPrefill(null);
                 }}
             />
 
-            <FavoriteRoutePlannerModal
-                visible={!!routePlannerFavorite}
-                targetFavorite={routePlannerFavorite}
-                currentLocation={currentLocation}
-                searchableStops={searchableStops}
-                onClose={() => setRoutePlannerFavoriteId(null)}
-                onSave={async (favoriteId, payload) => {
-                    await onUpdate(favoriteId, {
-                        latitude: payload.destinationLatitude,
-                        longitude: payload.destinationLongitude,
-                        selectedStopId: payload.selectedStopId ?? routePlannerFavorite?.selectedStopId ?? null,
-                        selectedStopName: payload.selectedStopName ?? routePlannerFavorite?.selectedStopName ?? null,
-                        selectedLines: payload.selectedLines ?? routePlannerFavorite?.selectedLines ?? [],
-                        defaultCommute: payload.commutePlan,
-                    });
-                }}
-            />
         </>
     );
 };
@@ -301,8 +398,11 @@ const styles = StyleSheet.create({
         elevation: 5,
     },
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+    headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     title: { color: '#111827', fontSize: 15, fontWeight: '700' },
     subtitle: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+    addButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0F766E', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8 },
+    addButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
     closeBtn: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6' },
     closeBtnText: { color: '#374151', fontSize: 14, fontWeight: '700' },
     tabItemWrap: { marginBottom: 10 },
@@ -323,13 +423,17 @@ const styles = StyleSheet.create({
     card: { marginTop: 8, backgroundColor: '#F9FAFB', borderRadius: 12, padding: 10, borderWidth: 1, borderColor: '#E5E7EB' },
     cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
     cardHeaderMain: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
+    cardHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     badge: { backgroundColor: '#DBEAFE', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
     badgeText: { color: '#1D4ED8', fontSize: 10, fontWeight: '700' },
     rowName: { color: '#111827', fontSize: 15, fontWeight: '700', flexShrink: 1 },
+    collapseBtn: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6' },
     summaryBox: { backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', paddingHorizontal: 10, paddingVertical: 9, marginTop: 8 },
+    summaryHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
     summaryLabel: { color: '#6B7280', fontSize: 11, fontWeight: '600', marginBottom: 2 },
     summaryValue: { color: '#111827', fontSize: 12, fontWeight: '700' },
     summarySubvalue: { color: '#475569', fontSize: 11, marginTop: 4, lineHeight: 16 },
+    summaryEditHint: { color: '#64748B', fontSize: 10, fontWeight: '600', marginTop: 6 },
     routeReminderRow: { marginTop: 8, flexDirection: 'row' },
     routeReminderPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1 },
     routeReminderPillActive: { backgroundColor: '#ECFDF5', borderColor: '#99F6E4' },
@@ -342,6 +446,7 @@ const styles = StyleSheet.create({
     noticeText: { color: '#92400E', fontSize: 11, lineHeight: 16 },
     actionsRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'stretch' },
     actionButton: { flex: 1, minHeight: 44, backgroundColor: '#1D4ED8', borderRadius: 10, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
+    actionButtonFullWidth: { flex: 1 },
     actionButtonSecondary: { backgroundColor: '#0F766E' },
     routeSettingsButton: { backgroundColor: '#7C3AED' },
     stopReminderButton: { backgroundColor: '#B91C1C' },

@@ -46,6 +46,7 @@ export interface FavoriteCommutePlan {
     itineraryIndex: number;
     itinerarySummary: string;
     routeLabel: string;
+    transportLabels?: string[];
     reminderTime: string | null;
     notificationEnabled: boolean;
     notificationIds: string[];
@@ -173,6 +174,9 @@ const normalizeFavoriteCommutePlan = (value: unknown): FavoriteCommutePlan | nul
         itineraryIndex,
         itinerarySummary: String(raw.itinerarySummary || '').trim(),
         routeLabel: String(raw.routeLabel || '').trim(),
+        transportLabels: Array.isArray(raw.transportLabels)
+            ? raw.transportLabels.map((entry) => String(entry || '').trim()).filter(Boolean)
+            : [],
         reminderTime: raw.reminderTime ? String(raw.reminderTime).trim() : null,
         notificationEnabled: !!raw.notificationEnabled,
         notificationIds,
@@ -408,6 +412,7 @@ export const addFavoritePlace = async (input: {
         selectedStopId: input.selectedStopId ? String(input.selectedStopId).trim() : null,
         selectedStopName: input.selectedStopName ? String(input.selectedStopName).trim() : null,
         selectedLines: normalizeFavoriteLinePreferences(input.selectedLines),
+        defaultCommute: null,
     };
 
     const existing = await loadFavoritePlaces();

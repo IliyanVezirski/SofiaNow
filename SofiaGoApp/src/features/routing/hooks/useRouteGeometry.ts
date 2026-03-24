@@ -5,6 +5,7 @@ import { RouteSelection } from '../../../types/routes';
 export const useRouteGeometry = (
     highlightedRoute: RouteSelection | null | undefined,
     onCameraFocus?: (lon: number, lat: number) => void,
+    onRouteBoundsChange?: (bounds: { ne: [number, number]; sw: [number, number] } | null) => void,
 ) => {
     const [routeGeometry, setRouteGeometry] = useState<LineRouteGeometry | null>(null);
     const [routeGeometryVersion, setRouteGeometryVersion] = useState(0);
@@ -16,6 +17,7 @@ export const useRouteGeometry = (
         if (!highlightedRoute) {
             setRouteGeometryVersion((v) => v + 1);
             setRouteGeometry(null);
+            onRouteBoundsChange?.(null);
             return () => { isMounted = false; };
         }
 
@@ -30,6 +32,26 @@ export const useRouteGeometry = (
             if (!geometry?.directions.length) return;
             const allCoords = geometry.directions.flatMap((d) => d.coordinates);
             if (!allCoords.length) return;
+            let minLon = Infinity;
+            let maxLon = -Infinity;
+            let minLat = Infinity;
+            let maxLat = -Infinity;
+
+            for (const [lon, lat] of allCoords) {
+                if (lon < minLon) minLon = lon;
+                if (lon > maxLon) maxLon = lon;
+                if (lat < minLat) minLat = lat;
+                if (lat > maxLat) maxLat = lat;
+            }
+
+            const lonSpread = maxLon - minLon;
+            const latSpread = maxLat - minLat;
+            const lonPad = Math.max(lonSpread * 0.18, 0.0035);
+            const latPad = Math.max(latSpread * 0.18, 0.0035);
+            onRouteBoundsChange?.({
+                ne: [maxLon + lonPad, maxLat + latPad],
+                sw: [minLon - lonPad, minLat - latPad],
+            });
             const sum = allCoords.reduce((acc, c) => ({ lon: acc.lon + c[0], lat: acc.lat + c[1] }), { lon: 0, lat: 0 });
             onCameraFocus?.(sum.lon / allCoords.length, sum.lat / allCoords.length);
         })();

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { StopEta } from '../../../types/vehicles';
-import { fetchStopEtas } from '../../../services/cgmApi/stopEtas';
+import { fetchFullStopSchedule, fetchStopEtas } from '../../../services/cgmApi/stopEtas';
 import { MAX_RENDERED_STOPS } from '../../map/constants';
 import { Stop } from '../../../services/stopsApi';
 
@@ -19,8 +19,8 @@ export const useStopEtas = () => {
 
     const refreshEtasForStop = useCallback(async (stopId: string) => {
         try {
-            const etas = await fetchStopEtas([stopId]);
-            setEtasByStopId((prev) => ({ ...prev, ...etas }));
+            const fullEtas = await fetchFullStopSchedule(stopId);
+            setEtasByStopId((prev) => ({ ...prev, [stopId]: fullEtas }));
         } catch (err) {
             console.warn('Failed to fetch stop ETA:', err);
         }

@@ -15,6 +15,16 @@ export const useSearch = (searchableStops: Stop[], staticLines: AvailableLine[])
     const [locationSearchLoading, setLocationSearchLoading] = useState(false);
 
     useEffect(() => {
+        if (searchModalVisible) {
+            return;
+        }
+
+        setLocationSearchQuery('');
+        setLocationSearchResults([]);
+        setLocationSearchLoading(false);
+    }, [searchModalVisible]);
+
+    useEffect(() => {
         const q = locationSearchQuery.trim();
         if (!q) { setLocationSearchResults([]); setLocationSearchLoading(false); return; }
         let isMounted = true;

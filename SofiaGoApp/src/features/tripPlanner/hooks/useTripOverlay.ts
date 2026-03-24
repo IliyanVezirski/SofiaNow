@@ -1,6 +1,6 @@
 import { useMemo, useEffect } from 'react';
 import { Stop } from '../../../services/stopsApi';
-import { TripRouteGeoJSON } from '../../../screens/TripPlannerScreen';
+import { TripRouteGeoJSON } from '../utils/routeGeoJson';
 import { fetchStopEtas } from '../../../services/cgmApi/stopEtas';
 
 type TripPlannerOverlayStop = { name: string; lat: number; lon: number; stopCode?: string };

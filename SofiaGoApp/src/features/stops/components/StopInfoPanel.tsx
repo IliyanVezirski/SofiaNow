@@ -4,7 +4,7 @@ import { Stop } from '../../../services/stopsApi';
 import { StopEta } from '../../../types/vehicles';
 import { getEtaScheduleInfo } from '../../../services/cgmApi/schedules';
 import { getVehicleAccentColor, getVehicleIcon, formatUnixTime } from '../../../services/transitUtils';
-import { STOP_ETA_PREVIEW_COUNT, formatMinSinceMidnight } from '../../map/constants';
+import { formatMinSinceMidnight } from '../../map/constants';
 import { ArrivalReminderControl } from '../../notifications/components/ArrivalReminderControl';
 import { ReminderCenterButton } from '../../notifications/components/ReminderCenterButton';
 
@@ -16,22 +16,21 @@ interface Props {
 }
 
 export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSchedule }) => {
-    const visibleEtas = etas.slice(0, STOP_ETA_PREVIEW_COUNT);
+    const visibleEtas = etas;
 
     return (
         <Modal transparent animationType="fade" visible onRequestClose={onClose} statusBarTranslucent>
             <View style={styles.modalRoot}>
                 <Pressable style={styles.backdrop} onPress={onClose} />
-                <ReminderCenterButton anchorStyle={styles.reminderCenterAnchor} />
                 <View style={styles.panel}>
                     <View style={styles.header}>
-                        <Text style={styles.title}>{`\uD83D\uDE8F ${stop.name}`}</Text>
+                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.title}>{`\uD83D\uDE8F ${stop.name}`}</Text>
                         <Pressable style={styles.closeBtn} onPress={onClose}>
-                            <Text style={styles.closeBtnText}>{'\u00D7'}</Text>
+                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.closeBtnText}>{'\u00D7'}</Text>
                         </Pressable>
                     </View>
                     <ScrollView style={styles.scroll} nestedScrollEnabled>
-                        <Text style={styles.info}>{`Линии: ${stop.lines.slice(0, 8).join(', ') || 'н/д'}`}</Text>
+                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.info}>{`Линии: ${stop.lines.slice(0, 8).join(', ') || 'н/д'}`}</Text>
                         {visibleEtas.length > 0 ? visibleEtas.map((eta) => {
                             const info = getEtaScheduleInfo(eta);
                             const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
@@ -47,13 +46,13 @@ export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSche
                                         <View style={styles.etaInfoWrap}>
                                             <View style={styles.etaHeaderRow}>
                                                 <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
-                                                    <Text style={styles.vehicleBadgeText}>{getVehicleIcon(eta.type)}</Text>
+                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleBadgeText}>{getVehicleIcon(eta.type)}</Text>
                                                 </View>
                                                 <View style={styles.etaTextWrap}>
-                                                    <Text style={styles.etaLineText} numberOfLines={2}>
+                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.etaLineText} numberOfLines={2}>
                                                         {lineLabel}
                                                     </Text>
-                                                    <Text style={styles.etaMetaText}>
+                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.etaMetaText}>
                                                         {`${eta.minutesAway} мин • ${formatUnixTime(eta.arrivalTimestamp)}`}
                                                         {schedText ? ` (разп. ${schedText})` : ''}
                                                         {delayText ? ' ' : ''}
@@ -70,11 +69,14 @@ export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSche
                                     </View>
                                 </View>
                             );
-                        }) : <Text style={styles.info}>Няма налични ETA в момента</Text>}
+                        }) : <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.info}>Няма налични ETA в момента</Text>}
                     </ScrollView>
-                    <TouchableOpacity style={styles.scheduleBtn} onPress={() => onOpenSchedule(stop.id, stop.name)}>
-                        <Text style={styles.scheduleBtnText}>{'\uD83D\uDCC5'} Разписание</Text>
-                    </TouchableOpacity>
+                    <View style={styles.footerActions}>
+                        <ReminderCenterButton inline />
+                        <TouchableOpacity style={styles.scheduleBtn} onPress={() => onOpenSchedule(stop.id, stop.name)}>
+                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.scheduleBtnText}>{'\uD83D\uDCC5'} Разписание</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </View>
         </Modal>
@@ -90,12 +92,8 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFillObject,
         backgroundColor: 'transparent',
     },
-    reminderCenterAnchor: {
-        top: 56,
-        right: 16,
-    },
     panel: {
-        marginBottom: 110, marginHorizontal: 16, maxHeight: 280,
+        marginBottom: 188, marginHorizontal: 16, maxHeight: 280,
         backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, zIndex: 25, elevation: 25,
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4,
     },
@@ -152,6 +150,12 @@ const styles = StyleSheet.create({
     vehicleBadgeText: {
         fontSize: 15,
     },
-    scheduleBtn: { marginTop: 8, backgroundColor: '#1D4ED8', borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
+    footerActions: {
+        marginTop: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    scheduleBtn: { flex: 1, backgroundColor: '#1D4ED8', borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
     scheduleBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 });

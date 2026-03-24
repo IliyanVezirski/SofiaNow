@@ -93,6 +93,19 @@ const normalizeText = (value: string) => value
     .replace(/\s+/g, ' ')
     .replace(/[.\-–—,;:()]/g, '');
 
+const matchesNormalizedText = (candidate: string, targets: string[]) => {
+    const normalizedCandidate = normalizeText(candidate || '');
+    if (!normalizedCandidate || targets.length === 0) {
+        return false;
+    }
+
+    return targets.some((target) => (
+        normalizedCandidate === target
+        || normalizedCandidate.includes(target)
+        || target.includes(normalizedCandidate)
+    ));
+};
+
 const sortLines = (lines: AvailableLine[]) => lines.sort((left, right) => (
     left.line.localeCompare(right.line, 'bg', { numeric: true })
 ));
@@ -633,30 +646,80 @@ export const getTripApiStopScheduleEntries = (
     stopId: string,
     directionId: string | null | undefined,
     directionName: string | null | undefined,
+    directionAliases: string[] = [],
     dayType: DayType,
 ) => {
     if (!lineSchedule) return null;
 
-    const normalizedDirection = normalizeText(directionName || '');
-    const direction = lineSchedule.directions.find((candidate) => {
+    const requestedStopIds = Array.from(new Set(
+        String(stopId || '')
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean),
+    ));
+    const normalizedDirectionTargets = Array.from(new Set(
+        [directionName, ...directionAliases]
+            .filter((value): value is string => Boolean(value))
+            .map((value) => normalizeText(value)),
+    ));
+
+    const matchStop = (candidate: TripApiStop) => (
+        requestedStopIds.includes(candidate.id)
+        || requestedStopIds.includes(candidate.apiStopId)
+    );
+
+    const preferredDirections = lineSchedule.directions.filter((candidate) => {
         if (directionId && candidate.id === directionId) {
             return true;
         }
 
-        const normalizedCandidate = normalizeText(candidate.name);
-        return normalizedCandidate === normalizedDirection
-            || normalizedCandidate.includes(normalizedDirection)
-            || normalizedDirection.includes(normalizedCandidate);
+        return matchesNormalizedText(candidate.name, normalizedDirectionTargets);
     });
-    if (!direction) return [];
 
-    const stop = direction.stops.find((candidate) => candidate.id === stopId);
-    if (!stop) return [];
+    const collectEntries = (directions: TripApiDirection[]) => {
+        const mergedEntries = new Map<string, StaticScheduleEntry>();
 
-    return stop.scheduleEntries
-        .filter((entry) => entry.dayType === dayType)
-        .map(({ dayType: _dayType, ...entry }) => entry)
-        .sort((left, right) => left.destination.localeCompare(right.destination, 'bg'));
+        directions.forEach((direction) => {
+            direction.stops
+                .filter(matchStop)
+                .forEach((stop) => {
+                    stop.scheduleEntries
+                        .filter((entry) => entry.dayType === dayType)
+                        .forEach(({ dayType: _dayType, ...entry }) => {
+                            const entryKey = `${entry.line}|${entry.type}|${entry.destination}|${entry.routeId}`;
+                            const existing = mergedEntries.get(entryKey);
+                            if (!existing) {
+                                mergedEntries.set(entryKey, {
+                                    ...entry,
+                                    times: [...entry.times],
+                                    partialTimeKinds: entry.partialTimeKinds ? { ...entry.partialTimeKinds } : undefined,
+                                });
+                                return;
+                            }
+
+                            const mergedTimes = new Set(existing.times);
+                            entry.times.forEach((time) => mergedTimes.add(time));
+                            existing.times = Array.from(mergedTimes).sort((left, right) => left - right);
+                            if (entry.partialTimeKinds) {
+                                existing.partialTimeKinds = {
+                                    ...(existing.partialTimeKinds || {}),
+                                    ...entry.partialTimeKinds,
+                                };
+                            }
+                        });
+                });
+        });
+
+        return Array.from(mergedEntries.values())
+            .sort((left, right) => left.destination.localeCompare(right.destination, 'bg'));
+    };
+
+    const preferredEntries = collectEntries(preferredDirections);
+    if (preferredEntries.length > 0) {
+        return preferredEntries;
+    }
+
+    return collectEntries(lineSchedule.directions);
 };
 
 export const convertTripApiScheduleToRouteGeometry = (lineSchedule: TripApiLineSchedule): LineRouteGeometry => {

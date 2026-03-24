@@ -39,6 +39,18 @@ export const useFavorites = () => {
         setFavoritePlaces(next);
     }, []);
 
+    const createFavorite = useCallback(async (input: {
+        name: string;
+        latitude: number;
+        longitude: number;
+        selectedStopId?: string | null;
+        selectedStopName?: string | null;
+        selectedLines?: FavoriteLinePreference[];
+    }) => {
+        const next = await addFavoritePlace(input);
+        setFavoritePlaces(next);
+    }, []);
+
     const removeFav = useCallback(async (favoriteId: string) => {
         const next = await removeFavoritePlace(favoriteId);
         setFavoritePlaces(next);
@@ -54,5 +66,5 @@ export const useFavorites = () => {
         setFavoritePlaces(next);
     }, []);
 
-    return { favoritePlaces, favoritesVisible, setFavoritesVisible, saveFavorite, removeFavorite: removeFav, updateFavorite: updateFav };
+    return { favoritePlaces, favoritesVisible, setFavoritesVisible, saveFavorite, createFavorite, removeFavorite: removeFav, updateFavorite: updateFav };
 };

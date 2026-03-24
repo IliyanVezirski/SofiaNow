@@ -5,13 +5,15 @@ import * as Notifications from 'expo-notifications';
 import * as NavigationBar from 'expo-navigation-bar';
 import MapScreen from './src/screens/MapScreen';
 import SchedulesScreen from './src/screens/SchedulesScreen';
-import TripPlannerScreen, { TripRouteGeoJSON } from './src/screens/TripPlannerScreen';
+import TripPlannerScreen from './src/screens/TripPlannerScreen';
 import NearbyScreen from './src/screens/NearbyScreen';
 import { RouteSelection } from './src/types/routes';
 import { TripLocation } from './src/services/tripPlanner';
 import { initializeTransitArrivalNotifications, refreshTransitArrivalReminders } from './src/services/notifications/transitArrivalNotifications';
+import { ensureTransitReminderBackgroundTaskRegistered } from './src/services/notifications/transitReminderBackgroundTask';
 import { ReminderCenterButton } from './src/features/notifications/components/ReminderCenterButton';
 import { reconcileFavoriteCommuteNotifications } from './src/services/places';
+import { TripRouteGeoJSON } from './src/features/tripPlanner/utils/routeGeoJson';
 
 type BottomTab = 'map' | 'schedules' | 'planner' | 'nearby';
 
@@ -45,6 +47,7 @@ export default function App() {
   useEffect(() => {
     void NavigationBar.setVisibilityAsync('hidden');
     void initializeTransitArrivalNotifications();
+    void ensureTransitReminderBackgroundTaskRegistered();
     void refreshTransitArrivalReminders();
     void reconcileFavoriteCommuteNotifications();
 
@@ -98,6 +101,12 @@ export default function App() {
           showReportButton={false}
           filterPanelVisible={mapFiltersVisible}
           onCloseFilterPanel={() => setMapFiltersVisible(false)}
+          onShowTripRoute={(route) => {
+            setTripPlannerRoute(route);
+            setMapFiltersVisible(false);
+            setDismissTransientPanelsToken((value) => value + 1);
+            setActiveTab('map');
+          }}
           searchRequestToken={openSearchToken}
           favoritesRequestToken={toggleFavoritesToken}
           dismissTransientPanelsToken={dismissTransientPanelsToken}
@@ -141,6 +150,7 @@ export default function App() {
         <View style={[styles.schedulesOverlay, activeTab !== 'planner' && { display: 'none' }]}>
           <TripPlannerScreen
             onClose={() => setActiveTab('map')}
+            isActive={activeTab === 'planner'}
             initialFromLocation={plannerInitialFrom}
             initialToLocation={plannerInitialTo}
             initialFromToken={plannerInitialFromToken}

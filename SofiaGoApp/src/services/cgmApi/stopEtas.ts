@@ -115,9 +115,11 @@ export const fetchFullStopSchedule = async (stopId: string): Promise<StopEta[]> 
 
         return results
             .sort((a, b) => {
+                const arrivalDiff = a.arrivalTimestamp - b.arrivalTimestamp;
+                if (arrivalDiff !== 0) return arrivalDiff;
                 const lineCmp = a.line.localeCompare(b.line, 'bg', { numeric: true });
                 if (lineCmp !== 0) return lineCmp;
-                return a.arrivalTimestamp - b.arrivalTimestamp;
+                return (a.destination || '').localeCompare(b.destination || '', 'bg');
             })
             .slice(0, MAX_FULL_SCHEDULE_RESULTS);
     } catch (error) {

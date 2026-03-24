@@ -26,18 +26,18 @@ export const StopScheduleModal: React.FC<Props> = ({
             <View style={styles.fullScreen}>
                 <View style={styles.header}>
                     <View style={styles.titleWrap}>
-                        <Text style={styles.title}>{`\uD83D\uDCC5 ${stopName}`}</Text>
-                        <Text style={styles.meta}>{`Спирка ${stopId}`}</Text>
+                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.title}>{`\uD83D\uDCC5 ${stopName}`}</Text>
+                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.meta}>{`Спирка ${stopId}`}</Text>
                     </View>
                     <Pressable style={styles.closeBtn} onPress={onClose}>
-                        <Text style={styles.closeBtnText}>{'\u00D7'}</Text>
+                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.closeBtnText}>{'\u00D7'}</Text>
                     </Pressable>
                 </View>
-                {loading && <Text style={styles.eta}>Зареждане...</Text>}
+                {loading && <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.eta}>Зареждане...</Text>}
                 <ScrollView style={styles.list} showsVerticalScrollIndicator nestedScrollEnabled>
                     {realtime.length > 0 && (
                         <>
-                            <Text style={styles.sectionTitle}>{'\uD83D\uDD34'} В реално време</Text>
+                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.sectionTitle}>{'\uD83D\uDD34'} В реално време</Text>
                             {realtime.map((eta) => {
                                         const info = getEtaScheduleInfo(eta);
                                         const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
@@ -50,9 +50,9 @@ export const StopScheduleModal: React.FC<Props> = ({
                                             <View key={`rt-${eta.tripId}-${eta.arrivalTimestamp}`} style={styles.row}>
                                                 <View style={styles.etaHeaderRow}>
                                                     <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
-                                                        <Text style={styles.vehicleBadgeText}>{getVehicleIcon(eta.type)}</Text>
+                                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleBadgeText}>{getVehicleIcon(eta.type)}</Text>
                                                     </View>
-                                                    <Text style={styles.eta}>
+                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.eta}>
                                                         {`${eta.line} \u2192 ${eta.destination || 'н/д'} \u2022 ${eta.minutesAway} мин \u2022 ${formatUnixTime(eta.arrivalTimestamp)}`}
                                                         {schedText ? ` (разп. ${schedText})` : ''}
                                                         {delayText ? ' ' : ''}
@@ -70,30 +70,30 @@ export const StopScheduleModal: React.FC<Props> = ({
                     )}
                     {staticSchedule.length > 0 && (
                         <>
-                            <Text style={[styles.sectionTitle, { marginTop: realtime.length > 0 ? 12 : 0 }]}>{'\uD83D\uDCCB'} Статично разписание</Text>
+                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={[styles.sectionTitle, { marginTop: realtime.length > 0 ? 12 : 0 }]}>{'\uD83D\uDCCB'} Статично разписание</Text>
                             <View style={styles.dayTypeRow}>
                                 <TouchableOpacity style={[styles.dayTypeChip, dayType === 'w' && styles.dayTypeChipActive]} onPress={() => onChangeDayType('w')}>
-                                    <Text style={[styles.dayTypeChipText, dayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
+                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={[styles.dayTypeChipText, dayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity style={[styles.dayTypeChip, dayType === 'h' && styles.dayTypeChipActive]} onPress={() => onChangeDayType('h')}>
-                                    <Text style={[styles.dayTypeChipText, dayType === 'h' && styles.dayTypeChipTextActive]}>Почивен ден</Text>
+                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={[styles.dayTypeChipText, dayType === 'h' && styles.dayTypeChipTextActive]}>Почивен ден</Text>
                                 </TouchableOpacity>
                             </View>
                             {staticSchedule.map((entry) => (
                                 <View key={`st-${entry.line}-${entry.destination}`} style={styles.row}>
                                     <View style={styles.etaHeaderRow}>
                                         <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(entry.type) }]}>
-                                            <Text style={styles.vehicleBadgeText}>{getVehicleIcon(entry.type)}</Text>
+                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleBadgeText}>{getVehicleIcon(entry.type)}</Text>
                                         </View>
-                                        <Text style={styles.eta}>{`${entry.line} \u2192 ${entry.destination}`}</Text>
+                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.eta}>{`${entry.line} \u2192 ${entry.destination}`}</Text>
                                     </View>
-                                    <Text style={styles.meta}>{entry.times.map(formatMinutesSinceMidnight).join(', ')}</Text>
+                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.meta}>{entry.times.map(formatMinutesSinceMidnight).join(', ')}</Text>
                                 </View>
                             ))}
                         </>
                     )}
                     {!loading && !realtime.length && !staticSchedule.length && (
-                        <Text style={styles.eta}>Няма налично разписание за тази спирка</Text>
+                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.eta}>Няма налично разписание за тази спирка</Text>
                     )}
                 </ScrollView>
             </View>

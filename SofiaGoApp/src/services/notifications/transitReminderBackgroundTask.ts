@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import { refreshTransitArrivalReminders } from './transitArrivalNotifications';
 
 export const TRANSIT_REMINDER_BACKGROUND_TASK = 'sofiago-transit-reminder-refresh';
@@ -16,6 +16,14 @@ const loadBackgroundTaskModules = () => {
     }
 
     if (cachedModules !== undefined) {
+        return cachedModules;
+    }
+
+    const hasTaskManagerNativeModule = !!NativeModules?.ExpoTaskManager;
+    const hasBackgroundTaskNativeModule = !!NativeModules?.ExpoBackgroundTask;
+
+    if (!hasTaskManagerNativeModule || !hasBackgroundTaskNativeModule) {
+        cachedModules = null;
         return cachedModules;
     }
 
@@ -40,16 +48,27 @@ const ensureBackgroundTaskDefined = () => {
 
     const { BackgroundTask, TaskManager } = modules;
 
-    if (!TaskManager.isTaskDefined(TRANSIT_REMINDER_BACKGROUND_TASK)) {
-        TaskManager.defineTask(TRANSIT_REMINDER_BACKGROUND_TASK, async () => {
-            try {
-                await refreshTransitArrivalReminders();
-                return BackgroundTask.BackgroundTaskResult.Success;
-            } catch (error) {
-                console.error('Transit reminder background refresh failed:', error);
-                return BackgroundTask.BackgroundTaskResult.Failed;
-            }
-        });
+    if (!BackgroundTask || !TaskManager || typeof TaskManager.isTaskDefined !== 'function' || typeof TaskManager.defineTask !== 'function') {
+        cachedModules = null;
+        return false;
+    }
+
+    try {
+        if (!TaskManager.isTaskDefined(TRANSIT_REMINDER_BACKGROUND_TASK)) {
+            TaskManager.defineTask(TRANSIT_REMINDER_BACKGROUND_TASK, async () => {
+                try {
+                    await refreshTransitArrivalReminders();
+                    return BackgroundTask.BackgroundTaskResult.Success;
+                } catch (error) {
+                    console.error('Transit reminder background refresh failed:', error);
+                    return BackgroundTask.BackgroundTaskResult.Failed;
+                }
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to define transit reminder background task in this build:', error);
+        cachedModules = null;
+        return false;
     }
 
     backgroundTaskDefinitionChecked = true;
@@ -68,23 +87,52 @@ export const ensureTransitReminderBackgroundTaskRegistered = async () => {
 
     const { BackgroundTask, TaskManager } = modules;
 
-    ensureBackgroundTaskDefined();
+    if (!ensureBackgroundTaskDefined()) {
+        return { ok: false, message: 'Background tasks are not available in this build.' };
+    }
 
-    const taskManagerAvailable = await TaskManager.isAvailableAsync();
+    if (!BackgroundTask || !TaskManager || typeof TaskManager.isAvailableAsync !== 'function' || typeof TaskManager.isTaskRegisteredAsync !== 'function' || typeof BackgroundTask.getStatusAsync !== 'function' || typeof BackgroundTask.registerTaskAsync !== 'function') {
+        return { ok: false, message: 'Background tasks are not available in this build.' };
+    }
+
+    let taskManagerAvailable = false;
+    try {
+        taskManagerAvailable = await TaskManager.isAvailableAsync();
+    } catch (error) {
+        console.warn('TaskManager availability check failed:', error);
+        return { ok: false, message: 'TaskManager is not available in this build.' };
+    }
     if (!taskManagerAvailable) {
         return { ok: false, message: 'TaskManager is not available in this build.' };
     }
 
-    const status = await BackgroundTask.getStatusAsync();
+    let status;
+    try {
+        status = await BackgroundTask.getStatusAsync();
+    } catch (error) {
+        console.warn('Background task status check failed:', error);
+        return { ok: false, message: 'Background tasks are not available on this device right now.' };
+    }
     if (status !== BackgroundTask.BackgroundTaskStatus.Available) {
         return { ok: false, message: 'Background tasks are not available on this device right now.' };
     }
 
-    const alreadyRegistered = await TaskManager.isTaskRegisteredAsync(TRANSIT_REMINDER_BACKGROUND_TASK);
+    let alreadyRegistered = false;
+    try {
+        alreadyRegistered = await TaskManager.isTaskRegisteredAsync(TRANSIT_REMINDER_BACKGROUND_TASK);
+    } catch (error) {
+        console.warn('Background task registration check failed:', error);
+        return { ok: false, message: 'Background tasks are not available in this build.' };
+    }
     if (!alreadyRegistered) {
-        await BackgroundTask.registerTaskAsync(TRANSIT_REMINDER_BACKGROUND_TASK, {
-            minimumInterval: BACKGROUND_MIN_INTERVAL_MINUTES,
-        });
+        try {
+            await BackgroundTask.registerTaskAsync(TRANSIT_REMINDER_BACKGROUND_TASK, {
+                minimumInterval: BACKGROUND_MIN_INTERVAL_MINUTES,
+            });
+        } catch (error) {
+            console.warn('Failed to register transit reminder background task:', error);
+            return { ok: false, message: 'Background tasks are not available in this build.' };
+        }
     }
 
     return {
@@ -107,7 +155,16 @@ export const unregisterTransitReminderBackgroundTask = async () => {
 
     const { BackgroundTask, TaskManager } = modules;
 
-    const isRegistered = await TaskManager.isTaskRegisteredAsync(TRANSIT_REMINDER_BACKGROUND_TASK);
+    if (!BackgroundTask || !TaskManager || typeof TaskManager.isTaskRegisteredAsync !== 'function' || typeof BackgroundTask.unregisterTaskAsync !== 'function') {
+        return;
+    }
+
+    let isRegistered = false;
+    try {
+        isRegistered = await TaskManager.isTaskRegisteredAsync(TRANSIT_REMINDER_BACKGROUND_TASK);
+    } catch {
+        return;
+    }
     if (isRegistered) {
         await BackgroundTask.unregisterTaskAsync(TRANSIT_REMINDER_BACKGROUND_TASK);
     }
@@ -121,6 +178,10 @@ export const triggerTransitReminderBackgroundTaskForTesting = async () => {
         }
 
         const { BackgroundTask } = modules;
+        if (!BackgroundTask || typeof BackgroundTask.triggerTaskWorkerForTestingAsync !== 'function') {
+            return;
+        }
+
         await BackgroundTask.triggerTaskWorkerForTestingAsync();
     }
 };

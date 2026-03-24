@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import {
   planTrip,
-  decodePolyline,
   searchLocations,
   TripRequest,
   Itinerary,
@@ -23,6 +22,7 @@ import {
 import * as Location from 'expo-location';
 import { ArrivalReminderControl } from '../features/notifications/components/ArrivalReminderControl';
 import { createStopEtaFromTripPlannerLeg } from '../features/notifications/utils/tripPlannerReminder';
+import { buildRouteGeoJSON, TripRouteGeoJSON } from '../features/tripPlanner/utils/routeGeoJson';
 
 export interface TripLocation {
   latitude: number;
@@ -74,6 +74,9 @@ const formatTimeForInput = (date: Date) => (
   `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 );
 
+const getCurrentPlannerDateInput = () => formatDateForInput(new Date());
+const getCurrentPlannerTimeInput = () => formatTimeForInput(new Date());
+
 const parseInputDate = (value: string) => {
   const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(value || '').trim());
   if (!match) {
@@ -106,89 +109,6 @@ const PLAN_LABELS: Record<PlanType, string> = {
   '2': 'По-малко прекачвания',
 };
 
-const MODE_COLORS: Record<string, string> = {
-  WALK: '#94A3B8',
-  BUS: '#2563EB',
-  TRAM: '#DC2626',
-  TROLLEYBUS: '#7C3AED',
-  SUBWAY: '#059669',
-  RAIL: '#D97706',
-};
-
-export interface TripRouteStop {
-  name: string;
-  lat: number;
-  lon: number;
-  stopCode?: string;
-}
-
-export interface TripRouteGeoJSON {
-  type: 'FeatureCollection';
-  features: Array<{
-    type: 'Feature';
-    properties: { mode: string; color: string };
-    geometry: { type: 'LineString'; coordinates: [number, number][] };
-  }>;
-  /** Start and end points of the whole itinerary */
-  endpoints: { from: TripRouteStop; to: TripRouteStop };
-  /** All transit stops along the route (from/to + intermediate per transit leg) */
-  transitStops: TripRouteStop[];
-}
-
-function buildRouteGeoJSON(it: Itinerary): TripRouteGeoJSON {
-  if (!Array.isArray(it.legs) || it.legs.length === 0) {
-    throw new Error('Маршрутът няма достатъчно данни за показване на картата.');
-  }
-
-  const transitStops: TripRouteStop[] = [];
-  const seen = new Set<string>();
-
-  for (const leg of it.legs) {
-    if (leg.mode === 'WALK') continue;
-
-    const addStop = (place: typeof leg.from) => {
-      const key = place.stop?.code ?? `${place.lat},${place.lon}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      transitStops.push({
-        name: place.name,
-        lat: place.lat,
-        lon: place.lon,
-        stopCode: place.stop?.code,
-      });
-    };
-
-    addStop(leg.from);
-    if (leg.intermediatePlaces) {
-      for (const p of leg.intermediatePlaces) addStop(p);
-    }
-    addStop(leg.to);
-  }
-
-  const firstLeg = it.legs[0];
-  const lastLeg = it.legs[it.legs.length - 1];
-
-  return {
-    type: 'FeatureCollection',
-    features: it.legs.map((leg) => ({
-      type: 'Feature' as const,
-      properties: {
-        mode: leg.mode,
-        color: MODE_COLORS[leg.mode] ?? '#1E3A8A',
-      },
-      geometry: {
-        type: 'LineString' as const,
-        coordinates: decodePolyline(leg.legGeometry.points),
-      },
-    })),
-    endpoints: {
-      from: { name: firstLeg.from.name, lat: firstLeg.from.lat, lon: firstLeg.from.lon },
-      to: { name: lastLeg.to.name, lat: lastLeg.to.lat, lon: lastLeg.to.lon },
-    },
-    transitStops,
-  };
-}
-
 /* ─── component ───────────────────────────────────────────────── */
 
 interface Props {
@@ -197,10 +117,11 @@ interface Props {
   initialFromLocation?: TripLocation | null;
   initialToLocation?: TripLocation | null;
   initialFromToken?: number;
+  isActive?: boolean;
 }
 
-export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLocation, initialToLocation, initialFromToken }: Props) {
-  const initialNow = new Date();
+export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLocation, initialToLocation, initialFromToken, isActive = true }: Props) {
+  const previousIsActiveRef = useRef(isActive);
   const [fromText, setFromText] = useState('');
   const [toText, setToText] = useState('');
   const [fromLoc, setFromLoc] = useState<TripLocation | null>(null);
@@ -213,8 +134,8 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
   const manualFromEditedRef = useRef(false);
 
   const [planType, setPlanType] = useState<PlanType>('0');
-  const [dateInput, setDateInput] = useState(formatDateForInput(initialNow));
-  const [timeInput, setTimeInput] = useState(formatTimeForInput(initialNow));
+  const [dateInput, setDateInput] = useState(() => getCurrentPlannerDateInput());
+  const [timeInput, setTimeInput] = useState(() => getCurrentPlannerTimeInput());
   const [arriveBy, setArriveBy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -292,6 +213,18 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
     setExpandedIdx(null);
     setError(null);
   }, [initialToLocation, initialFromToken]);
+
+  useEffect(() => {
+    const becameActive = isActive && !previousIsActiveRef.current;
+    previousIsActiveRef.current = isActive;
+
+    if (!becameActive || itineraries?.length) {
+      return;
+    }
+
+    setDateInput(getCurrentPlannerDateInput());
+    setTimeInput(getCurrentPlannerTimeInput());
+  }, [isActive, itineraries]);
 
   /* autocomplete */
   const onChangeText = useCallback((field: 'from' | 'to', text: string) => {
@@ -372,7 +305,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
     <View style={s.root}>
       {/* Header */}
       <View style={s.header}>
-        <Text style={s.title}>🗺️ Маршрутизатор</Text>
+        <Text style={s.title}>🗺️ Планирай пътуване</Text>
         {onClose && (
           <TouchableOpacity onPress={onClose} style={s.closeButton}>
             <Text style={s.closeButtonText}>✕</Text>
@@ -393,7 +326,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
           />
           <TextInput
             style={s.input}
-            placeholder="Докъде..."
+            placeholder="До къде"
             placeholderTextColor="#94A3B8"
             value={toText}
             onChangeText={(t) => onChangeText('to', t)}
@@ -437,9 +370,8 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
           <TouchableOpacity
             style={s.quickDateChip}
             onPress={() => {
-              const today = new Date();
-              setDateInput(formatDateForInput(today));
-              setTimeInput(formatTimeForInput(today));
+              setDateInput(getCurrentPlannerDateInput());
+              setTimeInput(getCurrentPlannerTimeInput());
             }}
           >
             <Text style={s.quickDateChipText}>Днес</Text>
@@ -456,7 +388,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
           </TouchableOpacity>
           <TouchableOpacity
             style={s.quickDateChip}
-            onPress={() => setTimeInput(formatTimeForInput(new Date()))}
+            onPress={() => setTimeInput(getCurrentPlannerTimeInput())}
           >
             <Text style={s.quickDateChipText}>Сега</Text>
           </TouchableOpacity>
@@ -469,7 +401,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
               style={s.datetimeInput}
               value={dateInput}
               onChangeText={(value) => setDateInput(normalizeDateInput(value))}
-              placeholder="24.03.2026"
+              placeholder={getCurrentPlannerDateInput()}
               placeholderTextColor="#94A3B8"
               keyboardType="number-pad"
             />
@@ -480,7 +412,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
               style={s.datetimeInput}
               value={timeInput}
               onChangeText={(value) => setTimeInput(normalizeTimeInput(value))}
-              placeholder="08:30"
+              placeholder={getCurrentPlannerTimeInput()}
               placeholderTextColor="#94A3B8"
               keyboardType="numbers-and-punctuation"
             />

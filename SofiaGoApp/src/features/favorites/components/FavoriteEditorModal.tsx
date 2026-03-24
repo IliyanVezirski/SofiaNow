@@ -1,11 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { FavoriteLinePreference, FavoritePlace, PlaceSearchResult, getFavoritePresetLabel, hasFavoriteCoordinates, searchLocations } from '../../../services/places';
+import { FavoriteLinePreference, FavoritePlace, PlaceSearchResult, formatFavoriteCommuteWeekdays, getFavoritePresetLabel, hasFavoriteCoordinates, searchLocations } from '../../../services/places';
 import { Stop, summarizeStopDirections } from '../../../services/stopsApi';
+
+export type FavoriteEditorSection = 'name' | 'location' | 'stop' | 'lines';
 
 interface Props {
     visible: boolean;
     favorite: FavoritePlace | null;
+    isDraft?: boolean;
+    initialSection?: FavoriteEditorSection | null;
     searchableStops: Stop[];
     currentPin?: { latitude: number; longitude: number } | null;
     currentLocation?: { latitude: number; longitude: number } | null;
@@ -33,6 +37,8 @@ const sortLines = (lines: string[]) => [...lines].sort((left, right) => left.loc
 export const FavoriteEditorModal: React.FC<Props> = ({
     visible,
     favorite,
+    isDraft = false,
+    initialSection = null,
     searchableStops,
     currentPin,
     currentLocation,
@@ -40,6 +46,10 @@ export const FavoriteEditorModal: React.FC<Props> = ({
     onConfigureRoute,
     onSave,
 }) => {
+    const contentScrollRef = useRef<ScrollView | null>(null);
+    const nameInputRef = useRef<TextInput | null>(null);
+    const locationSearchInputRef = useRef<TextInput | null>(null);
+    const stopInputRef = useRef<TextInput | null>(null);
     const [name, setName] = useState('');
     const [latitude, setLatitude] = useState<number | null>(null);
     const [longitude, setLongitude] = useState<number | null>(null);
@@ -49,6 +59,10 @@ export const FavoriteEditorModal: React.FC<Props> = ({
     const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
     const [stopQuery, setStopQuery] = useState('');
     const [linePreferences, setLinePreferences] = useState<FavoriteLinePreference[]>([]);
+    const [locationSectionOffset, setLocationSectionOffset] = useState(0);
+    const [stopSectionOffset, setStopSectionOffset] = useState(0);
+    const [linesSectionOffset, setLinesSectionOffset] = useState(0);
+    const [showPlaceFields, setShowPlaceFields] = useState(false);
 
     useEffect(() => {
         if (!favorite || !visible) {
@@ -64,7 +78,38 @@ export const FavoriteEditorModal: React.FC<Props> = ({
         setSelectedStopId(favorite.selectedStopId);
         setStopQuery(favorite.selectedStopName || '');
         setLinePreferences(favorite.selectedLines || []);
-    }, [favorite, visible]);
+        setShowPlaceFields(!!initialSection);
+    }, [favorite, initialSection, visible]);
+
+    useEffect(() => {
+        if (!visible || !favorite || !initialSection || !showPlaceFields) {
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            if (initialSection === 'name') {
+                contentScrollRef.current?.scrollTo({ x: 0, y: 0, animated: true });
+                nameInputRef.current?.focus();
+                return;
+            }
+
+            if (initialSection === 'location') {
+                contentScrollRef.current?.scrollTo({ x: 0, y: Math.max(0, locationSectionOffset - 12), animated: true });
+                locationSearchInputRef.current?.focus();
+                return;
+            }
+
+            if (initialSection === 'stop') {
+                contentScrollRef.current?.scrollTo({ x: 0, y: Math.max(0, stopSectionOffset - 12), animated: true });
+                stopInputRef.current?.focus();
+                return;
+            }
+
+            contentScrollRef.current?.scrollTo({ x: 0, y: Math.max(0, linesSectionOffset - 12), animated: true });
+        }, 120);
+
+        return () => clearTimeout(timer);
+    }, [favorite, initialSection, linesSectionOffset, locationSectionOffset, showPlaceFields, stopSectionOffset, visible]);
 
     useEffect(() => {
         const normalizedQuery = locationQuery.trim();
@@ -176,6 +221,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
     const title = favorite.name || (favorite.presetKey ? getFavoritePresetLabel(favorite.presetKey) : 'Редакция на любимо');
     const hasCoordinates = hasFavoriteCoordinates({ ...favorite, latitude, longitude });
     const enabledLines = linePreferences.filter((entry) => entry.enabled);
+    const hasSavedRoute = !!favorite.defaultCommute?.itinerarySummary;
 
     const applyLineToggle = (line: string, field: 'enabled' | 'notificationsEnabled', value: boolean) => {
         setLinePreferences((previous) => previous.map((entry) => {
@@ -217,15 +263,17 @@ export const FavoriteEditorModal: React.FC<Props> = ({
             <View style={styles.overlay}>
                 <View style={styles.card}>
                     <ScrollView
+                        ref={contentScrollRef}
                         style={styles.contentScroll}
                         contentContainerStyle={styles.contentScrollInner}
                         showsVerticalScrollIndicator={false}
                         nestedScrollEnabled
+                        keyboardShouldPersistTaps="handled"
                     >
                         <View style={styles.header}>
                             <View>
                                 <Text style={styles.title}>{title}</Text>
-                                <Text style={styles.subtitle}>Задай място, спирка, линии и известия</Text>
+                                <Text style={styles.subtitle}>{isDraft ? 'Създай ново любимо място' : 'Задай място, спирка, линии и известия'}</Text>
                             </View>
                             <Pressable onPress={onClose} style={styles.closeButton}>
                                 <Text style={styles.closeButtonText}>{'×'}</Text>
@@ -233,6 +281,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                         </View>
 
                         <TextInput
+                            ref={nameInputRef}
                             style={styles.nameInput}
                             value={name}
                             onChangeText={setName}
@@ -241,6 +290,58 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                         />
 
                         <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Изграждане на маршрут</Text>
+                            <Text style={styles.sectionHint}>
+                                {isDraft
+                                    ? 'Тук започваш и при добавяне на ново място. Ако още няма локация, отвори Персонализирай и попълни данните.'
+                                    : 'Това е основната стъпка за любимото място. Изгради маршрут до него, а от бутона долу можеш да отвориш старите полета за персонализация.'}
+                            </Text>
+                            {hasSavedRoute ? (
+                                <View style={styles.routeSummaryBox}>
+                                    <Text style={styles.routeSummaryTitle}>{favorite.defaultCommute?.routeLabel || 'Запазен маршрут'}</Text>
+                                    <Text style={styles.routeSummaryText}>{favorite.defaultCommute?.itinerarySummary}</Text>
+                                    {favorite.defaultCommute?.reminderTime ? (
+                                        <Text style={styles.routeSummaryMeta}>
+                                            {favorite.defaultCommute.arriveBy && favorite.defaultCommute.reminderOffsetMinutes
+                                                ? `Известяване: ${formatFavoriteCommuteWeekdays(favorite.defaultCommute.reminderWeekdays)} • ${favorite.defaultCommute.reminderOffsetMinutes} мин по-рано (${favorite.defaultCommute.reminderTime})`
+                                                : `Известяване: ${formatFavoriteCommuteWeekdays(favorite.defaultCommute.reminderWeekdays)} • ${favorite.defaultCommute.reminderTime}`}
+                                        </Text>
+                                    ) : (
+                                        <Text style={styles.routeSummaryMeta}>Няма запазено маршрутно известяване.</Text>
+                                    )}
+                                </View>
+                            ) : (
+                                <View style={styles.routeSummaryEmptyBox}>
+                                    <Text style={styles.routeSummaryEmptyText}>
+                                        {isDraft ? 'Още няма данни за мястото. Отвори Персонализирай, за да зададеш локация и спирка.' : 'Още няма изграден маршрут за това място.'}
+                                    </Text>
+                                </View>
+                            )}
+                            {!isDraft ? (
+                                <TouchableOpacity
+                                    style={[styles.routeButton, !hasCoordinates && styles.routeButtonDisabled]}
+                                    disabled={!hasCoordinates}
+                                    onPress={async () => {
+                                        await onConfigureRoute(favorite.id, buildDraftUpdates());
+                                        onClose();
+                                    }}
+                                >
+                                    <Text style={styles.routeButtonText}>{hasSavedRoute ? 'Изгради маршрута отново' : 'Изгради маршрут'}</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                            {!showPlaceFields ? (
+                                <TouchableOpacity
+                                    style={styles.personalizeButton}
+                                    onPress={() => setShowPlaceFields(true)}
+                                >
+                                    <Text style={styles.personalizeButtonText}>Персонализирай</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                        </View>
+
+                        {showPlaceFields ? (
+                            <>
+                        <View style={styles.section} onLayout={(event) => setLocationSectionOffset(event.nativeEvent.layout.y)}>
                             <Text style={styles.sectionTitle}>Локация</Text>
                             <Text style={styles.sectionHint}>Избери адрес, спирка, pin от картата или текуща локация. После натисни бутона за запазване в долната част.</Text>
                             <Text style={styles.locationText}>
@@ -255,6 +356,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                                 </View>
                             )}
                             <TextInput
+                                ref={locationSearchInputRef}
                                 style={styles.locationSearchInput}
                                 value={locationQuery}
                                 onChangeText={setLocationQuery}
@@ -262,7 +364,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                                 placeholderTextColor="#9CA3AF"
                             />
                             {(locationSearchLoading || locationStopResults.length > 0 || locationSearchResults.length > 0) && (
-                                <ScrollView style={styles.locationSearchList} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+                                <ScrollView style={styles.locationSearchList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                                     {locationStopResults.map((stop) => (
                                         <TouchableOpacity
                                             key={`location-stop-${stop.id}`}
@@ -334,17 +436,18 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                             </View>
                         </View>
 
-                        <View style={styles.section}>
+                        <View style={styles.section} onLayout={(event) => setStopSectionOffset(event.nativeEvent.layout.y)}>
                             <Text style={styles.sectionTitle}>Спирка, от която тръгваш</Text>
                             <Text style={styles.sectionHint}>След като зададеш адрес или локация, избери спирка оттук и после маркирай линиите отдолу.</Text>
                             <TextInput
+                                ref={stopInputRef}
                                 style={styles.stopInput}
                                 value={stopQuery}
                                 onChangeText={setStopQuery}
                                 placeholder="Търси по име или код на спирка"
                                 placeholderTextColor="#9CA3AF"
                             />
-                            <ScrollView style={styles.stopList} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+                            <ScrollView style={styles.stopList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                                 {visibleStops.map((stop) => {
                                     const isSelected = stop.id === selectedStopId;
                                     return (
@@ -364,13 +467,13 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                             </ScrollView>
                         </View>
 
-                        <View style={styles.section}>
+                        <View style={styles.section} onLayout={(event) => setLinesSectionOffset(event.nativeEvent.layout.y)}>
                             <Text style={styles.sectionTitle}>Линии и уведомяване</Text>
                             {!selectedStopLines.length && (
                                 <Text style={styles.emptyState}>Избери спирка, за да покажем наличните линии.</Text>
                             )}
                             {!!selectedStopLines.length && (
-                                <ScrollView style={styles.lineList} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+                                <ScrollView style={styles.lineList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                                     {linePreferences.map((entry) => (
                                         <View key={entry.line} style={styles.lineRow}>
                                             <View style={styles.lineLabelWrap}>
@@ -401,15 +504,15 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                             )}
                         </View>
 
-                        {hasCoordinates && (
+                        {hasCoordinates && !isDraft && (
                             <TouchableOpacity
-                                style={styles.routeButton}
+                                style={[styles.routeButton, styles.routeCustomizeButton]}
                                 onPress={async () => {
                                     await onConfigureRoute(favorite.id, buildDraftUpdates());
                                     onClose();
                                 }}
                             >
-                                <Text style={styles.routeButtonText}>Настрой маршрут и час</Text>
+                                <Text style={styles.routeButtonText}>{hasSavedRoute ? 'Персонализация на изградения маршрут' : 'Създай индивидуален маршрут'}</Text>
                             </TouchableOpacity>
                         )}
 
@@ -421,8 +524,10 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                                 onClose();
                             }}
                         >
-                            <Text style={styles.saveButtonText}>Запази мястото</Text>
+                            <Text style={styles.saveButtonText}>{isDraft ? 'Добави мястото' : 'Запази мястото'}</Text>
                         </TouchableOpacity>
+                            </>
+                        ) : null}
                     </ScrollView>
                 </View>
             </View>
@@ -471,8 +576,18 @@ const styles = StyleSheet.create({
     toggleWrap: { flex: 1, alignItems: 'center' },
     toggleLabel: { color: '#4B5563', fontSize: 11, fontWeight: '600', marginBottom: 4 },
     emptyState: { color: '#6B7280', fontSize: 12, lineHeight: 17 },
+    routeSummaryBox: { backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#BFDBFE', paddingHorizontal: 10, paddingVertical: 9, marginBottom: 10 },
+    routeSummaryTitle: { color: '#1E3A8A', fontSize: 12, fontWeight: '700', marginBottom: 3 },
+    routeSummaryText: { color: '#1F2937', fontSize: 12, fontWeight: '600' },
+    routeSummaryMeta: { color: '#475569', fontSize: 11, marginTop: 4, lineHeight: 16 },
+    routeSummaryEmptyBox: { backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', paddingHorizontal: 10, paddingVertical: 9, marginBottom: 10 },
+    routeSummaryEmptyText: { color: '#64748B', fontSize: 12, fontWeight: '600' },
     routeButton: { marginBottom: 10, minHeight: 44, backgroundColor: '#7C3AED', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    routeButtonDisabled: { backgroundColor: '#C4B5FD' },
+    routeCustomizeButton: { backgroundColor: '#0F766E' },
     routeButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+    personalizeButton: { marginBottom: 10, minHeight: 44, backgroundColor: '#E0F2FE', borderRadius: 12, borderWidth: 1, borderColor: '#7DD3FC', alignItems: 'center', justifyContent: 'center' },
+    personalizeButtonText: { color: '#0C4A6E', fontSize: 13, fontWeight: '700' },
     saveButton: { backgroundColor: '#1D4ED8', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
     saveButtonDisabled: { backgroundColor: '#93C5FD' },
     saveButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },

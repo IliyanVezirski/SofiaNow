@@ -784,6 +784,12 @@ export const fetchLineRouteGeometryByRouteId = async (routeId: string): Promise<
 
         // Normalize metro route IDs (e.g. A241 -> M3) and always prefer bundled two-way metro geometry.
         const displayLineByRoute = getDisplayLineFromRouteId(normalizedRouteId);
+        const routeMetadata = getRouteMetadata(normalizedRouteId);
+        const fallbackLine = displayLineByRoute || routeMetadata.line;
+        const fallbackType = inferLineTypeFromToken(displayLineByRoute) === 'bus'
+            ? routeMetadata.type
+            : inferLineTypeFromToken(displayLineByRoute);
+        const fallbackIsNight = fallbackLine.toUpperCase().startsWith('N');
         if (inferLineTypeFromToken(displayLineByRoute) === 'subway') {
             const metroGeometry = getBundledMetroRouteGeometry(displayLineByRoute);
             if (metroGeometry) {
@@ -802,10 +808,11 @@ export const fetchLineRouteGeometryByRouteId = async (routeId: string): Promise<
             if (inferLineTypeFromToken(displayLineByRoute) === 'subway') {
                 return getBundledMetroRouteGeometry(displayLineByRoute);
             }
-            return null;
+            return fallbackLine
+                ? fetchLineRouteGeometry(fallbackLine, fallbackType, fallbackIsNight)
+                : null;
         }
 
-        const routeMetadata = getRouteMetadata(normalizedRouteId);
         const displayLine = getDisplayLineFromRouteId(normalizedRouteId);
         const isNight = displayLine.toUpperCase().startsWith('N');
 
@@ -815,7 +822,9 @@ export const fetchLineRouteGeometryByRouteId = async (routeId: string): Promise<
         ].filter((direction): direction is LineRouteDirection => !!direction);
 
         if (!rawDirections.length) {
-            return null;
+            return fallbackLine
+                ? fetchLineRouteGeometry(fallbackLine, fallbackType, fallbackIsNight)
+                : null;
         }
 
         const directions = await Promise.all(rawDirections.map(enrichDirectionWithOsrm));

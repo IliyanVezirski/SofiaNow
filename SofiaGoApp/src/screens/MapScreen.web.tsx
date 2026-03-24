@@ -387,6 +387,16 @@ export default function MapScreen({
     }, [locationSearchQuery]);
 
     useEffect(() => {
+        if (searchModalVisible) {
+            return;
+        }
+
+        setLocationSearchQuery('');
+        setLocationSearchResults([]);
+        setLocationSearchLoading(false);
+    }, [searchModalVisible]);
+
+    useEffect(() => {
         if (typeof searchRequestToken === 'number' && searchRequestToken > 0) {
             setSearchModalVisible((prev) => {
                 const next = !prev;
@@ -932,6 +942,18 @@ export default function MapScreen({
         setFavoritePlaces(nextFavorites);
     };
 
+    const onCreateFavorite = async (input: {
+        name: string;
+        latitude: number;
+        longitude: number;
+        selectedStopId: string | null;
+        selectedStopName: string | null;
+        selectedLines: FavoritePlace['selectedLines'];
+    }) => {
+        const nextFavorites = await addFavoritePlace(input);
+        setFavoritePlaces(nextFavorites);
+    };
+
     const onSelectSearchResult = (result: PlaceSearchResult) => {
         focusMapOnCoordinate(result.latitude, result.longitude);
         setLocationSearchQuery(result.name);
@@ -1259,6 +1281,7 @@ export default function MapScreen({
                         setFavoritesVisible(false);
                     }}
                     onUpdate={onUpdateFavorite}
+                    onCreate={onCreateFavorite}
                     onRemove={onRemoveFavorite}
                     onClose={() => setFavoritesVisible(false)}
                 />

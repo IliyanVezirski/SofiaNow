@@ -7,8 +7,10 @@ import { useUserLocation } from '../features/map/hooks/useUserLocation';
 import { fetchAllStops, Stop } from '../services/stopsApi';
 import { haversineDistanceMeters, inferLineTypeFromToken, getVehicleAccentColor, getVehicleIcon, formatUnixTime, VehicleType } from '../services/transitUtils';
 import { fetchStopEtas, StopEta } from '../services/cgmApi';
+import { fetchFullStopSchedule } from '../services/cgmApi/stopEtas';
 import { getEtaScheduleInfo } from '../services/cgmApi/schedules';
 import { formatMinSinceMidnight } from '../features/map/constants';
+import { ArrivalReminderControl } from '../features/notifications/components/ArrivalReminderControl';
 
 // ── Walking‑radius config ──
 const RADIUS_BUCKETS = [
@@ -37,6 +39,67 @@ const resolveTypes = (stop: Stop): VehicleType[] => {
     return [...tSet].sort();
 };
 
+const MultiTypeBadge = ({ types }: { types: VehicleType[] }) => {
+    const infos = types.slice(0, 4).map((type) => ({ type, ...getStopTypeInfo(type) }));
+    const getTextColor = (type: VehicleType) => type === 'subway' ? '#0056A4' : '#FFFFFF';
+
+    if (infos.length === 2) {
+        return (
+            <View style={[st.badge, st.multiBadge]}>
+                <View style={[st.badgeHalf, st.badgeSegmentCenter, { left: 0, backgroundColor: infos[0].color }]}>
+                    <Text style={[st.badgeSegmentText, { color: getTextColor(infos[0].type) }]}>{infos[0].text}</Text>
+                </View>
+                <View style={[st.badgeHalf, st.badgeSegmentCenter, { right: 0, backgroundColor: infos[1].color }]}>
+                    <Text style={[st.badgeSegmentText, { color: getTextColor(infos[1].type) }]}>{infos[1].text}</Text>
+                </View>
+                <View style={st.badgeDividerVertical} />
+            </View>
+        );
+    }
+
+    if (infos.length === 3) {
+        return (
+            <View style={[st.badge, st.multiBadge]}>
+                <View style={[st.badgeHalfHorizontal, st.badgeSegmentCenter, { top: 0, backgroundColor: infos[0].color }]}>
+                    <Text style={[st.badgeSegmentText, { color: getTextColor(infos[0].type) }]}>{infos[0].text}</Text>
+                </View>
+                <View style={[st.badgeQuarter, st.badgeSegmentCenter, { left: 0, bottom: 0, backgroundColor: infos[1].color }]}>
+                    <Text style={[st.badgeSegmentTextSmall, { color: getTextColor(infos[1].type) }]}>{infos[1].text}</Text>
+                </View>
+                <View style={[st.badgeQuarter, st.badgeSegmentCenter, { right: 0, bottom: 0, backgroundColor: infos[2].color }]}>
+                    <Text style={[st.badgeSegmentTextSmall, { color: getTextColor(infos[2].type) }]}>{infos[2].text}</Text>
+                </View>
+                <View style={st.badgeDividerHorizontalBottom} />
+                <View style={st.badgeDividerVerticalBottom} />
+            </View>
+        );
+    }
+
+    return (
+        <View style={[st.badge, st.multiBadge]}>
+            {infos.map((info, index) => {
+                const positionStyle = [
+                    index === 0 && { left: 0, top: 0 },
+                    index === 1 && { right: 0, top: 0 },
+                    index === 2 && { left: 0, bottom: 0 },
+                    index === 3 && { right: 0, bottom: 0 },
+                ].find(Boolean);
+
+                return (
+                    <View
+                        key={info.type}
+                        style={[st.badgeQuarter, st.badgeSegmentCenter, positionStyle, { backgroundColor: info.color }]}
+                    >
+                        <Text style={[st.badgeSegmentTextSmall, { color: getTextColor(info.type) }]}>{info.text}</Text>
+                    </View>
+                );
+            })}
+            <View style={st.badgeDividerHorizontal} />
+            <View style={st.badgeDividerVertical} />
+        </View>
+    );
+};
+
 // ── Stop type badge ──
 const StopTypeBadge = ({ stop }: { stop: Stop }) => {
     const types = resolveTypes(stop);
@@ -59,18 +122,7 @@ const StopTypeBadge = ({ stop }: { stop: Stop }) => {
         );
     }
 
-    return (
-        <View style={[st.badge, { flexDirection: 'row', overflow: 'hidden', padding: 0 }]}>
-            {types.map(t => {
-                const info = getStopTypeInfo(t);
-                return (
-                    <View key={t} style={{ flex: 1, backgroundColor: info.color, alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={[st.badgeText, { fontSize: 7 }]}>{info.text}</Text>
-                    </View>
-                );
-            })}
-        </View>
-    );
+    return <MultiTypeBadge types={types} />;
 };
 
 // ── Props ──
@@ -137,8 +189,8 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
         setExpandedStopId(stopId);
         setEtasLoading(true);
         try {
-            const etaMap = await fetchStopEtas([stopId]);
-            setLiveEtas(etaMap[stopId] || []);
+            const etas = await fetchFullStopSchedule(stopId);
+            setLiveEtas(etas);
         } catch {
             setLiveEtas([]);
         } finally {
@@ -204,8 +256,8 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                             >
                                                 <StopTypeBadge stop={stop} />
                                                 <View style={st.stopInfo}>
-                                                    <Text style={st.stopName}>{stop.name}</Text>
-                                                    <Text style={st.stopMeta}>
+                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.stopName}>{stop.name}</Text>
+                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.stopMeta}>
                                                         {`${formatDist(stop.distanceMeters)} • Линии: ${stop.lines.slice(0, 5).join(', ')}${stop.lines.length > 5 ? '...' : ''}`}
                                                     </Text>
 
@@ -214,7 +266,7 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                             {etasLoading ? (
                                                                 <ActivityIndicator size="small" color="#1D4ED8" style={{ marginVertical: 8 }} />
                                                             ) : liveEtas.length === 0 ? (
-                                                                <Text style={st.emptyText}>Няма живи данни за тази спирка</Text>
+                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.emptyText}>Няма живи данни за тази спирка</Text>
                                                             ) : (
                                                                 liveEtas.map((eta, idx) => {
                                                                     const info = getEtaScheduleInfo(eta);
@@ -229,12 +281,12 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                                     return (
                                                                         <View key={`${eta.tripId}-${idx}`} style={st.etaRow}>
                                                                             <View style={[st.etaVehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
-                                                                                <Text style={st.etaIcon}>{getVehicleIcon(eta.type)}</Text>
+                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaIcon}>{getVehicleIcon(eta.type)}</Text>
                                                                             </View>
                                                                             <View style={st.etaMainInfo}>
-                                                                                <Text style={st.etaLine} numberOfLines={2}>{lineLabel}</Text>
+                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaLine} numberOfLines={2}>{lineLabel}</Text>
                                                                                 {(schedText || delayText) && (
-                                                                                    <Text style={st.etaStatusText}>
+                                                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaStatusText}>
                                                                                         {schedText ? `разп. ${schedText} ` : ''}
                                                                                         {delayText ? (
                                                                                             <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
@@ -246,9 +298,11 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                                             </View>
 
                                                                             <View style={st.etaTimeWrap}>
-                                                                                <Text style={st.etaTime}>{eta.minutesAway} мин</Text>
-                                                                                <Text style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
+                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaTime}>{eta.minutesAway} мин</Text>
+                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
                                                                             </View>
+
+                                                                            <ArrivalReminderControl stopName={stop.name} eta={eta} />
                                                                         </View>
                                                                     );
                                                                 })
@@ -275,7 +329,7 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                         style={st.mapBtn}
                                                         onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
                                                     >
-                                                        <Text style={st.mapBtnText}>🗺️</Text>
+                                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.mapBtnText}>🗺️</Text>
                                                     </TouchableOpacity>
                                                 )}
                                             </TouchableOpacity>
@@ -344,6 +398,79 @@ const st = StyleSheet.create({
         borderWidth: 1, borderColor: '#000',
     },
     badgeText: { color: '#FFF', fontSize: 8, fontWeight: '900' },
+    multiBadge: {
+        overflow: 'hidden',
+        position: 'relative',
+        padding: 0,
+        backgroundColor: '#FFFFFF',
+    },
+    badgeHalf: {
+        position: 'absolute',
+        top: 0,
+        bottom: 0,
+        width: '50%',
+    },
+    badgeHalfHorizontal: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        height: '50%',
+    },
+    badgeQuarter: {
+        position: 'absolute',
+        width: '50%',
+        height: '50%',
+    },
+    badgeSegmentCenter: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    badgeSegmentText: {
+        fontSize: 7,
+        fontWeight: '900',
+        lineHeight: 8,
+    },
+    badgeSegmentTextSmall: {
+        fontSize: 5,
+        fontWeight: '900',
+        lineHeight: 6,
+    },
+    badgeDividerVertical: {
+        position: 'absolute',
+        top: 0,
+        bottom: 0,
+        left: '50%',
+        width: 1,
+        marginLeft: -0.5,
+        backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    },
+    badgeDividerHorizontal: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: '50%',
+        height: 1,
+        marginTop: -0.5,
+        backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    },
+    badgeDividerHorizontalBottom: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: '50%',
+        height: 1,
+        marginTop: -0.5,
+        backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    },
+    badgeDividerVerticalBottom: {
+        position: 'absolute',
+        top: '50%',
+        bottom: 0,
+        left: '50%',
+        width: 1,
+        marginLeft: -0.5,
+        backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    },
 
     // Route button
     routeBtn: {
@@ -370,7 +497,7 @@ const st = StyleSheet.create({
     etaMainInfo: { flex: 1, minWidth: 0, paddingRight: 6 },
     etaLine: { color: '#1E293B', fontSize: 13, fontWeight: '800', lineHeight: 17, flexShrink: 1 },
     etaStatusText: { color: '#64748B', fontSize: 10, marginTop: 1 },
-    etaTimeWrap: { width: 70, alignItems: 'flex-end', marginLeft: 2, flexShrink: 0 },
+    etaTimeWrap: { width: 64, alignItems: 'flex-end', marginLeft: 2, flexShrink: 0 },
     etaTime: { color: '#1D4ED8', fontSize: 13, fontWeight: '800' },
     etaClock: { color: '#94A3B8', fontSize: 11, marginTop: 1, textAlign: 'right' },
 

@@ -79,6 +79,7 @@ export const useStops = (
 
     const stopById = useMemo(() => stops.reduce<Record<string, Stop>>((r, s) => { r[s.id] = s; return r; }, {}), [stops]);
     const stopNameByIdMap = useMemo(() => stops.reduce<Record<string, string>>((r, s) => { r[s.id] = s.name; return r; }, {}), [stops]);
+    const searchableStopNameByIdMap = useMemo(() => searchableStops.reduce<Record<string, string>>((r, s) => { r[s.id] = s.name; return r; }, {}), [searchableStops]);
 
-    return { stops, searchableStops, filteredStops, renderedStops, visibleStopsRef, stopById, stopNameByIdMap };
+    return { stops, searchableStops, filteredStops, renderedStops, visibleStopsRef, stopById, stopNameByIdMap, searchableStopNameByIdMap };
 };

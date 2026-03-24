@@ -1,15 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { FAVORITE_COMMUTE_WEEKDAY_OPTIONS, FavoriteCommutePlan, FavoriteCommuteWeekday, FavoriteLinePreference, FavoritePlace, PlaceSearchResult, formatFavoriteCommuteWeekdays, hasFavoriteCoordinates, searchLocations } from '../../../services/places';
-import { Itinerary, PlanType, TripLocation, planTrip } from '../../../services/tripPlanner';
+import { Ionicons } from '@expo/vector-icons';
+import { FAVORITE_COMMUTE_WEEKDAY_OPTIONS, FavoriteCommutePlan, FavoriteCommuteWeekday, FavoriteLinePreference, FavoritePlace, formatFavoriteCommuteWeekdays, hasFavoriteCoordinates } from '../../../services/places';
+import { Itinerary, ItineraryLeg, PlanType, TripLocation, planTrip, searchLocations as searchTripLocations } from '../../../services/tripPlanner';
 import { cancelCommuteRouteNotification, scheduleCommuteRouteNotification } from '../../../services/notifications/commuteRouteNotifications';
 import { Stop } from '../../../services/stopsApi';
+import { buildRouteGeoJSON, TripRouteGeoJSON } from '../../tripPlanner/utils/routeGeoJson';
 
 interface Props {
-    visible: boolean;
+    visible?: boolean;
+    inline?: boolean;
     targetFavorite: FavoritePlace | null;
     currentLocation?: { latitude: number; longitude: number } | null;
     searchableStops: Stop[];
+    onShowOnMap?: (route: TripRouteGeoJSON) => void;
+    onOpenPlaceEditor?: (favoriteId: string, prefill?: {
+        latitude?: number | null;
+        longitude?: number | null;
+        selectedStopId?: string | null;
+        selectedStopName?: string | null;
+        selectedLines?: FavoriteLinePreference[];
+    }) => void;
     onClose: () => void;
     onSave: (favoriteId: string, payload: {
         commutePlan: FavoriteCommutePlan | null;
@@ -20,6 +31,10 @@ interface Props {
         selectedLines?: FavoriteLinePreference[];
     }) => Promise<void> | void;
 }
+
+type PlannerPointSearchResult =
+    | { kind: 'place'; id: string; name: string; subtitle: string; latitude: number; longitude: number }
+    | { kind: 'stop'; id: string; stop: Stop; name: string; subtitle: string; latitude: number; longitude: number };
 
 const PLAN_LABELS: Record<PlanType, string> = {
     '0': 'По-малко чакане',
@@ -114,6 +129,10 @@ const inferSelectedLines = (itinerary: Itinerary): FavoriteLinePreference[] => {
     }));
 };
 
+const buildTransportLabels = (itinerary: Itinerary) => Array.from(new Set(
+    getTransitLegs(itinerary).map((leg) => `${getLegLabel(leg.mode)} ${String(leg.route?.shortName || '').trim()}`.trim()).filter(Boolean),
+));
+
 const inferSelectedStop = (itinerary: Itinerary, searchableStops: Stop[]) => {
     const firstTransitLeg = getTransitLegs(itinerary)[0];
     if (!firstTransitLeg) {
@@ -156,18 +175,47 @@ const getLegLabel = (mode: string) => {
     }
 };
 
-export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavorite, currentLocation, searchableStops, onClose, onSave }) => {
+const buildStopPointSearchResults = (query: string, searchableStops: Stop[]): PlannerPointSearchResult[] => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) {
+        return [];
+    }
+
+    return searchableStops
+        .filter((stop) => stop.name.toLowerCase().includes(normalizedQuery) || stop.id.toLowerCase().includes(normalizedQuery))
+        .slice(0, 8)
+        .map((stop) => ({
+            kind: 'stop' as const,
+            id: stop.id,
+            stop,
+            name: stop.name,
+            subtitle: `Спирка • ${stop.id}${stop.lines.length ? ` • Линии: ${stop.lines.slice(0, 4).join(', ')}` : ''}`,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+        }));
+};
+
+const mapTripLocationSearchResult = (result: TripLocation): PlannerPointSearchResult => ({
+    kind: 'place',
+    id: `${result.latitude.toFixed(6)}:${result.longitude.toFixed(6)}:${result.name}`,
+    name: result.name,
+    subtitle: `${result.latitude.toFixed(5)}, ${result.longitude.toFixed(5)}`,
+    latitude: result.latitude,
+    longitude: result.longitude,
+});
+
+export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inline = false, targetFavorite, currentLocation, searchableStops, onShowOnMap, onOpenPlaceEditor, onClose, onSave }) => {
     const initialNow = new Date();
     const [originName, setOriginName] = useState('');
     const [originLatitude, setOriginLatitude] = useState<number | null>(null);
     const [originLongitude, setOriginLongitude] = useState<number | null>(null);
     const [originQuery, setOriginQuery] = useState('');
-    const [originSearchResults, setOriginSearchResults] = useState<PlaceSearchResult[]>([]);
+    const [originSearchResults, setOriginSearchResults] = useState<TripLocation[]>([]);
     const [originSearchLoading, setOriginSearchLoading] = useState(false);
     const [destinationLatitude, setDestinationLatitude] = useState<number | null>(null);
     const [destinationLongitude, setDestinationLongitude] = useState<number | null>(null);
     const [destinationQuery, setDestinationQuery] = useState('');
-    const [destinationSearchResults, setDestinationSearchResults] = useState<PlaceSearchResult[]>([]);
+    const [destinationSearchResults, setDestinationSearchResults] = useState<TripLocation[]>([]);
     const [destinationSearchLoading, setDestinationSearchLoading] = useState(false);
     const [isEditingDestination, setIsEditingDestination] = useState(false);
     const [planType, setPlanType] = useState<PlanType>('0');
@@ -180,6 +228,20 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [notificationEnabled, setNotificationEnabled] = useState(false);
+    const [expandedLegKey, setExpandedLegKey] = useState<string | null>(null);
+    const [showSavedRouteDetails, setShowSavedRouteDetails] = useState(false);
+    const [showPlannerBuilder, setShowPlannerBuilder] = useState(false);
+
+    const originStopResults = useMemo(() => buildStopPointSearchResults(originQuery, searchableStops), [originQuery, searchableStops]);
+    const destinationStopResults = useMemo(() => buildStopPointSearchResults(destinationQuery, searchableStops), [destinationQuery, searchableStops]);
+    const originCombinedResults = useMemo<PlannerPointSearchResult[]>(() => ([
+        ...originStopResults,
+        ...originSearchResults.slice(0, 8).map(mapTripLocationSearchResult),
+    ]).slice(0, 20), [originSearchResults, originStopResults]);
+    const destinationCombinedResults = useMemo<PlannerPointSearchResult[]>(() => ([
+        ...destinationStopResults,
+        ...destinationSearchResults.slice(0, 8).map(mapTripLocationSearchResult),
+    ]).slice(0, 20), [destinationSearchResults, destinationStopResults]);
 
     useEffect(() => {
         const normalizedQuery = originQuery.trim();
@@ -194,7 +256,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
         const timer = setTimeout(() => {
             void (async () => {
                 try {
-                    const results = await searchLocations(normalizedQuery, 6);
+                    const results = await searchTripLocations(normalizedQuery);
                     if (isMounted) {
                         setOriginSearchResults(results);
                     }
@@ -229,7 +291,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
         const timer = setTimeout(() => {
             void (async () => {
                 try {
-                    const results = await searchLocations(normalizedQuery, 6);
+                    const results = await searchTripLocations(normalizedQuery);
                     if (isMounted) {
                         setDestinationSearchResults(results);
                     }
@@ -291,19 +353,28 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
         setNotificationEnabled(existingPlan?.notificationEnabled || false);
         setItineraries([]);
         setError(null);
+        setExpandedLegKey(null);
+        setShowSavedRouteDetails(false);
+        setShowPlannerBuilder(!existingPlan?.itinerarySummary);
     }, [
         visible,
         targetFavorite?.id,
         targetFavorite?.defaultCommute?.lastPlannedAt,
     ]);
 
-    if (!targetFavorite) {
+    if (!targetFavorite || (!inline && !visible)) {
         return null;
     }
 
     const existingPlan = targetFavorite.defaultCommute;
     const arriveBy = true;
     const canPlanRoute = Number.isFinite(originLatitude) && Number.isFinite(originLongitude) && Number.isFinite(destinationLatitude) && Number.isFinite(destinationLongitude);
+    const isOriginAtCurrentLocation = !!currentLocation
+        && Number.isFinite(originLatitude)
+        && Number.isFinite(originLongitude)
+        && Math.abs((originLatitude as number) - currentLocation.latitude) < 0.000001
+        && Math.abs((originLongitude as number) - currentLocation.longitude) < 0.000001;
+    const showResetToCurrentLocationButton = !!currentLocation && (!isOriginAtCurrentLocation || originName !== 'Моята локация');
     const selectedItinerary = itineraries[selectedItineraryIndex] ?? null;
     const derivedArriveByReminderTime = selectedItinerary
         ? formatReminderTimeFromItineraryStart(selectedItinerary.startTime, reminderOffsetMinutes)
@@ -323,7 +394,19 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
         });
     };
 
+    const getLegStops = (leg: ItineraryLeg) => {
+        const places = [leg.from, ...(leg.intermediatePlaces || []), leg.to];
+        return places.filter((place, index) => {
+            const key = `${place.name}-${place.stop?.code || ''}-${place.lat}-${place.lon}`;
+            return places.findIndex((candidate) => `${candidate.name}-${candidate.stop?.code || ''}-${candidate.lat}-${candidate.lon}` === key) === index;
+        });
+    };
+
     const doPlanRoute = async () => {
+        await fetchPlannedRoutes(0);
+    };
+
+    const fetchPlannedRoutes = async (preferredItineraryIndex: number) => {
         const from = buildTripLocation(originName || 'Начална точка', originLatitude, originLongitude);
         const to = buildTripLocation(targetFavorite.name, destinationLatitude, destinationLongitude);
         if (!from || !to) {
@@ -358,7 +441,8 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                 setError('Не е намерен маршрут.');
             } else {
                 setItineraries(result);
-                setSelectedItineraryIndex(0);
+                setSelectedItineraryIndex(Math.max(0, Math.min(preferredItineraryIndex, result.length - 1)));
+                setExpandedLegKey(null);
             }
         } catch (routeError: any) {
             setError(routeError?.message || 'Грешка при изчисляване на маршрут.');
@@ -425,6 +509,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                 itineraryIndex: selectedItineraryIndex,
                 itinerarySummary: buildItinerarySummary(selectedItinerary),
                 routeLabel: `${originName || 'Начална точка'} → ${targetFavorite.name}`,
+                transportLabels: buildTransportLabels(selectedItinerary),
                 reminderTime: notificationEnabled ? effectiveReminderTime : derivedArriveByReminderTime,
                 notificationEnabled,
                 notificationIds,
@@ -439,19 +524,51 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
         onClose();
     };
 
-    return (
-        <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
-            <View style={styles.overlay}>
-                <View style={styles.card}>
-                    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} nestedScrollEnabled>
+    const buildEditorPrefill = () => {
+        if (!selectedItinerary) {
+            return {
+                latitude: destinationLatitude,
+                longitude: destinationLongitude,
+            };
+        }
+
+        const inferredStop = inferSelectedStop(selectedItinerary, searchableStops);
+        const inferredLines = inferSelectedLines(selectedItinerary);
+
+        return {
+            latitude: destinationLatitude,
+            longitude: destinationLongitude,
+            selectedStopId: inferredStop.selectedStopId,
+            selectedStopName: inferredStop.selectedStopName,
+            selectedLines: inferredLines,
+        };
+    };
+
+    const selectedTransportLabels = selectedItinerary ? buildTransportLabels(selectedItinerary) : [];
+
+    const openSavedRouteDetails = async () => {
+        if (!existingPlan?.itinerarySummary) {
+            return;
+        }
+
+        setShowSavedRouteDetails(true);
+        setShowPlannerBuilder(false);
+        await fetchPlannedRoutes(existingPlan.itineraryIndex || 0);
+    };
+
+    const content = (
+        <View style={[styles.card, inline && styles.inlineCard]}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                         <View style={styles.header}>
                             <View>
-                                <Text style={styles.title}>Маршрут и час</Text>
-                                <Text style={styles.subtitle}>Настрой маршрут за това място</Text>
+                                <Text style={styles.title}>Изчисли маршрут</Text>
+                                <Text style={styles.subtitle}>Това е първата стъпка при редакция на мястото</Text>
                             </View>
-                            <Pressable onPress={onClose} style={styles.closeButton}>
-                                <Text style={styles.closeButtonText}>{'×'}</Text>
-                            </Pressable>
+                            {!inline ? (
+                                <Pressable onPress={onClose} style={styles.closeButton}>
+                                    <Text style={styles.closeButtonText}>{'×'}</Text>
+                                </Pressable>
+                            ) : null}
                         </View>
 
                         <View style={styles.placesSummaryBox}>
@@ -465,6 +582,8 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                             </View>
                         </View>
 
+                        {!existingPlan?.itinerarySummary || showPlannerBuilder ? (
+                            <>
                         <Text style={styles.sectionTitle}>Начална точка</Text>
                         <Text style={styles.sectionHint}>По подразбиране началната точка е твоята локация. Ако искаш да я смениш, потърси адрес отдолу.</Text>
                         <TextInput
@@ -474,11 +593,27 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                             placeholder="Промени началната точка по адрес"
                             placeholderTextColor="#94A3B8"
                         />
-                        {(originSearchLoading || originSearchResults.length > 0) && (
-                            <ScrollView style={styles.originResultsList} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-                                {originSearchResults.map((result) => (
+                        {showResetToCurrentLocationButton ? (
+                            <TouchableOpacity
+                                style={styles.resetOriginButton}
+                                onPress={() => {
+                                    setOriginName('Моята локация');
+                                    setOriginLatitude(currentLocation?.latitude ?? null);
+                                    setOriginLongitude(currentLocation?.longitude ?? null);
+                                    setOriginQuery('Моята локация');
+                                    setOriginSearchResults([]);
+                                    setOriginSearchLoading(false);
+                                }}
+                            >
+                                <Ionicons name="locate" size={14} color="#1D4ED8" />
+                                <Text style={styles.resetOriginButtonText}>Върни моята локация</Text>
+                            </TouchableOpacity>
+                        ) : null}
+                        {(originSearchLoading || originCombinedResults.length > 0) && (
+                            <ScrollView style={styles.originResultsList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                                {originCombinedResults.map((result) => (
                                     <TouchableOpacity
-                                        key={result.id}
+                                        key={`${result.kind}-${result.id}`}
                                         style={styles.originResultRow}
                                         onPress={() => {
                                             setOriginName(result.name);
@@ -488,7 +623,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                                             setOriginSearchResults([]);
                                         }}
                                     >
-                                        <Text style={styles.originResultTitle}>{`📍 ${result.name}`}</Text>
+                                        <Text style={styles.originResultTitle}>{result.kind === 'stop' ? `🚌 ${result.name}` : `📍 ${result.name}`}</Text>
                                         <Text style={styles.originResultSubtitle}>{result.subtitle}</Text>
                                     </TouchableOpacity>
                                 ))}
@@ -516,11 +651,11 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                                     placeholder="Търси нов адрес за крайната точка"
                                     placeholderTextColor="#94A3B8"
                                 />
-                                {(destinationSearchLoading || destinationSearchResults.length > 0) && (
-                                    <ScrollView style={styles.originResultsList} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-                                        {destinationSearchResults.map((result) => (
+                                {(destinationSearchLoading || destinationCombinedResults.length > 0) && (
+                                    <ScrollView style={styles.originResultsList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                                        {destinationCombinedResults.map((result) => (
                                             <TouchableOpacity
-                                                key={result.id}
+                                                key={`${result.kind}-${result.id}`}
                                                 style={styles.originResultRow}
                                                 onPress={() => {
                                                     setDestinationLatitude(result.latitude);
@@ -530,7 +665,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                                                     setIsEditingDestination(false);
                                                 }}
                                             >
-                                                <Text style={styles.originResultTitle}>{`📍 ${result.name}`}</Text>
+                                                <Text style={styles.originResultTitle}>{result.kind === 'stop' ? `🚌 ${result.name}` : `📍 ${result.name}`}</Text>
                                                 <Text style={styles.originResultSubtitle}>{result.subtitle}</Text>
                                             </TouchableOpacity>
                                         ))}
@@ -614,8 +749,10 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                         </TouchableOpacity>
 
                         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+                            </>
+                        ) : null}
 
-                        {!!itineraries.length && (
+                        {!!itineraries.length && (showPlannerBuilder || showSavedRouteDetails) && (
                             <>
                                 <Text style={styles.sectionTitle}>Избери маршрут</Text>
                                 {itineraries.map((itinerary, index) => {
@@ -624,17 +761,70 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                                         <View key={`${itinerary.startTime}-${index}`}>
                                             <TouchableOpacity style={[styles.routeCard, active && styles.routeCardActive]} onPress={() => setSelectedItineraryIndex(index)}>
                                                 <Text style={styles.routeSummary}>{buildItinerarySummary(itinerary)}</Text>
+                                                <View style={styles.transportChipsRow}>
+                                                    {buildTransportLabels(itinerary).map((label) => (
+                                                        <View key={`${itinerary.startTime}-${index}-${label}`} style={styles.transportChip}>
+                                                            <Text style={styles.transportChipText}>{label}</Text>
+                                                        </View>
+                                                    ))}
+                                                </View>
                                             </TouchableOpacity>
                                             {active && (
                                                 <View style={styles.routeDetailsBox}>
-                                                    {itinerary.legs.map((leg, legIndex) => (
-                                                        <View key={`${itinerary.startTime}-${index}-${legIndex}`} style={styles.routeDetailRow}>
-                                                            <Text style={styles.routeDetailMode}>
-                                                                {leg.route?.shortName ? `${getLegLabel(leg.mode)} ${leg.route.shortName}` : getLegLabel(leg.mode)}
-                                                            </Text>
-                                                            <Text style={styles.routeDetailText}>{`${leg.from.name} • ${fmtTime(leg.from.departureTime)} → ${leg.to.name} • ${fmtTime(leg.to.arrivalTime)}`}</Text>
-                                                        </View>
-                                                    ))}
+                                                    {itinerary.legs.map((leg, legIndex) => {
+                                                        const legKey = `${itinerary.startTime}-${index}-${legIndex}`;
+                                                        const hasVehicle = !!leg.route?.shortName;
+                                                        const legStops = getLegStops(leg);
+                                                        const isExpanded = expandedLegKey === legKey;
+
+                                                        return (
+                                                            <View key={legKey} style={styles.routeDetailRow}>
+                                                                <TouchableOpacity
+                                                                    style={[styles.routeLegButton, hasVehicle && styles.routeLegButtonInteractive]}
+                                                                    disabled={!hasVehicle}
+                                                                    onPress={() => setExpandedLegKey((previous) => previous === legKey ? null : legKey)}
+                                                                >
+                                                                    <View style={styles.routeLegHeader}>
+                                                                        <Text style={styles.routeDetailMode}>
+                                                                            {leg.route?.shortName ? `${getLegLabel(leg.mode)} ${leg.route.shortName}` : getLegLabel(leg.mode)}
+                                                                        </Text>
+                                                                        {hasVehicle ? (
+                                                                            <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={14} color="#1E3A8A" />
+                                                                        ) : null}
+                                                                    </View>
+                                                                    <Text style={styles.routeDetailText}>{`${leg.from.name} • ${fmtTime(leg.from.departureTime)} → ${leg.to.name} • ${fmtTime(leg.to.arrivalTime)}`}</Text>
+                                                                </TouchableOpacity>
+                                                                {hasVehicle && isExpanded ? (
+                                                                    <View style={styles.legStopsBox}>
+                                                                        {legStops.map((place, stopIndex) => (
+                                                                            <View key={`${legKey}-stop-${stopIndex}`} style={styles.legStopRow}>
+                                                                                <Text style={styles.legStopBullet}>{stopIndex + 1}.</Text>
+                                                                                <View style={styles.legStopContent}>
+                                                                                    <Text style={styles.legStopName}>{place.name}</Text>
+                                                                                    <Text style={styles.legStopMeta}>
+                                                                                        {place.stop?.code ? `${place.stop.code} • ` : ''}{`${fmtTime(place.arrivalTime || place.departureTime)}`}
+                                                                                    </Text>
+                                                                                </View>
+                                                                            </View>
+                                                                        ))}
+                                                                    </View>
+                                                                ) : null}
+                                                            </View>
+                                                        );
+                                                    })}
+                                                    {onShowOnMap ? (
+                                                        <TouchableOpacity
+                                                            style={styles.showOnMapButton}
+                                                            onPress={() => {
+                                                                onShowOnMap(buildRouteGeoJSON(itinerary));
+                                                                if (!inline) {
+                                                                    onClose();
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Text style={styles.showOnMapButtonText}>Покажи целия маршрут на картата</Text>
+                                                        </TouchableOpacity>
+                                                    ) : null}
                                                 </View>
                                             )}
                                         </View>
@@ -643,6 +833,8 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                             </>
                         )}
 
+                        {(showPlannerBuilder || !existingPlan?.itinerarySummary) ? (
+                            <>
                         <Text style={styles.sectionTitle}>Известяване</Text>
                         <View style={styles.reminderRow}>
                             <View style={styles.switchWrap}>
@@ -691,12 +883,26 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                                 ) : null}
                             </>
                         ) : null}
+                            </>
+                        ) : null}
 
                         {existingPlan?.itinerarySummary ? (
-                            <View style={styles.currentPlanBox}>
+                            <TouchableOpacity
+                                style={styles.currentPlanBox}
+                                onPress={() => void openSavedRouteDetails()}
+                            >
                                 <Text style={styles.currentPlanTitle}>Текущ запазен маршрут</Text>
                                 <Text style={styles.currentPlanText}>{existingPlan.routeLabel}</Text>
                                 <Text style={styles.currentPlanText}>{existingPlan.itinerarySummary}</Text>
+                                {!!(existingPlan.transportLabels || []).length ? (
+                                    <View style={styles.transportChipsRow}>
+                                        {existingPlan.transportLabels?.map((label) => (
+                                            <View key={`saved-${label}`} style={styles.transportChip}>
+                                                <Text style={styles.transportChipText}>{label}</Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                ) : null}
                                 <Text style={styles.currentPlanText}>
                                     {existingPlan.routeDate && existingPlan.routeTime
                                         ? `Пристигане до ${existingPlan.routeDate} ${existingPlan.routeTime}`
@@ -707,14 +913,48 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
                                         ? `Известяване: ${formatFavoriteCommuteWeekdays(existingPlan.reminderWeekdays)} • ${existingPlan.reminderOffsetMinutes || 5} мин по-рано (${existingPlan.reminderTime})`
                                         : 'Без известяване'}
                                 </Text>
+                                <Text style={styles.currentPlanText}>{`Предпочитание: ${PLAN_LABELS[existingPlan.planType]}`}</Text>
+                                <Text style={styles.currentPlanHint}>Натисни, за да отвориш маршрута и избраните опции</Text>
+                            </TouchableOpacity>
+                        ) : null}
+
+                        {existingPlan?.itinerarySummary && showSavedRouteDetails && !showPlannerBuilder ? (
+                            <View style={styles.savedOptionsBox}>
+                                <Text style={styles.savedOptionsTitle}>Избрани опции</Text>
+                                <Text style={styles.savedOptionsText}>{`Предпочитание: ${PLAN_LABELS[existingPlan.planType]}`}</Text>
+                                <Text style={styles.savedOptionsText}>{`Дата: ${existingPlan.routeDate || 'няма'} • Час: ${existingPlan.routeTime || 'няма'}`}</Text>
+                                <Text style={styles.savedOptionsText}>{existingPlan.notificationEnabled ? 'Уведомленията са включени' : 'Уведомленията са изключени'}</Text>
+                                <TouchableOpacity
+                                    style={styles.modifyRouteButton}
+                                    onPress={() => setShowPlannerBuilder(true)}
+                                >
+                                    <Text style={styles.modifyRouteButtonText}>Промени маршрута</Text>
+                                </TouchableOpacity>
                             </View>
                         ) : null}
+
+                        <TouchableOpacity
+                            style={styles.personalizeButton}
+                            onPress={() => onOpenPlaceEditor?.(targetFavorite.id, buildEditorPrefill())}
+                        >
+                            <Text style={styles.personalizeButtonText}>Персонализирай</Text>
+                        </TouchableOpacity>
 
                         <TouchableOpacity style={[styles.saveButton, !itineraries.length && styles.saveButtonDisabled]} disabled={!itineraries.length} onPress={savePlan}>
                             <Text style={styles.saveButtonText}>Запази маршрут и час</Text>
                         </TouchableOpacity>
-                    </ScrollView>
-                </View>
+            </ScrollView>
+        </View>
+    );
+
+    if (inline) {
+        return content;
+    }
+
+    return (
+        <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+            <View style={styles.overlay}>
+                {content}
             </View>
         </Modal>
     );
@@ -723,6 +963,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible, targetFavo
 const styles = StyleSheet.create({
     overlay: { flex: 1, backgroundColor: 'rgba(17,24,39,0.35)', justifyContent: 'flex-start', paddingTop: 28, paddingHorizontal: 12 },
     card: { backgroundColor: 'rgba(255,255,255,0.98)', borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', maxHeight: '92%', padding: 12 },
+    inlineCard: { maxHeight: undefined, marginTop: 8, paddingHorizontal: 10, paddingVertical: 10 },
     content: { paddingBottom: 8 },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 12 },
     title: { color: '#111827', fontSize: 16, fontWeight: '700' },
@@ -736,6 +977,8 @@ const styles = StyleSheet.create({
     sectionTitle: { color: '#111827', fontSize: 13, fontWeight: '700', marginBottom: 8, marginTop: 6 },
     sectionHint: { color: '#6B7280', fontSize: 11, lineHeight: 16, marginBottom: 8 },
     originInput: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#D1D5DB', paddingHorizontal: 12, paddingVertical: 10, color: '#111827', fontSize: 14 },
+    resetOriginButton: { marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 40, backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#BFDBFE' },
+    resetOriginButtonText: { color: '#1D4ED8', fontSize: 12, fontWeight: '700' },
     originResultsList: { maxHeight: 180, borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#F9FAFB', padding: 8, marginTop: 8 },
     originResultRow: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: '#FFFFFF', marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
     originResultTitle: { color: '#111827', fontSize: 12, fontWeight: '700' },
@@ -770,8 +1013,19 @@ const styles = StyleSheet.create({
     routeSummary: { color: '#111827', fontSize: 12, fontWeight: '700', lineHeight: 18 },
     routeDetailsBox: { marginTop: 6, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#DBEAFE' },
     routeDetailRow: { marginBottom: 8 },
+    routeLegButton: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 6 },
+    routeLegButtonInteractive: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#DBEAFE' },
+    routeLegHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
     routeDetailMode: { color: '#1E3A8A', fontSize: 11, fontWeight: '700', marginBottom: 2 },
     routeDetailText: { color: '#334155', fontSize: 11, lineHeight: 16 },
+    legStopsBox: { marginTop: 6, marginLeft: 8, borderLeftWidth: 2, borderLeftColor: '#BFDBFE', paddingLeft: 10, gap: 8 },
+    legStopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+    legStopBullet: { color: '#1D4ED8', fontSize: 11, fontWeight: '700', width: 18 },
+    legStopContent: { flex: 1 },
+    legStopName: { color: '#0F172A', fontSize: 11, fontWeight: '700' },
+    legStopMeta: { color: '#64748B', fontSize: 10, marginTop: 2 },
+    showOnMapButton: { marginTop: 4, minHeight: 42, backgroundColor: '#1E3A8A', borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+    showOnMapButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', textAlign: 'center' },
     reminderRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
     reminderHint: { color: '#475569', fontSize: 11, lineHeight: 16, marginTop: 6 },
     switchWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -790,6 +1044,17 @@ const styles = StyleSheet.create({
     currentPlanBox: { marginTop: 12, backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 10 },
     currentPlanTitle: { color: '#111827', fontSize: 12, fontWeight: '700', marginBottom: 4 },
     currentPlanText: { color: '#475569', fontSize: 11, lineHeight: 16 },
+    currentPlanHint: { color: '#1D4ED8', fontSize: 10, fontWeight: '700', marginTop: 8 },
+    savedOptionsBox: { marginTop: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#DBEAFE', padding: 10 },
+    savedOptionsTitle: { color: '#1E3A8A', fontSize: 12, fontWeight: '700', marginBottom: 6 },
+    savedOptionsText: { color: '#475569', fontSize: 11, lineHeight: 16, marginBottom: 4 },
+    modifyRouteButton: { marginTop: 8, minHeight: 42, backgroundColor: '#1D4ED8', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    modifyRouteButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+    transportChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+    transportChip: { backgroundColor: '#DBEAFE', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: '#93C5FD' },
+    transportChipText: { color: '#1E3A8A', fontSize: 10, fontWeight: '700' },
+    personalizeButton: { marginTop: 14, minHeight: 44, backgroundColor: '#E0F2FE', borderRadius: 12, borderWidth: 1, borderColor: '#7DD3FC', alignItems: 'center', justifyContent: 'center' },
+    personalizeButtonText: { color: '#0C4A6E', fontSize: 13, fontWeight: '700', textAlign: 'center' },
     saveButton: { marginTop: 14, minHeight: 46, backgroundColor: '#0F766E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
     saveButtonDisabled: { backgroundColor: '#99F6E4' },
     saveButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
