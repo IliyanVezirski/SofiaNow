@@ -1,21 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { getVehicleIcon, VehicleType } from '../services/transitUtils';
+import { getVehicleIconName, VehicleType } from '../services/transitUtils';
 import { AvailableLine, fetchAvailableLines, fetchLineRouteGeometryByRouteId, fetchLineRouteGeometry, fetchStopById, fetchAllStops, LineRouteGeometry, Stop } from '../services/stopsApi';
 import { getStaticStopSchedule, getScheduleBasedDirections, resolveScheduleRouteId, StaticScheduleEntry, DayType, getDayTypeForDate } from '../services/cgmApi';
 import { convertTripApiScheduleToRouteGeometry, fetchTripApiAvailableLines, fetchTripApiLineSchedule, getTripApiStopScheduleEntries, TripApiLineSchedule } from '../services/cgmApi/tripScheduleApi';
 import { RouteSelection } from '../types/routes';
+import { Ionicons } from '@expo/vector-icons';
 
 type ScheduleKind = 'bus' | 'trolley' | 'tram' | 'subway' | 'night';
 
 const SCHEDULE_KIND_ORDER: ScheduleKind[] = ['bus', 'trolley', 'tram', 'subway', 'night'];
 
-const SCHEDULE_KIND_META: Record<ScheduleKind, { label: string; icon: string }> = {
-    bus: { label: 'Автобус', icon: '🚌' },
-    trolley: { label: 'Тролей', icon: '🚎' },
-    tram: { label: 'Трамвай', icon: '🚊' },
-    subway: { label: 'Метро', icon: '🚇' },
-    night: { label: 'Нощен', icon: '🌙' },
+const SCHEDULE_KIND_META: Record<ScheduleKind, { label: string; ionicon: string }> = {
+    bus: { label: 'Автобус', ionicon: 'bus-outline' },
+    trolley: { label: 'Тролей', ionicon: 'bus-outline' },
+    tram: { label: 'Трамвай', ionicon: 'train-outline' },
+    subway: { label: 'Метро', ionicon: 'subway-outline' },
+    night: { label: 'Нощен', ionicon: 'moon-outline' },
 };
 
 const getLineKind = (line: AvailableLine): ScheduleKind => {
@@ -239,7 +240,7 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                     <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.stopEtaEmpty}>Няма налично разписание</Text>
                 ) : (
                     stopSchedule.map((entry) => {
-                        const label = `${getVehicleIcon(entry.type)} ${entry.line}${entry.destination ? ` → ${entry.destination}` : ''}`;
+                        const label = `${entry.line}${entry.destination ? ` → ${entry.destination}` : ''}`;
                         return (
                             <View key={label} style={styles.lineGroup}>
                                 <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.lineGroupHeader}>{label}</Text>
@@ -377,22 +378,24 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
         <View style={styles.page}>
             <View style={styles.header}>
                 <View style={styles.headerRow}>
-                    <View style={{ flex: 1 }}>
+                    <View style={{ flex: 1, paddingRight: 12 }}>
                         <Text style={styles.title}>Линии</Text>
                         <Text style={styles.subtitle}>{`${allLines.length} налични линии`}</Text>
                     </View>
                     {onClose && (
                         <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-                            <Text style={styles.closeButtonText}>{"\u00D7"}</Text>
+                            <Ionicons name="close" size={18} color="#334155" />
                         </TouchableOpacity>
                     )}
                 </View>
             </View>
 
             <View style={styles.globalSearchWrap}>
-                <TextInput
-                    style={styles.globalSearchInput}
-                    placeholder="🔍 Търси спирка по име..."
+                <View style={styles.searchInputWrap}>
+                    <Ionicons name="search-outline" size={16} color="#94A3B8" style={{ marginRight: 8 }} />
+                    <TextInput
+                        style={styles.globalSearchInput}
+                    placeholder="Търси спирка по име..."
                     placeholderTextColor="#9CA3AF"
                     value={stopSearch}
                     onChangeText={(text) => {
@@ -402,13 +405,14 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                         setExpandedDirectionAliases([]);
                         setStopSchedule([]);
                     }}
-                />
+                    />
+                </View>
             </View>
 
             {globalSearchResults.length > 0 && !selectedLine ? (
                 <ScrollView style={styles.routeArea} contentContainerStyle={styles.routeAreaContent}>
                     <View style={styles.routeCard}>
-                        <Text style={styles.routeCardTitle}>{`🔍 Резултати (${globalSearchResults.length})`}</Text>
+                        <Text style={styles.routeCardTitle}>{`Резултати (${globalSearchResults.length})`}</Text>
                         {globalSearchResults.map((stop) => (
                             <TouchableOpacity
                                 key={stop.id}
@@ -419,7 +423,9 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                 activeOpacity={0.7}
                                 onPress={() => { void handleStopPress(stop.id); }}
                             >
-                                <Text style={styles.stopIndex}>🚏</Text>
+                                <View style={styles.stopIndexIcon}>
+                                    <Ionicons name="flag-outline" size={13} color="#64748B" />
+                                </View>
                                 <View style={styles.stopInfo}>
                                     <Text style={styles.stopName}>{stop.name}</Text>
                                     <Text style={styles.stopMeta}>{`ID: ${stop.id} • Линии: ${stop.lines.slice(0, 6).join(', ')}`}</Text>
@@ -436,19 +442,20 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
             ) : (
                 <>
                     <View style={styles.filtersPanel}>
-                        <View style={styles.kindRow}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.kindCarousel} contentContainerStyle={styles.kindCarouselContent}>
                             {SCHEDULE_KIND_ORDER.map((kind) => (
                                 <TouchableOpacity
                                     key={kind}
-                                    style={[styles.chip, selectedKind === kind && styles.chipActive]}
+                                    style={[styles.kindChip, selectedKind === kind && styles.kindChipActive]}
                                     onPress={() => { setSelectedKind(kind); setSelectedLine(null); }}
                                 >
-                                    <Text style={[styles.chipText, selectedKind === kind && styles.chipTextActive]}>
-                                        {SCHEDULE_KIND_META[kind].icon} {SCHEDULE_KIND_META[kind].label} ({kindCounts[kind]})
+                                    <Ionicons name={SCHEDULE_KIND_META[kind].ionicon as any} size={18} color={selectedKind === kind ? '#FFFFFF' : '#475569'} />
+                                    <Text style={[styles.kindChipText, selectedKind === kind && styles.chipTextActive]}>
+                                        {SCHEDULE_KIND_META[kind].label}
                                     </Text>
                                 </TouchableOpacity>
                             ))}
-                        </View>
+                        </ScrollView>
 
                         <ScrollView style={styles.linesScroll} showsVerticalScrollIndicator={false}>
                             <View style={styles.linesGrid}>
@@ -476,7 +483,7 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                     <ScrollView style={styles.routeArea} contentContainerStyle={styles.routeAreaContent}>
                         {!selectedLine ? (
                             <View style={styles.placeholder}>
-                                <Text style={styles.placeholderIcon}>{SCHEDULE_KIND_META[selectedKind].icon}</Text>
+                                <Ionicons name={SCHEDULE_KIND_META[selectedKind].ionicon as any} size={40} color="#94A3B8" />
                                 <Text style={styles.placeholderText}>Избери линия, за да видиш маршрута</Text>
                             </View>
                         ) : routeLoading ? (
@@ -487,21 +494,28 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                         ) : routeGeometry ? (
                             <View style={styles.routeCard}>
                                 <View style={styles.routeCardHeader}>
-                                    <Text style={styles.routeCardTitle}>
-                                        {getVehicleIcon(selectedLine.type)} Линия {selectedLine.line}
-                                    </Text>
+                                    <View style={styles.routeCardTitleRow}>
+                                        <Ionicons name={getVehicleIconName(selectedLine.type) as any} size={16} color="#1F2937" />
+                                        <Text style={styles.routeCardTitle} numberOfLines={1}>
+                                            Линия {selectedLine.line}
+                                        </Text>
+                                    </View>
                                     <TouchableOpacity
                                         style={styles.mapButton}
+                                        activeOpacity={0.7}
                                         onPress={() => {
-                                            onOpenRoute?.({
-                                                line: selectedLine.line,
-                                                type: selectedLine.isNight ? 'bus' : selectedLine.type,
-                                                isNight: selectedLine.isNight,
-                                                routeId: selectedLine.routeId || undefined,
-                                            });
+                                            if (onOpenRoute) {
+                                                onOpenRoute({
+                                                    line: selectedLine.line,
+                                                    type: selectedLine.isNight ? 'bus' : selectedLine.type,
+                                                    isNight: selectedLine.isNight,
+                                                    routeId: selectedLine.routeId || undefined,
+                                                });
+                                            }
                                         }}
                                     >
-                                        <Text style={styles.mapButtonText}>🗺️ Маршрут</Text>
+                                        <Ionicons name="map-outline" size={14} color="#FFFFFF" />
+                                        <Text style={styles.mapButtonText}>На картата</Text>
                                     </TouchableOpacity>
                                 </View>
 
@@ -516,12 +530,15 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                                 onPress={() => toggleSection(dirKey)}
                                             >
                                                 <View style={{ flex: 1 }}>
-                                                    <Text style={styles.accordionHeaderText} numberOfLines={2}>
-                                                        {`🚏 ${direction.name || `Посока ${dirIndex + 1}`}`}
-                                                    </Text>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                                        <Ionicons name="navigate-outline" size={14} color="#475569" />
+                                                        <Text style={styles.accordionHeaderText} numberOfLines={2}>
+                                                            {direction.name || `Посока ${dirIndex + 1}`}
+                                                        </Text>
+                                                    </View>
                                                     <Text style={styles.accordionSubText}>{`${direction.stops.length} спирки`}</Text>
                                                 </View>
-                                                <Text style={styles.accordionArrow}>{isExpanded ? '▲' : '▼'}</Text>
+                                                <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#64748B" />
                                             </TouchableOpacity>
                                             {isExpanded && (
                                                 <View style={styles.accordionBody}>
@@ -550,7 +567,7 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                                                     style={styles.stopMapBtn}
                                                                     onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
                                                                 >
-                                                                    <Text style={styles.stopMapBtnText}>{"\uD83D\uDCCD"}</Text>
+                                                                        <Ionicons name="locate-outline" size={14} color="#475569" />
                                                                 </TouchableOpacity>
                                                             )}
                                                         </TouchableOpacity>
@@ -578,26 +595,27 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
 const styles = StyleSheet.create({
     page: {
         flex: 1,
-        backgroundColor: '#F8FAFC',
-        paddingTop: 16,
+        backgroundColor: 'transparent',
+        paddingTop: 8,
     },
     header: {
-        paddingHorizontal: 16,
-        marginBottom: 8,
+        paddingHorizontal: 14,
+        paddingTop: 6,
+        paddingBottom: 10,
     },
     headerRow: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
     },
     closeButton: {
         width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: '#F1F5F9',
+        backgroundColor: 'rgba(248,250,252,0.72)',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: 'rgba(226,232,240,0.72)',
     },
     closeButtonText: {
         fontSize: 22,
@@ -607,7 +625,7 @@ const styles = StyleSheet.create({
     },
     title: {
         color: '#0F172A',
-        fontSize: 22,
+        fontSize: 20,
         fontWeight: '700',
     },
     subtitle: {
@@ -620,68 +638,85 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         marginBottom: 8,
     },
-    globalSearchInput: {
-        backgroundColor: '#FFFFFF',
+    searchInputWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255,255,255,0.72)',
         borderRadius: 12,
         paddingHorizontal: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
+    },
+    globalSearchInput: {
+        flex: 1,
         paddingVertical: 10,
         fontSize: 14,
         color: '#0F172A',
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
     },
     filtersPanel: {
         marginHorizontal: 12,
-        marginBottom: 10,
-        backgroundColor: '#FFFFFF',
+        marginBottom: 6,
+        backgroundColor: 'rgba(255,255,255,0.74)',
         borderWidth: 1,
-        borderColor: '#E2E8F0',
-        borderRadius: 14,
-        padding: 10,
+        borderColor: 'rgba(226,232,240,0.72)',
+        borderRadius: 18,
+        padding: 8,
     },
-    kindRow: {
+    kindCarousel: {
+        marginBottom: 6,
+        marginHorizontal: -8,
+    },
+    kindCarouselContent: {
+        paddingHorizontal: 8,
+        gap: 6,
+    },
+    kindChip: {
         flexDirection: 'row',
-        flexWrap: 'wrap',
-        marginRight: -6,
-        marginBottom: 8,
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: 'rgba(248,250,252,0.72)',
+        borderRadius: 14,
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
+    },
+    kindChipActive: {
+        backgroundColor: 'rgba(29,78,216,0.82)',
+        borderColor: 'rgba(29,78,216,0.82)',
+    },
+    kindChipText: {
+        color: '#475569',
+        fontSize: 13,
+        fontWeight: '700',
     },
     linesScroll: {
-        maxHeight: 160,
+        maxHeight: 120,
     },
     linesGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        marginRight: -6,
-    },
-    chip: {
-        backgroundColor: '#EFF6FF',
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 7,
-        borderWidth: 1,
-        borderColor: '#BFDBFE',
-        marginRight: 6,
-        marginBottom: 6,
+        marginRight: -5,
     },
     lineChip: {
-        backgroundColor: '#EFF6FF',
+        backgroundColor: 'rgba(248,250,252,0.72)',
         borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 7,
+        paddingHorizontal: 8,
+        paddingVertical: 5,
         borderWidth: 1,
-        borderColor: '#BFDBFE',
-        marginRight: 6,
-        marginBottom: 6,
-        minWidth: '18%',
+        borderColor: 'rgba(226,232,240,0.72)',
+        marginRight: 5,
+        marginBottom: 5,
+        minWidth: '15%',
         alignItems: 'center',
         justifyContent: 'center',
     },
     chipActive: {
-        backgroundColor: '#1D4ED8',
-        borderColor: '#1D4ED8',
+        backgroundColor: 'rgba(29,78,216,0.82)',
+        borderColor: 'rgba(29,78,216,0.82)',
     },
     chipText: {
-        color: '#1E3A8A',
+        color: '#1E293B',
         fontSize: 12,
         fontWeight: '700',
     },
@@ -693,7 +728,7 @@ const styles = StyleSheet.create({
     },
     routeAreaContent: {
         paddingHorizontal: 12,
-        paddingBottom: 120,
+        paddingBottom: 32,
     },
     placeholder: {
         marginTop: 48,
@@ -702,6 +737,7 @@ const styles = StyleSheet.create({
     },
     placeholderIcon: {
         fontSize: 40,
+        display: 'none',
     },
     placeholderText: {
         color: '#64748B',
@@ -712,7 +748,7 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#F8FAFC',
+        backgroundColor: 'transparent',
     },
     loadingText: {
         marginTop: 10,
@@ -733,10 +769,10 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     routeCard: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 14,
+        backgroundColor: 'rgba(255,255,255,0.74)',
+        borderRadius: 18,
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: 'rgba(226,232,240,0.72)',
         padding: 12,
     },
     routeCardHeader: {
@@ -744,19 +780,30 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         marginBottom: 10,
-        gap: 10,
+        gap: 8,
+    },
+    routeCardTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        flex: 1,
+        minWidth: 0,
     },
     routeCardTitle: {
         color: '#1E293B',
         fontSize: 16,
         fontWeight: '700',
-        flex: 1,
+        flexShrink: 1,
     },
     mapButton: {
-        borderRadius: 999,
-        backgroundColor: '#1D4ED8',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        borderRadius: 12,
+        backgroundColor: 'rgba(29,78,216,0.82)',
         paddingHorizontal: 12,
-        paddingVertical: 7,
+        paddingVertical: 8,
+        flexShrink: 0,
     },
     mapButtonText: {
         color: '#FFFFFF',
@@ -766,15 +813,15 @@ const styles = StyleSheet.create({
 
     accordionSection: {
         borderWidth: 1,
-        borderColor: '#E2E8F0',
-        borderRadius: 12,
+        borderColor: 'rgba(226,232,240,0.72)',
+        borderRadius: 14,
         marginBottom: 10,
         overflow: 'hidden',
     },
     accordionHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#EFF6FF',
+        backgroundColor: 'rgba(248,250,252,0.68)',
         paddingHorizontal: 12,
         paddingVertical: 11,
         gap: 8,
@@ -791,14 +838,10 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         marginTop: 1,
     },
-    accordionArrow: {
-        color: '#64748B',
-        fontSize: 12,
-        fontWeight: '700',
-    },
+
     accordionBody: {
         padding: 10,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'rgba(255,255,255,0.68)',
     },
     directionTitle: {
         color: '#1E293B',
@@ -809,14 +852,14 @@ const styles = StyleSheet.create({
     stopRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        paddingVertical: 6,
-        paddingHorizontal: 6,
+        paddingVertical: 8,
+        paddingHorizontal: 8,
         borderTopWidth: 1,
-        borderTopColor: '#EDF2F7',
-        borderRadius: 8,
+        borderTopColor: 'rgba(226,232,240,0.72)',
+        borderRadius: 12,
     },
     stopRowActive: {
-        backgroundColor: '#EFF6FF',
+        backgroundColor: 'rgba(248,250,252,0.84)',
     },
     stopIndex: {
         width: 28,
@@ -824,6 +867,11 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '700',
         paddingTop: 1,
+    },
+    stopIndexIcon: {
+        width: 28,
+        alignItems: 'center',
+        paddingTop: 2,
     },
     stopInfo: {
         flex: 1,
@@ -842,19 +890,18 @@ const styles = StyleSheet.create({
         width: 30,
         height: 30,
         borderRadius: 15,
-        backgroundColor: '#EFF6FF',
+        backgroundColor: 'rgba(248,250,252,0.72)',
         alignItems: 'center',
         justifyContent: 'center',
         marginLeft: 4,
-    },
-    stopMapBtnText: {
-        fontSize: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
     },
     stopEtaPanel: {
         marginTop: 6,
         paddingTop: 6,
         borderTopWidth: 1,
-        borderTopColor: '#E2E8F0',
+        borderTopColor: 'rgba(226,232,240,0.72)',
     },
     dayTypeRow: {
         flexDirection: 'row',
@@ -862,16 +909,16 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     dayTypeChip: {
-        backgroundColor: '#F1F5F9',
+        backgroundColor: 'rgba(248,250,252,0.72)',
         borderRadius: 999,
         paddingHorizontal: 12,
         paddingVertical: 5,
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: 'rgba(226,232,240,0.72)',
     },
     dayTypeChipActive: {
-        backgroundColor: '#1E293B',
-        borderColor: '#1E293B',
+        backgroundColor: 'rgba(30,41,59,0.88)',
+        borderColor: 'rgba(30,41,59,0.88)',
     },
     dayTypeChipText: {
         color: '#475569',
@@ -909,14 +956,16 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     lineGroupTime: {
-        backgroundColor: '#EEF2FF',
-        borderRadius: 6,
+        backgroundColor: 'rgba(248,250,252,0.72)',
+        borderRadius: 8,
         paddingHorizontal: 8,
         paddingVertical: 3,
         textAlign: 'center',
         fontSize: 12,
         color: '#1E293B',
         overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.56)',
     },
     lineGroupTimePartialStart: {
         backgroundColor: '#FDE68A',

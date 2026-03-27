@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
-import { VehicleType, VEHICLE_TYPE_ORDER, getVehicleIcon, getVehicleTypeLabel } from '../../../services/transitUtils';
+import { VehicleType, VEHICLE_TYPE_ORDER, getVehicleIconName, getVehicleTypeLabel } from '../../../services/transitUtils';
 import { Stop, summarizeStopDirections } from '../../../services/stopsApi';
+import { Ionicons } from '@expo/vector-icons';
 
 interface Props {
     visible: boolean;
@@ -35,7 +36,7 @@ export const FilterPanel: React.FC<Props> = ({
                 <Text style={styles.filterTitle}>1. Филтър по вид</Text>
                 {onClose && (
                     <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-                        <Text style={styles.closeBtnText}>{'\u00D7'}</Text>
+                        <Ionicons name="close" size={16} color="#334155" />
                     </TouchableOpacity>
                 )}
             </View>
@@ -45,7 +46,10 @@ export const FilterPanel: React.FC<Props> = ({
                 </TouchableOpacity>
                 {VEHICLE_TYPE_ORDER.map((vt) => (
                     <TouchableOpacity key={vt} style={[styles.chip, selectedVehicleTypes.includes(vt) && styles.chipActive]} onPress={() => onToggleVehicleType(vt)}>
-                        <Text style={[styles.chipText, selectedVehicleTypes.includes(vt) && styles.chipTextActive]}>{getVehicleIcon(vt)} {getVehicleTypeLabel(vt)}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name={getVehicleIconName(vt) as any} size={14} color={selectedVehicleTypes.includes(vt) ? '#FFFFFF' : '#374151'} />
+                            <Text style={[styles.chipText, selectedVehicleTypes.includes(vt) && styles.chipTextActive]}>{getVehicleTypeLabel(vt)}</Text>
+                        </View>
                     </TouchableOpacity>
                 ))}
             </View>
@@ -83,23 +87,33 @@ export const FilterPanel: React.FC<Props> = ({
 const styles = StyleSheet.create({
     panel: {
         position: 'absolute', top: 62, right: 76, width: 248, maxHeight: '72%',
-        backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 14, padding: 12, zIndex: 20, elevation: 20,
+        backgroundColor: 'rgba(255,255,255,0.82)', borderRadius: 18, padding: 12, zIndex: 20, elevation: 20,
+        borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
+        shadowColor: '#0F172A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 20,
     },
     content: { paddingBottom: 8 },
     headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-    filterTitle: { color: '#264653', fontSize: 14, fontWeight: '700' },
-    closeBtn: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D1D5DB' },
-    closeBtnText: { fontSize: 18, lineHeight: 20, fontWeight: '700', color: '#334155' },
+    filterTitle: { color: '#0F172A', fontSize: 14, fontWeight: '700' },
+    closeBtn: {
+        width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+        backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
+    },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginRight: -6, marginBottom: -6 },
-    chip: { backgroundColor: '#EEF2FF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: '#C7D2FE', marginRight: 6, marginBottom: 6 },
-    chipActive: { backgroundColor: '#1D4ED8', borderColor: '#1D4ED8' },
+    chip: {
+        backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7,
+        borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', marginRight: 6, marginBottom: 6,
+    },
+    chipActive: { backgroundColor: 'rgba(29,78,216,0.82)', borderColor: 'rgba(29,78,216,0.82)' },
     chipDimmed: { opacity: 0.45 },
-    chipText: { color: '#1E3A8A', fontSize: 12, fontWeight: '700' },
+    chipText: { color: '#1E293B', fontSize: 12, fontWeight: '700' },
     chipTextActive: { color: '#FFFFFF' },
     linesScroll: { marginTop: 2, maxHeight: 140 },
-    hint: { marginTop: 8, color: '#4B5563', fontSize: 12, fontWeight: '600' },
+    hint: { marginTop: 8, color: '#475569', fontSize: 12, fontWeight: '600' },
     stopsList: { marginTop: 10, maxHeight: 200 },
-    stopBtn: { backgroundColor: '#DBEAFE', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 6 },
+    stopBtn: {
+        backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 6,
+        borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
+    },
     stopBtnText: { color: '#1D4ED8', fontSize: 12, fontWeight: '600' },
-    stopDirText: { marginTop: 3, color: '#4B5563', fontSize: 11, lineHeight: 14 },
+    stopDirText: { marginTop: 3, color: '#475569', fontSize: 11, lineHeight: 14 },
 });

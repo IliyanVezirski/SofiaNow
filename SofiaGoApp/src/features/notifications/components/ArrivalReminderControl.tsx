@@ -15,9 +15,10 @@ import {
 interface Props {
     stopName: string;
     eta: StopEta;
+    compact?: boolean;
 }
 
-export const ArrivalReminderControl: React.FC<Props> = ({ stopName, eta }) => {
+export const ArrivalReminderControl: React.FC<Props> = ({ stopName, eta, compact = false }) => {
     const [minutesBefore, setMinutesBefore] = useState<number>(DEFAULT_REMINDER_MINUTES);
     const [submitting, setSubmitting] = useState(false);
     const [menuVisible, setMenuVisible] = useState(false);
@@ -87,19 +88,24 @@ export const ArrivalReminderControl: React.FC<Props> = ({ stopName, eta }) => {
 
     return (
         <>
-            <View style={styles.container}>
+            <View style={[styles.container, compact && styles.containerCompact]}>
                 <TouchableOpacity
-                    style={[styles.bellButton, activeReminder && styles.bellButtonActive, !canSchedule && styles.bellButtonDisabled]}
+                    style={[
+                        styles.bellButton,
+                        activeReminder && styles.bellButtonActive,
+                        !canSchedule && styles.bellButtonDisabled,
+                        compact && styles.bellButtonCompact,
+                    ]}
                     onPress={() => setMenuVisible(true)}
                     disabled={!canSchedule && !activeReminder}
                 >
                     <Ionicons
                         name={activeReminder ? 'notifications' : 'notifications-outline'}
-                        size={18}
-                        color={activeReminder ? '#F59E0B' : '#64748B'}
+                        size={compact ? 15 : 17}
+                        color={activeReminder ? '#A16207' : '#64748B'}
                     />
                 </TouchableOpacity>
-                {activeReminder ? (
+                {activeReminder && !compact ? (
                     <View style={styles.activeSummaryWrap}>
                         <View style={styles.activeBadge}>
                             <Ionicons name="notifications" size={12} color="#B45309" />
@@ -174,19 +180,27 @@ const styles = StyleSheet.create({
         alignItems: 'flex-end',
         minWidth: 40,
     },
+    containerCompact: {
+        minWidth: 34,
+    },
     bellButton: {
         width: 34,
         height: 34,
         borderRadius: 17,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#E2E8F0',
+        backgroundColor: 'rgba(248,250,252,0.64)',
         borderWidth: 1,
-        borderColor: '#CBD5E1',
+        borderColor: 'rgba(203,213,225,0.7)',
+    },
+    bellButtonCompact: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
     },
     bellButtonActive: {
-        backgroundColor: '#FEF3C7',
-        borderColor: '#FBBF24',
+        backgroundColor: 'rgba(245,158,11,0.14)',
+        borderColor: 'rgba(245,158,11,0.28)',
     },
     bellButtonDisabled: {
         opacity: 0.5,
@@ -222,18 +236,18 @@ const styles = StyleSheet.create({
     },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(15, 23, 42, 0.18)',
+        backgroundColor: 'rgba(15,23,42,0.18)',
     },
     menuCard: {
         marginHorizontal: 16,
         marginBottom: 110,
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        padding: 14,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 6,
+        backgroundColor: 'rgba(255,255,255,0.82)',
+        borderRadius: 24,
+        padding: 18,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.12,
+        shadowRadius: 28,
         elevation: 20,
     },
     menuHeader: {
@@ -248,12 +262,12 @@ const styles = StyleSheet.create({
         color: '#0F172A',
     },
     closeButton: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+        width: 34,
+        height: 34,
+        borderRadius: 17,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#F1F5F9',
+        backgroundColor: 'rgba(226,232,240,0.72)',
     },
     menuSubtitle: {
         fontSize: 12,
@@ -267,16 +281,16 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     optionChip: {
-        paddingHorizontal: 8,
-        paddingVertical: 5,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: '#CBD5E1',
-        backgroundColor: '#F8FAFC',
+        borderColor: 'rgba(226,232,240,0.72)',
+        backgroundColor: 'rgba(248,250,252,0.72)',
     },
     optionChipActive: {
-        backgroundColor: '#DBEAFE',
-        borderColor: '#60A5FA',
+        backgroundColor: '#1D4ED8',
+        borderColor: '#1D4ED8',
     },
     optionText: {
         fontSize: 12,
@@ -284,23 +298,23 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     optionTextActive: {
-        color: '#1D4ED8',
+        color: '#FFFFFF',
     },
     currentReminderCard: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        backgroundColor: '#FFF7ED',
+        backgroundColor: 'rgba(248,250,252,0.72)',
         borderWidth: 1,
-        borderColor: '#FED7AA',
-        borderRadius: 10,
+        borderColor: 'rgba(226,232,240,0.72)',
+        borderRadius: 12,
         paddingHorizontal: 10,
         paddingVertical: 8,
         marginBottom: 10,
     },
     currentReminderText: {
         flex: 1,
-        color: '#9A3412',
+        color: '#475569',
         fontSize: 12,
         fontWeight: '600',
     },
@@ -325,13 +339,13 @@ const styles = StyleSheet.create({
         lineHeight: 15,
     },
     button: {
-        backgroundColor: '#0F766E',
-        borderRadius: 10,
-        paddingVertical: 8,
+        backgroundColor: '#1D4ED8',
+        borderRadius: 12,
+        paddingVertical: 10,
         alignItems: 'center',
     },
     buttonDisabled: {
-        backgroundColor: '#94A3B8',
+        backgroundColor: '#93C5FD',
     },
     buttonText: {
         color: '#FFFFFF',
@@ -341,9 +355,9 @@ const styles = StyleSheet.create({
     removeButton: {
         marginTop: 8,
         alignItems: 'center',
-        paddingVertical: 8,
-        borderRadius: 10,
-        backgroundColor: '#FEE2E2',
+        paddingVertical: 10,
+        borderRadius: 12,
+        backgroundColor: 'rgba(254,226,226,0.72)',
     },
     removeButtonText: {
         color: '#B91C1C',

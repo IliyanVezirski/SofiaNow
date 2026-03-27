@@ -18,12 +18,12 @@ export const DroppedPinPanel: React.FC<Props> = ({ pin, onClose, onSaveFavorite,
         </View>
         {onSaveFavorite ? (
             <TouchableOpacity style={styles.favBtn} onPress={onSaveFavorite}>
-                <Text style={styles.favBtnText}>{'\u2B50'} Добави в любими</Text>
+                <Text style={styles.favBtnText}>{'\u2B50'} Добави в моите места</Text>
             </TouchableOpacity>
         ) : null}
         {onBuildRoute && (
             <TouchableOpacity style={styles.routeBtn} onPress={onBuildRoute}>
-                <Text style={styles.routeBtnText}>{'\uD83E\uDDED'} Изгради маршрут</Text>
+                <Text style={styles.routeBtnText}>{'\uD83E\uDDED'} Заведи ме</Text>
             </TouchableOpacity>
         )}
     </View>

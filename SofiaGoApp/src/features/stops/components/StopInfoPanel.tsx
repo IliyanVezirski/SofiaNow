@@ -3,10 +3,11 @@ import { View, Text, Pressable, ScrollView, TouchableOpacity, StyleSheet, Modal 
 import { Stop } from '../../../services/stopsApi';
 import { StopEta } from '../../../types/vehicles';
 import { getEtaScheduleInfo } from '../../../services/cgmApi/schedules';
-import { getVehicleAccentColor, getVehicleIcon, formatUnixTime } from '../../../services/transitUtils';
+import { getVehicleAccentColor, getVehicleIconName, formatUnixTime } from '../../../services/transitUtils';
 import { formatMinSinceMidnight } from '../../map/constants';
 import { ArrivalReminderControl } from '../../notifications/components/ArrivalReminderControl';
 import { ReminderCenterButton } from '../../notifications/components/ReminderCenterButton';
+import { Ionicons } from '@expo/vector-icons';
 
 interface Props {
     stop: Stop;
@@ -24,9 +25,10 @@ export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSche
                 <Pressable style={styles.backdrop} onPress={onClose} />
                 <View style={styles.panel}>
                     <View style={styles.header}>
-                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.title}>{`\uD83D\uDE8F ${stop.name}`}</Text>
+                        <Ionicons name="flag-outline" size={16} color="#0F172A" style={{ marginRight: 4 }} />
+                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.title}>{stop.name}</Text>
                         <Pressable style={styles.closeBtn} onPress={onClose}>
-                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.closeBtnText}>{'\u00D7'}</Text>
+                            <Ionicons name="close" size={18} color="#334155" />
                         </Pressable>
                     </View>
                     <ScrollView style={styles.scroll} nestedScrollEnabled>
@@ -46,18 +48,17 @@ export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSche
                                         <View style={styles.etaInfoWrap}>
                                             <View style={styles.etaHeaderRow}>
                                                 <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
-                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleBadgeText}>{getVehicleIcon(eta.type)}</Text>
+                                                    <Ionicons name={getVehicleIconName(eta.type) as any} size={15} color="#FFFFFF" />
                                                 </View>
                                                 <View style={styles.etaTextWrap}>
-                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.etaLineText} numberOfLines={2}>
+                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.etaLineText}>
                                                         {lineLabel}
                                                     </Text>
                                                     <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.etaMetaText}>
-                                                        {`${eta.minutesAway} мин • ${formatUnixTime(eta.arrivalTimestamp)}`}
-                                                        {schedText ? ` (разп. ${schedText})` : ''}
-                                                        {delayText ? ' ' : ''}
+                                                        {schedText ? `Разп. ${schedText}` : 'Няма разписание'}
+                                                        {delayText ? ' • ' : ''}
                                                         {delayText ? (
-                                                            <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
+                                                            <Text style={hasDelay ? styles.delayLateText : isEarly ? styles.delayEarlyText : styles.delayOnTimeText}>
                                                                 {delayText}
                                                             </Text>
                                                         ) : null}
@@ -65,7 +66,11 @@ export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSche
                                                 </View>
                                             </View>
                                         </View>
-                                        <ArrivalReminderControl stopName={stop.name} eta={eta} />
+                                        <View style={styles.etaSideWrap}>
+                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.etaMinutesText}>{eta.minutesAway} мин</Text>
+                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.etaClockText}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
+                                            <ArrivalReminderControl stopName={stop.name} eta={eta} compact />
+                                        </View>
                                     </View>
                                 </View>
                             );
@@ -74,7 +79,8 @@ export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSche
                     <View style={styles.footerActions}>
                         <ReminderCenterButton inline />
                         <TouchableOpacity style={styles.scheduleBtn} onPress={() => onOpenSchedule(stop.id, stop.name)}>
-                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.scheduleBtnText}>{'\uD83D\uDCC5'} Разписание</Text>
+                            <Ionicons name="calendar-outline" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
+                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.scheduleBtnText}>Разписание</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -90,41 +96,42 @@ const styles = StyleSheet.create({
     },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'transparent',
+        backgroundColor: 'rgba(15,23,42,0.18)',
     },
     panel: {
         marginBottom: 188, marginHorizontal: 16, maxHeight: 280,
-        backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, zIndex: 25, elevation: 25,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4,
+        backgroundColor: 'rgba(255,255,255,0.82)', borderRadius: 24, padding: 14, zIndex: 25, elevation: 25,
+        shadowColor: '#0F172A', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.12, shadowRadius: 28,
+        borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
     },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-    title: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
-    closeBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
-    closeBtnText: { fontSize: 14, fontWeight: '700', color: '#6B7280' },
+    header: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 4 },
+    title: { flex: 1, minWidth: 0, fontSize: 16, fontWeight: '700', color: '#0F172A' },
+    closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
     scroll: { maxHeight: 150 },
-    info: { fontSize: 13, color: '#374151', marginBottom: 2 },
+    info: { fontSize: 12, color: '#475569', marginBottom: 8, lineHeight: 18 },
     etaCard: {
-        backgroundColor: '#F8FAFC',
-        borderRadius: 10,
+        backgroundColor: 'rgba(248,250,252,0.72)',
+        borderRadius: 12,
         paddingHorizontal: 10,
         paddingVertical: 8,
         marginBottom: 8,
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: 'rgba(226,232,240,0.72)',
     },
     etaRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        justifyContent: 'space-between',
         gap: 10,
     },
     etaInfoWrap: {
         flex: 1,
+        minWidth: 0,
     },
     etaHeaderRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
         gap: 8,
+        minWidth: 0,
     },
     etaTextWrap: {
         flex: 1,
@@ -133,12 +140,42 @@ const styles = StyleSheet.create({
     etaLineText: {
         fontSize: 13,
         fontWeight: '700',
-        color: '#1F2937',
+        color: '#0F172A',
+        lineHeight: 17,
     },
     etaMetaText: {
         marginTop: 2,
-        fontSize: 12,
+        fontSize: 11,
         color: '#475569',
+        lineHeight: 16,
+    },
+    etaSideWrap: {
+        width: 62,
+        alignItems: 'flex-end',
+        flexShrink: 0,
+    },
+    etaMinutesText: {
+        fontSize: 13,
+        fontWeight: '800',
+        color: '#1D4ED8',
+    },
+    etaClockText: {
+        marginTop: 2,
+        marginBottom: 6,
+        fontSize: 11,
+        color: '#94A3B8',
+    },
+    delayLateText: {
+        color: '#DC2626',
+        fontWeight: '700',
+    },
+    delayEarlyText: {
+        color: '#2563EB',
+        fontWeight: '700',
+    },
+    delayOnTimeText: {
+        color: '#475569',
+        fontWeight: '600',
     },
     vehicleBadge: {
         width: 28,
@@ -147,15 +184,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    vehicleBadgeText: {
-        fontSize: 15,
-    },
     footerActions: {
         marginTop: 8,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
     },
-    scheduleBtn: { flex: 1, backgroundColor: '#1D4ED8', borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
+    scheduleBtn: { flex: 1, flexDirection: 'row', backgroundColor: '#1D4ED8', borderRadius: 12, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
     scheduleBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 });

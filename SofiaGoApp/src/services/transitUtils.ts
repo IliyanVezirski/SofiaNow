@@ -92,6 +92,20 @@ export const getVehicleIcon = (type: VehicleType) => {
     }
 };
 
+/** Returns an Ionicons outline icon name for the given vehicle type. */
+export const getVehicleIconName = (type: VehicleType): string => {
+    switch (type) {
+        case 'tram':
+            return 'train-outline';
+        case 'trolley':
+            return 'bus-outline';
+        case 'subway':
+            return 'subway-outline';
+        default:
+            return 'bus-outline';
+    }
+};
+
 export const getVehicleAccentColor = (type: VehicleType) => {
     switch (type) {
         case 'tram':

@@ -6,7 +6,7 @@ import * as Location from 'expo-location';
 import { MapContainer, Popup, TileLayer, CircleMarker, Marker, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import { fetchStopEtas, fetchVehiclesInBounds, StopEta, Vehicle } from '../services/cgmApi';
 import { fetchLineRouteGeometry, fetchLineRouteGeometryByRouteId, fetchStopById, fetchStopsInBounds, LineRouteGeometry, MapBounds, Stop, summarizeStopDirections } from '../services/stopsApi';
-import { addFavoritePlace, FavoritePlace, loadFavoritePlaces, PlaceSearchResult, removeFavoritePlace, searchLocations, updateFavoritePlace, updateFavoritePlaceName } from '../services/places';
+import { addFavoritePlace, FavoritePlace, loadFavoritePlaces, PlaceSearchResult, removeFavoritePlace, reorderFavoritePlaces, searchCentralLocations, updateFavoritePlace, updateFavoritePlaceName } from '../services/places';
 import 'leaflet/dist/leaflet.css';
 import { VehicleType, formatUnixTime, getVehicleAccentColor, getVehicleIcon, getVehicleTypeLabel, inferLineTypeFromToken, VEHICLE_TYPE_ORDER } from '../services/transitUtils';
 import { RouteSelection } from '../types/routes';
@@ -284,6 +284,7 @@ const createSavedPinIcon = () => L.divIcon({
 
 interface MapScreenProps {
     highlightedRoute?: RouteSelection | null;
+    isActive?: boolean;
     filterPanelVisible?: boolean;
     searchRequestToken?: number;
     favoritesRequestToken?: number;
@@ -293,6 +294,7 @@ interface MapScreenProps {
 
 export default function MapScreen({
     highlightedRoute,
+    isActive = true,
     filterPanelVisible = true,
     searchRequestToken,
     favoritesRequestToken,
@@ -363,7 +365,7 @@ export default function MapScreen({
         const timer = setTimeout(() => {
             void (async () => {
                 try {
-                    const results = await searchLocations(normalizedQuery, 6);
+                    const results = await searchCentralLocations(normalizedQuery, 6);
                     if (isMounted) {
                         setLocationSearchResults(results);
                     }
@@ -949,9 +951,11 @@ export default function MapScreen({
         selectedStopId: string | null;
         selectedStopName: string | null;
         selectedLines: FavoritePlace['selectedLines'];
+        personalNotificationLeadMinutes?: number | null;
     }) => {
         const nextFavorites = await addFavoritePlace(input);
         setFavoritePlaces(nextFavorites);
+        return nextFavorites;
     };
 
     const onSelectSearchResult = (result: PlaceSearchResult) => {
@@ -963,6 +967,11 @@ export default function MapScreen({
 
     const onRemoveFavorite = async (favoriteId: string) => {
         const nextFavorites = await removeFavoritePlace(favoriteId);
+        setFavoritePlaces(nextFavorites);
+    };
+
+    const onReorderFavorites = async (favoriteIds: string[]) => {
+        const nextFavorites = await reorderFavoritePlaces(favoriteIds);
         setFavoritePlaces(nextFavorites);
     };
 
@@ -1016,6 +1025,7 @@ export default function MapScreen({
             selectedStopId: string | null;
             selectedStopName: string | null;
             selectedLines: FavoritePlace['selectedLines'];
+            personalNotificationLeadMinutes?: number | null;
         },
     ) => {
         const nextFavorites = await updateFavoritePlace(favoriteId, updates);
@@ -1280,6 +1290,7 @@ export default function MapScreen({
                         setSavedPinCoordinate({ latitude: favorite.latitude, longitude: favorite.longitude });
                         setFavoritesVisible(false);
                     }}
+                    onReorder={onReorderFavorites}
                     onUpdate={onUpdateFavorite}
                     onCreate={onCreateFavorite}
                     onRemove={onRemoveFavorite}
@@ -1526,6 +1537,15 @@ export default function MapScreen({
                     </TouchableOpacity>
                 </View>
 
+                {isActive && location && !userLocationVisible && (
+                    <TouchableOpacity style={styles.locationButton} onPress={() => { void recenterToUserLocation(); }}>
+                        <View style={styles.locationButtonIconWrap}>
+                            <Ionicons name="locate" size={18} color="#0F172A" />
+                        </View>
+                        <Text style={styles.locationButtonLabel}>До мен</Text>
+                    </TouchableOpacity>
+                )}
+
                 {selectedStop && (
                     <View style={styles.stopSchedulePanel}>
                         <View style={styles.stopScheduleHeader}>
@@ -1543,12 +1563,6 @@ export default function MapScreen({
                             {renderStopEtaByLine(selectedStop)}
                         </ScrollView>
                     </View>
-                )}
-
-                {location && !userLocationVisible && (
-                    <TouchableOpacity style={styles.locationButton} onPress={() => { void recenterToUserLocation(); }}>
-                        <Ionicons name="locate" size={24} color="#0F172A" />
-                    </TouchableOpacity>
                 )}
 
                 <Modal
@@ -2002,19 +2016,35 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 8,
         bottom: 44,
-        width: 52,
-        height: 52,
-        borderRadius: 26,
-        backgroundColor: 'rgba(255,255,255,0.95)',
+        height: 48,
+        borderRadius: 24,
+        paddingHorizontal: 8,
+        backgroundColor: 'rgba(255,255,255,0.78)',
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: 'rgba(226,232,240,0.72)',
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        zIndex: 1000,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.08,
+        shadowRadius: 24,
+        zIndex: 1,
+    },
+    locationButtonIconWrap: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(248,250,252,0.42)',
+    },
+    locationButtonLabel: {
+        marginLeft: 8,
+        marginRight: 4,
+        color: '#475569',
+        fontSize: 12,
+        fontWeight: '600',
     },
     favoritesButton: {
         position: 'absolute',

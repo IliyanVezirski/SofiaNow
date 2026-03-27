@@ -1,5 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 import { refreshTransitArrivalReminders } from './transitArrivalNotifications';
+import { reconcileFavoriteCommuteNotifications } from '../places';
 
 export const TRANSIT_REMINDER_BACKGROUND_TASK = 'sofiago-transit-reminder-refresh';
 const BACKGROUND_MIN_INTERVAL_MINUTES = 15;
@@ -58,6 +59,7 @@ const ensureBackgroundTaskDefined = () => {
             TaskManager.defineTask(TRANSIT_REMINDER_BACKGROUND_TASK, async () => {
                 try {
                     await refreshTransitArrivalReminders();
+                    await reconcileFavoriteCommuteNotifications();
                     return BackgroundTask.BackgroundTaskResult.Success;
                 } catch (error) {
                     console.error('Transit reminder background refresh failed:', error);

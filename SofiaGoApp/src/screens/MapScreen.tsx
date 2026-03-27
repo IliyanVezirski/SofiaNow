@@ -43,6 +43,7 @@ import { FavoritesPanel } from '../features/favorites/components/FavoritesPanel'
 import { RouteStopsPanel } from '../features/routing/components/RouteStopsPanel';
 import { ReportModal } from '../features/reporting/components/ReportModal';
 import { DroppedPinPanel } from '../features/droppedPin/components/DroppedPinPanel';
+import { ReminderCenterButton } from '../features/notifications/components/ReminderCenterButton';
 
 import { INITIAL_ZOOM_LEVEL, MAP_STYLE, MAX_RENDERED_STOPS, DEFAULT_CENTER_COORDINATE, createFallbackBounds, getDirectionAccentColor, getDirectionArrowSamples } from '../features/map/constants';
 
@@ -76,13 +77,13 @@ const createCirclePolygon = (centerLon: number, centerLat: number, radiusMeters:
 const getStopTypeInfo = (type: VehicleType) => {
     switch (type) {
         case 'bus':
-            return { color: '#DC2626', text: 'А' };
+            return { color: '#DC2626' };
         case 'trolley':
-            return { color: '#2563EB', text: 'ТР' };
+            return { color: '#2563EB' };
         case 'tram':
-            return { color: '#F97316', text: 'ТМ' };
+            return { color: '#F97316' };
         default:
-            return { color: '#9CA3AF', text: '' };
+            return { color: '#94A3B8' };
     }
 };
 
@@ -110,42 +111,20 @@ const StopDot = ({ stop, selected }: { stop: Stop; selected: boolean }) => {
     }
 
     const hasSubway = types.includes('subway');
+    const primaryColor = hasSubway ? '#0056A4' : getStopTypeInfo(types[0]).color;
 
-    if (hasSubway) {
+    if (types.length > 1 && !hasSubway) {
+        const colors = types.map(t => getStopTypeInfo(t).color);
         return (
             <View style={[
                 styles.stopDotBase,
-                { backgroundColor: '#FFFFFF', borderColor: '#0056A4', borderWidth: 2 },
-                selected && { transform: [{ scale: 1.4 }], borderColor: '#F59E0B', borderWidth: 3, zIndex: 10 }
+                selected && styles.stopDotBaseSelected,
             ]}>
-                <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: -1 }}>
-                    <Text style={{ color: '#0056A4', fontWeight: '900', fontSize: 11, lineHeight: 11 }}>M</Text>
-                    <View style={{
-                        width: 5, height: 5,
-                        borderBottomWidth: 1.5, borderRightWidth: 1.5,
-                        borderColor: '#0056A4',
-                        transform: [{ rotate: '45deg' }],
-                        marginTop: 0
-                    }} />
+                <View style={{ width: 10, height: 10, borderRadius: 5, overflow: 'hidden', flexDirection: 'row' }}>
+                    {colors.map((c, i) => (
+                        <View key={i} style={{ flex: 1, backgroundColor: c }} />
+                    ))}
                 </View>
-                {selected && (
-                    <View style={styles.stopLabelContainer}>
-                        <Text style={styles.stopLabelText}>{stop.name}</Text>
-                    </View>
-                )}
-            </View>
-        );
-    }
-
-    if (types.length === 1) {
-        const { color, text } = getStopTypeInfo(types[0]);
-        return (
-            <View style={[
-                styles.stopDotBase,
-                { backgroundColor: color, borderColor: '#000000', borderWidth: 1.5 },
-                selected && { transform: [{ scale: 1.4 }], borderColor: '#F59E0B', borderWidth: 3, zIndex: 10 }
-            ]}>
-                <Text style={styles.stopDotText}>{text}</Text>
                 {selected && (
                     <View style={styles.stopLabelContainer}>
                         <Text style={styles.stopLabelText}>{stop.name}</Text>
@@ -158,24 +137,13 @@ const StopDot = ({ stop, selected }: { stop: Stop; selected: boolean }) => {
     return (
         <View style={[
             styles.stopDotBase,
-            { backgroundColor: '#CCC', borderColor: '#000000', borderWidth: 1.5, overflow: 'hidden', flexDirection: 'row', alignItems: 'stretch' },
-            selected && { transform: [{ scale: 1.4 }], borderColor: '#F59E0B', borderWidth: 3, zIndex: 10 }
+            selected && styles.stopDotBaseSelected,
         ]}>
-            {types.map(t => {
-                const info = getStopTypeInfo(t);
-                const isSubway = t === 'subway';
-                return (
-                    <View key={t} style={{ flex: 1, backgroundColor: info.color, alignItems: 'center', justifyContent: 'center' }}>
-                        <Text 
-                            numberOfLines={1} 
-                            style={[
-                                styles.stopDotText, 
-                                { fontSize: types.length > 2 ? 6 : 7.5, letterSpacing: -0.5 },
-                                isSubway && { color: '#0056A4' }
-                            ]}>{info.text}</Text>
-                    </View>
-                );
-            })}
+            {hasSubway ? (
+                <Text style={{ color: '#0056A4', fontWeight: '800', fontSize: 9, lineHeight: 11 }}>M</Text>
+            ) : (
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: primaryColor }} />
+            )}
             {selected && (
                 <View style={styles.stopLabelContainer}>
                     <Text style={styles.stopLabelText}>{stop.name}</Text>
@@ -188,6 +156,7 @@ const StopDot = ({ stop, selected }: { stop: Stop; selected: boolean }) => {
 interface MapScreenProps {
     highlightedRoute?: RouteSelection | null;
     onClearHighlightedRoute?: () => void;
+    isActive?: boolean;
     showReportButton?: boolean;
     filterPanelVisible?: boolean;
     onCloseFilterPanel?: () => void;
@@ -201,11 +170,14 @@ interface MapScreenProps {
     focusStopId?: string | null;
     tripPlannerRoute?: TripRouteGeoJSON | null;
     onClearTripRoute?: () => void;
+    onSearchVisibilityChange?: (visible: boolean) => void;
+    onFavoritesVisibilityChange?: (visible: boolean) => void;
 }
 
 export default function MapScreen({
     highlightedRoute,
     onClearHighlightedRoute,
+    isActive = true,
     showReportButton = true,
     filterPanelVisible = true,
     onCloseFilterPanel,
@@ -219,6 +191,8 @@ export default function MapScreen({
     focusStopId,
     tripPlannerRoute,
     onClearTripRoute,
+    onSearchVisibilityChange,
+    onFavoritesVisibilityChange,
 }: MapScreenProps) {
     const stopAnnotationRefs = useRef<Record<string, { refresh: () => void } | null>>({});
     const previousSelectedStopAnnotationIdRef = useRef<string | null>(null);
@@ -362,6 +336,14 @@ export default function MapScreen({
             favorites.setFavoritesVisible(false);
         }
     }, [dismissTransientPanelsToken]);
+
+    useEffect(() => {
+        onSearchVisibilityChange?.(search.searchModalVisible);
+    }, [search.searchModalVisible]);
+
+    useEffect(() => {
+        onFavoritesVisibilityChange?.(favorites.favoritesVisible);
+    }, [favorites.favoritesVisible]);
 
     useEffect(() => {
         const previousAnnotationId = previousSelectedStopAnnotationIdRef.current;
@@ -839,6 +821,17 @@ export default function MapScreen({
                     )}
                 </MapboxGL.MapView>
 
+                <View style={styles.floatingRowWrap}>
+                    <ReminderCenterButton inline opaque={!!selectedStop.selectedStop || search.searchModalVisible || favorites.favoritesVisible || !!filterPanelVisible} />
+                    {isActive && location && !userLocationVisible && (
+                        <TouchableOpacity style={styles.recenterFloatingButton} onPress={() => void recenterToUserLocation()}>
+                            <View style={styles.recenterFloatingIconWrap}>
+                                <Ionicons name="locate" size={18} color="#0F172A" />
+                            </View>
+                        </TouchableOpacity>
+                    )}
+                </View>
+
                 {/* Clear route buttons */}
                 {vehicleRoute.hasVehicleRoute && (
                     <TouchableOpacity style={styles.clearRouteButton} onPress={vehicleRoute.clearVehicleRoute}>
@@ -853,12 +846,6 @@ export default function MapScreen({
                 {!!highlightedRoute && !!onClearHighlightedRoute && !tripPlannerRoute && (
                     <TouchableOpacity style={[styles.clearRouteButton, { top: vehicleRoute.hasVehicleRoute ? 100 : 50 }]} onPress={onClearHighlightedRoute}>
                         <Text style={styles.clearRouteButtonText}>{'\u2715'}</Text>
-                    </TouchableOpacity>
-                )}
-
-                {location && !userLocationVisible && (
-                    <TouchableOpacity style={styles.recenterFloatingButton} onPress={() => void recenterToUserLocation()}>
-                        <Ionicons name="locate" size={24} color="#0F172A" />
                     </TouchableOpacity>
                 )}
 
@@ -898,6 +885,7 @@ export default function MapScreen({
                         onShowTripRoute?.(route);
                         favorites.setFavoritesVisible(false);
                     }}
+                    onReorder={favorites.reorderFavorites}
                     onSelect={(fav) => {
                         if (!Number.isFinite(fav.latitude) || !Number.isFinite(fav.longitude)) {
                             return;
@@ -1029,51 +1017,75 @@ const styles = StyleSheet.create({
     map: { flex: 1 },
     userDot: { width: 20, height: 20, backgroundColor: '#007AFF', borderRadius: 10, borderWidth: 3, borderColor: 'white' },
     vehicleMarkerWrap: { alignItems: 'center', justifyContent: 'center', zIndex: 10, elevation: 10 },
-    stopDotBase: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.3, shadowRadius: 1 },
+    stopDotBase: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.9)', elevation: 2, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 2 },
+    stopDotBaseSelected: { backgroundColor: '#FFFFFF', transform: [{ scale: 1.35 }], shadowOpacity: 0.18, shadowRadius: 4, zIndex: 10 },
     stopDotText: { color: '#FFFFFF', fontSize: 11, fontWeight: 'bold' },
-    stopDot: { backgroundColor: 'rgba(0, 122, 255, 0.35)', borderWidth: 2, borderColor: 'rgba(0, 122, 255, 0.6)', borderRadius: 12, width: 24, height: 24 },
-    stopDotSelected: { backgroundColor: '#F59E0B', borderColor: '#D97706', borderWidth: 3, transform: [{ scale: 1.2 }] },
-    stopLabelContainer: { position: 'absolute', bottom: 28, left: -60, width: 140, backgroundColor: '#1F2937', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
-    stopLabelText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700', textAlign: 'center' },
-    routeStopDot: { width: 26, height: 26, borderRadius: 13, borderWidth: 2.5, alignItems: 'center', justifyContent: 'center' },
-    routeStopDotSelected: { borderColor: '#F59E0B', borderWidth: 4, transform: [{ scale: 1.18 }] },
+    stopDot: { backgroundColor: 'rgba(148,163,184,0.35)', borderRadius: 7, width: 14, height: 14 },
+    stopDotSelected: { backgroundColor: '#1D4ED8', transform: [{ scale: 1.3 }] },
+    stopLabelContainer: { position: 'absolute', bottom: 28, left: -60, width: 140, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center', elevation: 5, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    stopLabelText: { color: '#0F172A', fontSize: 10, fontWeight: '700', textAlign: 'center' },
+    routeStopDot: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.9)' },
+    routeStopDotSelected: { backgroundColor: '#FFFFFF', transform: [{ scale: 1.3 }] },
     routeStopText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
-    routeStopLabel: { backgroundColor: '#FFFFFF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2, maxWidth: 120, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2 },
-    routeStopLabelSelected: { borderWidth: 1.5, borderColor: '#F59E0B' },
-    routeStopName: { fontSize: 9, fontWeight: '600', color: '#1F2937', textAlign: 'center' },
-    vehicleRouteStopDot: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#059669', borderWidth: 2, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-    vehicleRouteStopDotSelected: { borderColor: '#F59E0B', borderWidth: 4, transform: [{ scale: 1.15 }] },
-    vehicleRouteStopText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700' },
-    vehicleRouteStopLabel: { backgroundColor: '#FFFFFF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2, maxWidth: 120, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2 },
-    vehicleRouteStopName: { fontSize: 9, fontWeight: '600', color: '#1F2937', textAlign: 'center' },
+    routeStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2, maxWidth: 120, elevation: 3, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    routeStopLabelSelected: { borderWidth: 1.5, borderColor: '#1D4ED8' },
+    routeStopName: { fontSize: 9, fontWeight: '600', color: '#0F172A', textAlign: 'center' },
+    vehicleRouteStopDot: { width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' },
+    vehicleRouteStopDotSelected: { backgroundColor: '#FFFFFF', transform: [{ scale: 1.3 }] },
+    vehicleRouteStopText: { color: '#059669', fontSize: 8, fontWeight: '700' },
+    vehicleRouteStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2, maxWidth: 120, elevation: 3, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    vehicleRouteStopName: { fontSize: 9, fontWeight: '600', color: '#0F172A', textAlign: 'center' },
     vehicleRouteStopTime: { fontSize: 9, fontWeight: '700', color: '#059669', textAlign: 'center' },
     routeDirectionArrow: { fontSize: 22, fontWeight: '900', textShadowColor: 'rgba(255,255,255,0.95)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 2 },
     droppedPinIcon: { fontSize: 28, lineHeight: 28, textShadowColor: 'rgba(220,38,38,0.35)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4 },
-    tripStopDot: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF', borderWidth: 3, borderColor: '#1E3A8A' },
-    tripStopDotSelected: { borderColor: '#F59E0B', borderWidth: 3.5, transform: [{ scale: 1.2 }] },
+    tripStopDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.9)' },
+    tripStopDotSelected: { backgroundColor: '#FFFFFF', transform: [{ scale: 1.3 }] },
     tripEndpointMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#059669', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3, elevation: 5 },
     tripEndpointMarkerEnd: { backgroundColor: '#DC2626' },
     tripEndpointText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
     clearRouteButton: { position: 'absolute', top: 50, left: 16, backgroundColor: 'white', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 10, zIndex: 30 },
     clearRouteButtonText: { fontSize: 20, color: '#E63946', fontWeight: '700' },
-    recenterFloatingButton: {
+    floatingRowWrap: {
         position: 'absolute',
         right: 16,
-        bottom: 122,
-        width: 52,
-        height: 52,
-        borderRadius: 26,
-        backgroundColor: 'rgba(255,255,255,0.96)',
+        bottom: 110,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        zIndex: 0,
+        elevation: 0,
+    },
+    recenterFloatingButton: {
+        height: 48,
+        borderRadius: 24,
+        paddingHorizontal: 8,
+        backgroundColor: 'rgba(255,255,255,0.78)',
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: 'rgba(226,232,240,0.72)',
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.22,
-        shadowRadius: 8,
-        elevation: 12,
-        zIndex: 30,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.08,
+        shadowRadius: 24,
+        elevation: 1,
+        zIndex: 1,
+    },
+    recenterFloatingIconWrap: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(248,250,252,0.42)',
+    },
+    recenterFloatingLabel: {
+        marginLeft: 8,
+        marginRight: 4,
+        color: '#475569',
+        fontSize: 12,
+        fontWeight: '600',
     },
     bottomOverlay: { position: 'absolute', bottom: 40, width: '100%', alignItems: 'center', zIndex: 5, elevation: 5 },
     reportButton: { backgroundColor: '#E63946', paddingHorizontal: 25, paddingVertical: 15, borderRadius: 30, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 6 },

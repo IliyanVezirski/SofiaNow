@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { FAVORITE_COMMUTE_WEEKDAY_OPTIONS, FavoriteCommutePlan, FavoriteCommuteWeekday, FavoriteLinePreference, FavoritePlace, formatFavoriteCommuteWeekdays, hasFavoriteCoordinates } from '../../../services/places';
+import { FAVORITE_COMMUTE_NOTIFICATION_SCHEDULE_VERSION, FAVORITE_COMMUTE_WEEKDAY_OPTIONS, FavoriteCommutePlan, FavoriteCommuteRouteLineTab, FavoriteCommuteWeekday, FavoriteLinePreference, FavoritePlace, formatFavoriteCommuteWeekdays, getFavoriteCommuteNotificationShiftLabel, hasFavoriteCoordinates, resolveFavoriteCommuteNotificationWeekdays } from '../../../services/places';
 import { Itinerary, ItineraryLeg, PlanType, TripLocation, planTrip, searchLocations as searchTripLocations } from '../../../services/tripPlanner';
 import { cancelCommuteRouteNotification, scheduleCommuteRouteNotification } from '../../../services/notifications/commuteRouteNotifications';
 import { Stop } from '../../../services/stopsApi';
@@ -11,6 +11,7 @@ interface Props {
     visible?: boolean;
     inline?: boolean;
     targetFavorite: FavoritePlace | null;
+    openBuilderByDefault?: boolean;
     currentLocation?: { latitude: number; longitude: number } | null;
     searchableStops: Stop[];
     onShowOnMap?: (route: TripRouteGeoJSON) => void;
@@ -29,6 +30,7 @@ interface Props {
         selectedStopId?: string | null;
         selectedStopName?: string | null;
         selectedLines?: FavoriteLinePreference[];
+        personalNotificationLeadMinutes?: number | null;
     }) => Promise<void> | void;
 }
 
@@ -99,6 +101,17 @@ const formatReminderTimeFromItineraryStart = (startEpoch: number, minutesBefore:
     return `${String(reminderDate.getHours()).padStart(2, '0')}:${String(reminderDate.getMinutes()).padStart(2, '0')}`;
 };
 
+const formatReminderTimeFromClock = (clockValue: string, minutesBefore: number) => {
+    const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(clockValue || '').trim());
+    if (!match) {
+        return null;
+    }
+
+    const reminderDate = new Date(2000, 0, 1, Number(match[1]), Number(match[2]), 0, 0);
+    reminderDate.setMinutes(reminderDate.getMinutes() - minutesBefore);
+    return `${String(reminderDate.getHours()).padStart(2, '0')}:${String(reminderDate.getMinutes()).padStart(2, '0')}`;
+};
+
 const buildTripLocation = (name: string, latitude: number | null, longitude: number | null): TripLocation | null => {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
         return null;
@@ -113,7 +126,7 @@ const buildTripLocation = (name: string, latitude: number | null, longitude: num
 
 const buildItinerarySummary = (itinerary: Itinerary) => {
     const routeParts = itinerary.legs
-        .map((leg) => (leg.route?.shortName ? leg.route.shortName : (leg.mode === 'WALK' ? '🚶' : leg.mode)))
+        .map((leg) => (leg.route?.shortName ? leg.route.shortName : (leg.mode === 'WALK' ? 'Пеша' : leg.mode)))
         .join(' • ');
     return `${fmtTime(itinerary.startTime)} → ${fmtTime(itinerary.endTime)} • ${fmtDuration(itinerary.duration)} • ${routeParts}`;
 };
@@ -129,9 +142,74 @@ const inferSelectedLines = (itinerary: Itinerary): FavoriteLinePreference[] => {
     }));
 };
 
+const syncLineNotifications = (lines: FavoriteLinePreference[], enabled: boolean, primaryLine?: string | null): FavoriteLinePreference[] => {
+    const normalizedPrimaryLine = String(primaryLine || '').trim().toUpperCase();
+    const fallbackPrimaryLine = lines.find((entry) => entry.enabled)?.line || '';
+    const effectivePrimaryLine = normalizedPrimaryLine || fallbackPrimaryLine;
+
+    return lines.map((entry) => ({
+        ...entry,
+        notificationsEnabled: enabled ? !!entry.enabled && entry.line === effectivePrimaryLine : false,
+    }));
+};
+
 const buildTransportLabels = (itinerary: Itinerary) => Array.from(new Set(
     getTransitLegs(itinerary).map((leg) => `${getLegLabel(leg.mode)} ${String(leg.route?.shortName || '').trim()}`.trim()).filter(Boolean),
 ));
+
+const buildLegStops = (leg: ItineraryLeg) => {
+    const places = [leg.from, ...(leg.intermediatePlaces || []), leg.to];
+    return places.filter((place, index) => {
+        const stopCode = String(place.stop?.code || '').trim();
+        const key = stopCode ? `stop:${stopCode}` : `place:${place.name}-${place.lat}-${place.lon}`;
+        return places.findIndex((candidate) => {
+            const candidateStopCode = String(candidate.stop?.code || '').trim();
+            const candidateKey = candidateStopCode ? `stop:${candidateStopCode}` : `place:${candidate.name}-${candidate.lat}-${candidate.lon}`;
+            return candidateKey === key;
+        }) === index;
+    });
+};
+
+const buildRouteLineTabs = (itinerary: Itinerary): FavoriteCommuteRouteLineTab[] => {
+    const tabs = new Map<string, FavoriteCommuteRouteLineTab>();
+    const seenStopsByLine = new Map<string, Set<string>>();
+
+    getTransitLegs(itinerary).forEach((leg, index) => {
+        const line = String(leg.route?.shortName || '').trim().toUpperCase();
+        if (!line) {
+            return;
+        }
+
+        const existing = tabs.get(line) || {
+            id: `${line}-${index}`,
+            line,
+            label: `${getLegLabel(leg.mode)} ${line}`.trim(),
+            mode: leg.mode,
+            stops: [],
+        };
+        const seenStops = seenStopsByLine.get(line) || new Set<string>();
+
+        buildLegStops(leg).forEach((place) => {
+            const stopCode = String(place.stop?.code || '').trim() || null;
+            const stopKey = stopCode || `${place.name}-${place.lat}-${place.lon}`;
+            if (seenStops.has(stopKey)) {
+                return;
+            }
+
+            seenStops.add(stopKey);
+            existing.stops.push({
+                name: String(place.name || '').trim(),
+                stopCode,
+                time: fmtTime(place.arrivalTime ?? place.departureTime),
+            });
+        });
+
+        tabs.set(line, existing);
+        seenStopsByLine.set(line, seenStops);
+    });
+
+    return Array.from(tabs.values());
+};
 
 const inferSelectedStop = (itinerary: Itinerary, searchableStops: Stop[]) => {
     const firstTransitLeg = getTransitLegs(itinerary)[0];
@@ -155,6 +233,30 @@ const inferSelectedStop = (itinerary: Itinerary, searchableStops: Stop[]) => {
     return {
         selectedStopId: stopCode || null,
         selectedStopName: firstTransitLeg.from.name || null,
+    };
+};
+
+const inferFirstTransitReminderContext = (itinerary: Itinerary, searchableStops: Stop[]) => {
+    const firstTransitLeg = getTransitLegs(itinerary)[0];
+    if (!firstTransitLeg) {
+        return {
+            firstTransitStopId: null,
+            firstTransitStopName: null,
+            firstTransitLine: null,
+            firstTransitStopOffsetMinutes: null,
+            walkDurationSeconds: Math.max(0, Math.round(itinerary.walkTime || 0)),
+            walkDistanceMeters: Math.max(0, Math.round(itinerary.walkDistance || 0)),
+        };
+    }
+
+    const inferredStop = inferSelectedStop(itinerary, searchableStops);
+    return {
+        firstTransitStopId: inferredStop.selectedStopId,
+        firstTransitStopName: inferredStop.selectedStopName,
+        firstTransitLine: String(firstTransitLeg.route?.shortName || '').trim().toUpperCase() || null,
+        firstTransitStopOffsetMinutes: Math.max(0, Math.round((firstTransitLeg.from.departureTime - itinerary.startTime) / 60000)),
+        walkDurationSeconds: Math.max(0, Math.round(itinerary.walkTime || 0)),
+        walkDistanceMeters: Math.max(0, Math.round(itinerary.walkDistance || 0)),
     };
 };
 
@@ -204,7 +306,7 @@ const mapTripLocationSearchResult = (result: TripLocation): PlannerPointSearchRe
     longitude: result.longitude,
 });
 
-export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inline = false, targetFavorite, currentLocation, searchableStops, onShowOnMap, onOpenPlaceEditor, onClose, onSave }) => {
+export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inline = false, targetFavorite, openBuilderByDefault = false, currentLocation, searchableStops, onShowOnMap, onOpenPlaceEditor, onClose, onSave }) => {
     const initialNow = new Date();
     const [originName, setOriginName] = useState('');
     const [originLatitude, setOriginLatitude] = useState<number | null>(null);
@@ -224,7 +326,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
     const [reminderOffsetMinutes, setReminderOffsetMinutes] = useState<number>(5);
     const [reminderWeekdays, setReminderWeekdays] = useState<FavoriteCommuteWeekday[]>(FAVORITE_COMMUTE_WEEKDAY_OPTIONS.map((option) => option.value));
     const [itineraries, setItineraries] = useState<Itinerary[]>([]);
-    const [selectedItineraryIndex, setSelectedItineraryIndex] = useState(0);
+    const [selectedItineraryIndex, setSelectedItineraryIndex] = useState<number | null>(0);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [notificationEnabled, setNotificationEnabled] = useState(false);
@@ -355,8 +457,9 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         setError(null);
         setExpandedLegKey(null);
         setShowSavedRouteDetails(false);
-        setShowPlannerBuilder(!existingPlan?.itinerarySummary);
+        setShowPlannerBuilder(openBuilderByDefault || !existingPlan?.itinerarySummary);
     }, [
+        openBuilderByDefault,
         visible,
         targetFavorite?.id,
         targetFavorite?.defaultCommute?.lastPlannedAt,
@@ -375,10 +478,28 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         && Math.abs((originLatitude as number) - currentLocation.latitude) < 0.000001
         && Math.abs((originLongitude as number) - currentLocation.longitude) < 0.000001;
     const showResetToCurrentLocationButton = !!currentLocation && (!isOriginAtCurrentLocation || originName !== 'Моята локация');
-    const selectedItinerary = itineraries[selectedItineraryIndex] ?? null;
-    const derivedArriveByReminderTime = selectedItinerary
+    const selectedItinerary = selectedItineraryIndex == null ? null : (itineraries[selectedItineraryIndex] ?? null);
+    const hasSavedRoute = !!existingPlan?.itinerarySummary;
+    const effectiveRouteStartTime = selectedItinerary
+        ? fmtTime(selectedItinerary.startTime)
+        : (existingPlan?.routeStartTime || null);
+    const effectiveReminderTime = selectedItinerary
         ? formatReminderTimeFromItineraryStart(selectedItinerary.startTime, reminderOffsetMinutes)
-        : null;
+        : (effectiveRouteStartTime ? formatReminderTimeFromClock(effectiveRouteStartTime, reminderOffsetMinutes) : (existingPlan?.reminderTime || null));
+    const effectiveNotificationWeekdays = resolveFavoriteCommuteNotificationWeekdays({
+        arriveBy,
+        routeStartTime: effectiveRouteStartTime,
+        reminderTime: effectiveReminderTime,
+        reminderWeekdays,
+    });
+    const effectiveReminderShiftLabel = getFavoriteCommuteNotificationShiftLabel({
+        arriveBy,
+        routeStartTime: effectiveRouteStartTime,
+        reminderTime: effectiveReminderTime,
+        reminderWeekdays,
+    });
+    const canSaveWithoutReplanning = hasSavedRoute && !showPlannerBuilder;
+    const selectedItinerarySummary = selectedItinerary ? buildItinerarySummary(selectedItinerary) : null;
 
     const toggleReminderWeekday = (weekday: FavoriteCommuteWeekday) => {
         setReminderWeekdays((previous) => {
@@ -394,19 +515,11 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         });
     };
 
-    const getLegStops = (leg: ItineraryLeg) => {
-        const places = [leg.from, ...(leg.intermediatePlaces || []), leg.to];
-        return places.filter((place, index) => {
-            const key = `${place.name}-${place.stop?.code || ''}-${place.lat}-${place.lon}`;
-            return places.findIndex((candidate) => `${candidate.name}-${candidate.stop?.code || ''}-${candidate.lat}-${candidate.lon}` === key) === index;
-        });
-    };
-
     const doPlanRoute = async () => {
-        await fetchPlannedRoutes(0);
+        await fetchPlannedRoutes();
     };
 
-    const fetchPlannedRoutes = async (preferredItineraryIndex: number) => {
+    const fetchPlannedRoutes = async () => {
         const from = buildTripLocation(originName || 'Начална точка', originLatitude, originLongitude);
         const to = buildTripLocation(targetFavorite.name, destinationLatitude, destinationLongitude);
         if (!from || !to) {
@@ -441,7 +554,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                 setError('Не е намерен маршрут.');
             } else {
                 setItineraries(result);
-                setSelectedItineraryIndex(Math.max(0, Math.min(preferredItineraryIndex, result.length - 1)));
+                setSelectedItineraryIndex(null);
                 setExpandedLegKey(null);
             }
         } catch (routeError: any) {
@@ -452,16 +565,32 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
     };
 
     const savePlan = async () => {
-        if (!selectedItinerary) {
+        if (!selectedItinerary && !existingPlan?.itinerarySummary) {
             setError('Избери маршрут, който да запазим.');
             return;
         }
 
-        const inferredStop = inferSelectedStop(selectedItinerary, searchableStops);
-        const inferredLines = inferSelectedLines(selectedItinerary);
-        const effectiveReminderTime = derivedArriveByReminderTime;
+        const commuteItinerary = selectedItinerary;
+        const inferredStop = commuteItinerary ? inferSelectedStop(commuteItinerary, searchableStops) : null;
+        const inferredLines = commuteItinerary ? inferSelectedLines(commuteItinerary) : null;
+        const firstTransitReminderContext = commuteItinerary
+            ? inferFirstTransitReminderContext(commuteItinerary, searchableStops)
+            : {
+                firstTransitStopId: existingPlan?.firstTransitStopId || null,
+                firstTransitStopName: existingPlan?.firstTransitStopName || null,
+                firstTransitLine: existingPlan?.firstTransitLine || null,
+                firstTransitStopOffsetMinutes: existingPlan?.firstTransitStopOffsetMinutes ?? null,
+                walkDurationSeconds: existingPlan?.walkDurationSeconds ?? null,
+                walkDistanceMeters: existingPlan?.walkDistanceMeters ?? null,
+            };
+        const routeGeoJson = commuteItinerary ? buildRouteGeoJSON(commuteItinerary) : (existingPlan?.routeGeoJson || null);
+        const routeSummary = commuteItinerary ? buildItinerarySummary(commuteItinerary) : (existingPlan?.itinerarySummary || '');
+        const routeLabel = existingPlan?.routeLabel || `${originName || 'Начална точка'} → ${targetFavorite.name}`;
+        const transportLabels = commuteItinerary ? buildTransportLabels(commuteItinerary) : (existingPlan?.transportLabels || []);
+        const routeLineTabs = commuteItinerary ? buildRouteLineTabs(commuteItinerary) : (existingPlan?.routeLineTabs || []);
 
         let notificationIds = existingPlan?.notificationIds || [];
+        let scheduleSuccessMessage: string | null = null;
         if (notificationEnabled) {
             if (!effectiveReminderTime) {
                 setError('Липсва час за уведомление.');
@@ -473,12 +602,20 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
             }
 
             const scheduled = await scheduleCommuteRouteNotification({
+                favoriteId: targetFavorite.id,
                 sourceName: originName || 'Начална точка',
                 destinationName: targetFavorite.name,
-                routeSummary: buildItinerarySummary(selectedItinerary),
+                routeSummary,
                 reminderTime: effectiveReminderTime,
-                weekdays: reminderWeekdays,
+                weekdays: effectiveNotificationWeekdays,
                 existingNotificationIds: existingPlan?.notificationIds || [],
+                reminderOffsetMinutes: reminderOffsetMinutes,
+                firstTransitStopId: firstTransitReminderContext.firstTransitStopId,
+                firstTransitStopName: firstTransitReminderContext.firstTransitStopName,
+                firstTransitLine: firstTransitReminderContext.firstTransitLine,
+                firstTransitStopOffsetMinutes: firstTransitReminderContext.firstTransitStopOffsetMinutes,
+                walkDurationSeconds: firstTransitReminderContext.walkDurationSeconds,
+                walkDistanceMeters: firstTransitReminderContext.walkDistanceMeters,
             });
 
             if (!scheduled.ok) {
@@ -487,6 +624,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
             }
 
             notificationIds = scheduled.notificationIds || [];
+            scheduleSuccessMessage = scheduled.message || null;
         } else if (existingPlan?.notificationIds?.length) {
             await cancelCommuteRouteNotification(existingPlan.notificationIds);
             notificationIds = [];
@@ -503,24 +641,38 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                 routeDate: routeDateInput.trim(),
                 routeTime: routeTimeInput.trim(),
                 arriveBy: true,
-                routeStartTime: fmtTime(selectedItinerary.startTime),
+                routeStartTime: effectiveRouteStartTime,
                 reminderOffsetMinutes: reminderOffsetMinutes,
                 reminderWeekdays,
-                itineraryIndex: selectedItineraryIndex,
-                itinerarySummary: buildItinerarySummary(selectedItinerary),
-                routeLabel: `${originName || 'Начална точка'} → ${targetFavorite.name}`,
-                transportLabels: buildTransportLabels(selectedItinerary),
-                reminderTime: notificationEnabled ? effectiveReminderTime : derivedArriveByReminderTime,
+                notificationWeekdays: effectiveNotificationWeekdays,
+                firstTransitStopId: firstTransitReminderContext.firstTransitStopId,
+                firstTransitStopName: firstTransitReminderContext.firstTransitStopName,
+                firstTransitLine: firstTransitReminderContext.firstTransitLine,
+                firstTransitStopOffsetMinutes: firstTransitReminderContext.firstTransitStopOffsetMinutes,
+                walkDurationSeconds: firstTransitReminderContext.walkDurationSeconds,
+                walkDistanceMeters: firstTransitReminderContext.walkDistanceMeters,
+                routeGeoJson,
+                itineraryIndex: commuteItinerary ? selectedItineraryIndex : (existingPlan?.itineraryIndex || 0),
+                itinerarySummary: routeSummary,
+                routeLabel,
+                transportLabels,
+                routeLineTabs,
+                reminderTime: effectiveReminderTime,
                 notificationEnabled,
                 notificationIds,
+                notificationScheduleVersion: FAVORITE_COMMUTE_NOTIFICATION_SCHEDULE_VERSION,
                 lastPlannedAt: Date.now(),
             },
             destinationLatitude,
             destinationLongitude,
-            selectedStopId: inferredStop.selectedStopId,
-            selectedStopName: inferredStop.selectedStopName,
-            selectedLines: inferredLines,
+            selectedStopId: inferredStop?.selectedStopId ?? targetFavorite.selectedStopId ?? null,
+            selectedStopName: inferredStop?.selectedStopName ?? targetFavorite.selectedStopName ?? null,
+            selectedLines: syncLineNotifications(inferredLines ?? targetFavorite.selectedLines ?? [], notificationEnabled, firstTransitReminderContext.firstTransitLine),
+            personalNotificationLeadMinutes: reminderOffsetMinutes,
         });
+        if (scheduleSuccessMessage) {
+            Alert.alert('Маршрутът е запазен', scheduleSuccessMessage);
+        }
         onClose();
     };
 
@@ -553,22 +705,20 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
 
         setShowSavedRouteDetails(true);
         setShowPlannerBuilder(false);
-        await fetchPlannedRoutes(existingPlan.itineraryIndex || 0);
+        await fetchPlannedRoutes();
     };
 
     const content = (
         <View style={[styles.card, inline && styles.inlineCard]}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                         <View style={styles.header}>
-                            <View>
-                                <Text style={styles.title}>Изчисли маршрут</Text>
-                                <Text style={styles.subtitle}>Това е първата стъпка при редакция на мястото</Text>
+                            <View style={styles.headerMain}>
+                                <Text style={styles.title}>Маршрут и известие</Text>
+                                <Text style={styles.subtitle}>Избери маршрут до мястото и кога да получиш напомняне</Text>
                             </View>
-                            {!inline ? (
-                                <Pressable onPress={onClose} style={styles.closeButton}>
-                                    <Text style={styles.closeButtonText}>{'×'}</Text>
-                                </Pressable>
-                            ) : null}
+                            <Pressable onPress={onClose} style={styles.closeButton}>
+                                <Ionicons name="close" size={16} color="#334155" />
+                            </Pressable>
                         </View>
 
                         <View style={styles.placesSummaryBox}>
@@ -623,7 +773,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                             setOriginSearchResults([]);
                                         }}
                                     >
-                                        <Text style={styles.originResultTitle}>{result.kind === 'stop' ? `🚌 ${result.name}` : `📍 ${result.name}`}</Text>
+                                        <Text style={styles.originResultTitle}>{result.name}</Text>
                                         <Text style={styles.originResultSubtitle}>{result.subtitle}</Text>
                                     </TouchableOpacity>
                                 ))}
@@ -665,7 +815,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                                     setIsEditingDestination(false);
                                                 }}
                                             >
-                                                <Text style={styles.originResultTitle}>{result.kind === 'stop' ? `🚌 ${result.name}` : `📍 ${result.name}`}</Text>
+                                                <Text style={styles.originResultTitle}>{result.name}</Text>
                                                 <Text style={styles.originResultSubtitle}>{result.subtitle}</Text>
                                             </TouchableOpacity>
                                         ))}
@@ -755,11 +905,30 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                         {!!itineraries.length && (showPlannerBuilder || showSavedRouteDetails) && (
                             <>
                                 <Text style={styles.sectionTitle}>Избери маршрут</Text>
+                                <Text style={styles.routeSelectionHint}>
+                                    {selectedItinerarySummary
+                                        ? `Избран маршрут: ${selectedItinerarySummary}`
+                                        : 'Няма избран маршрут. Натисни вариант, за да го избереш.'}
+                                </Text>
                                 {itineraries.map((itinerary, index) => {
                                     const active = index === selectedItineraryIndex;
                                     return (
                                         <View key={`${itinerary.startTime}-${index}`}>
-                                            <TouchableOpacity style={[styles.routeCard, active && styles.routeCardActive]} onPress={() => setSelectedItineraryIndex(index)}>
+                                            <TouchableOpacity
+                                                style={[styles.routeCard, active && styles.routeCardActive]}
+                                                onPress={() => {
+                                                    setSelectedItineraryIndex((previous) => previous === index ? null : index);
+                                                    setExpandedLegKey(null);
+                                                }}
+                                            >
+                                                <View style={styles.routeCardHeader}>
+                                                    <Text style={styles.routeVariantLabel}>{`Вариант ${index + 1}`}</Text>
+                                                    {active ? (
+                                                        <View style={styles.routeSelectedBadge}>
+                                                            <Text style={styles.routeSelectedBadgeText}>Избран</Text>
+                                                        </View>
+                                                    ) : null}
+                                                </View>
                                                 <Text style={styles.routeSummary}>{buildItinerarySummary(itinerary)}</Text>
                                                 <View style={styles.transportChipsRow}>
                                                     {buildTransportLabels(itinerary).map((label) => (
@@ -774,7 +943,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                                     {itinerary.legs.map((leg, legIndex) => {
                                                         const legKey = `${itinerary.startTime}-${index}-${legIndex}`;
                                                         const hasVehicle = !!leg.route?.shortName;
-                                                        const legStops = getLegStops(leg);
+                                                        const legStops = buildLegStops(leg);
                                                         const isExpanded = expandedLegKey === legKey;
 
                                                         return (
@@ -833,7 +1002,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                             </>
                         )}
 
-                        {(showPlannerBuilder || !existingPlan?.itinerarySummary) ? (
+                        {(showPlannerBuilder || !existingPlan?.itinerarySummary || showSavedRouteDetails) ? (
                             <>
                         <Text style={styles.sectionTitle}>Известяване</Text>
                         <View style={styles.reminderRow}>
@@ -845,9 +1014,9 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                         {notificationEnabled && arriveBy ? (
                             <>
                                 <Text style={styles.reminderHint}>
-                                    {selectedItinerary
-                                        ? `Начало на маршрута: ${fmtTime(selectedItinerary.startTime)}. Известието ще е по-рано.`
-                                        : 'Избери маршрут, за да изчислим уведомлението от началния час.'}
+                                    {effectiveRouteStartTime
+                                        ? `Начало на маршрута: ${effectiveRouteStartTime}. Известието ще е по-рано.`
+                                        : 'Запази маршрут, за да включиш известие.'}
                                 </Text>
                                 <Text style={styles.reminderSubheading}>Повтаряй в дни</Text>
                                 <View style={styles.weekdayGrid}>
@@ -878,8 +1047,11 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                         </TouchableOpacity>
                                     ))}
                                 </View>
-                                {derivedArriveByReminderTime ? (
-                                    <Text style={styles.reminderHint}>{`Уведомление: ${derivedArriveByReminderTime}`}</Text>
+                                {effectiveReminderTime ? (
+                                    <Text style={styles.reminderHint}>{`Уведомление: ${effectiveReminderTime}`}</Text>
+                                ) : null}
+                                {effectiveReminderShiftLabel ? (
+                                    <Text style={styles.reminderHint}>{`Пускане: ${formatFavoriteCommuteWeekdays(effectiveNotificationWeekdays)} • ${effectiveReminderShiftLabel}`}</Text>
                                 ) : null}
                             </>
                         ) : null}
@@ -910,7 +1082,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                 </Text>
                                 <Text style={styles.currentPlanText}>
                                     {existingPlan.reminderTime
-                                        ? `Известяване: ${formatFavoriteCommuteWeekdays(existingPlan.reminderWeekdays)} • ${existingPlan.reminderOffsetMinutes || 5} мин по-рано (${existingPlan.reminderTime})`
+                                        ? `Известяване: ${formatFavoriteCommuteWeekdays(existingPlan.notificationWeekdays)} • ${existingPlan.reminderOffsetMinutes || 5} мин по-рано (${existingPlan.reminderTime})${getFavoriteCommuteNotificationShiftLabel(existingPlan) ? ` • ${getFavoriteCommuteNotificationShiftLabel(existingPlan)}` : ''}`
                                         : 'Без известяване'}
                                 </Text>
                                 <Text style={styles.currentPlanText}>{`Предпочитание: ${PLAN_LABELS[existingPlan.planType]}`}</Text>
@@ -924,6 +1096,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                 <Text style={styles.savedOptionsText}>{`Предпочитание: ${PLAN_LABELS[existingPlan.planType]}`}</Text>
                                 <Text style={styles.savedOptionsText}>{`Дата: ${existingPlan.routeDate || 'няма'} • Час: ${existingPlan.routeTime || 'няма'}`}</Text>
                                 <Text style={styles.savedOptionsText}>{existingPlan.notificationEnabled ? 'Уведомленията са включени' : 'Уведомленията са изключени'}</Text>
+                                <Text style={styles.savedOptionsText}>Седмичните дни и 5/10 мин могат да се редактират директно от секцията за известие по-горе.</Text>
                                 <TouchableOpacity
                                     style={styles.modifyRouteButton}
                                     onPress={() => setShowPlannerBuilder(true)}
@@ -933,15 +1106,8 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                             </View>
                         ) : null}
 
-                        <TouchableOpacity
-                            style={styles.personalizeButton}
-                            onPress={() => onOpenPlaceEditor?.(targetFavorite.id, buildEditorPrefill())}
-                        >
-                            <Text style={styles.personalizeButtonText}>Персонализирай</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity style={[styles.saveButton, !itineraries.length && styles.saveButtonDisabled]} disabled={!itineraries.length} onPress={savePlan}>
-                            <Text style={styles.saveButtonText}>Запази маршрут и час</Text>
+                        <TouchableOpacity style={[styles.saveButton, !selectedItinerary && !canSaveWithoutReplanning && styles.saveButtonDisabled]} disabled={!selectedItinerary && !canSaveWithoutReplanning} onPress={savePlan}>
+                            <Text style={styles.saveButtonText}>{canSaveWithoutReplanning ? 'Запази известието' : 'Запази маршрут и час'}</Text>
                         </TouchableOpacity>
             </ScrollView>
         </View>
@@ -961,64 +1127,70 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
 };
 
 const styles = StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(17,24,39,0.35)', justifyContent: 'flex-start', paddingTop: 28, paddingHorizontal: 12 },
-    card: { backgroundColor: 'rgba(255,255,255,0.98)', borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', maxHeight: '92%', padding: 12 },
+    overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.18)', justifyContent: 'flex-start', paddingTop: 78, paddingHorizontal: 12 },
+    card: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', maxHeight: '92%', padding: 14, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.12, shadowRadius: 28 },
     inlineCard: { maxHeight: undefined, marginTop: 8, paddingHorizontal: 10, paddingVertical: 10 },
     content: { paddingBottom: 8 },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 12 },
-    title: { color: '#111827', fontSize: 16, fontWeight: '700' },
-    subtitle: { color: '#6B7280', fontSize: 12, marginTop: 2 },
-    placesSummaryBox: { backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 10, marginBottom: 6 },
+    headerMain: { flex: 1, paddingRight: 4 },
+    title: { color: '#0F172A', fontSize: 16, fontWeight: '700' },
+    subtitle: { color: '#475569', fontSize: 12, marginTop: 2 },
+    placesSummaryBox: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 10, marginBottom: 6 },
     placeSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
     placeSummaryLabel: { width: 24, color: '#475569', fontSize: 12, fontWeight: '700' },
-    placeSummaryValue: { flex: 1, color: '#111827', fontSize: 12, fontWeight: '700' },
-    closeButton: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6' },
-    closeButtonText: { color: '#374151', fontSize: 16, fontWeight: '700' },
-    sectionTitle: { color: '#111827', fontSize: 13, fontWeight: '700', marginBottom: 8, marginTop: 6 },
-    sectionHint: { color: '#6B7280', fontSize: 11, lineHeight: 16, marginBottom: 8 },
-    originInput: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#D1D5DB', paddingHorizontal: 12, paddingVertical: 10, color: '#111827', fontSize: 14 },
-    resetOriginButton: { marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 40, backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#BFDBFE' },
+    placeSummaryValue: { flex: 1, color: '#0F172A', fontSize: 12, fontWeight: '700' },
+    closeButton: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', flexShrink: 0 },
+    closeButtonText: { color: '#334155', fontSize: 18, fontWeight: '700', lineHeight: 20 },
+    sectionTitle: { color: '#0F172A', fontSize: 13, fontWeight: '700', marginBottom: 8, marginTop: 6 },
+    sectionHint: { color: '#475569', fontSize: 11, lineHeight: 16, marginBottom: 8 },
+    originInput: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingHorizontal: 12, paddingVertical: 10, color: '#0F172A', fontSize: 14 },
+    resetOriginButton: { marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 40, backgroundColor: 'rgba(239,246,255,0.82)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(191,219,254,0.72)' },
     resetOriginButtonText: { color: '#1D4ED8', fontSize: 12, fontWeight: '700' },
-    originResultsList: { maxHeight: 180, borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#F9FAFB', padding: 8, marginTop: 8 },
-    originResultRow: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: '#FFFFFF', marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
-    originResultTitle: { color: '#111827', fontSize: 12, fontWeight: '700' },
-    originResultSubtitle: { color: '#6B7280', fontSize: 11, marginTop: 2 },
-    originSearchStatus: { color: '#4B5563', fontSize: 12, textAlign: 'center', paddingVertical: 8 },
-    destinationFixedBox: { backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 10 },
-    destinationFixedBoxActive: { backgroundColor: '#EFF6FF', borderColor: '#93C5FD' },
-    destinationFixedTitle: { color: '#111827', fontSize: 12, fontWeight: '700' },
+    originResultsList: { maxHeight: 180, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', backgroundColor: 'rgba(248,250,252,0.72)', padding: 8, marginTop: 8 },
+    originResultRow: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: '#FFFFFF', marginBottom: 8, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    originResultTitle: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
+    originResultSubtitle: { color: '#64748B', fontSize: 11, marginTop: 2 },
+    originSearchStatus: { color: '#475569', fontSize: 12, textAlign: 'center', paddingVertical: 8 },
+    destinationFixedBox: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 10 },
+    destinationFixedBoxActive: { backgroundColor: 'rgba(239,246,255,0.82)', borderColor: 'rgba(147,197,253,0.72)' },
+    destinationFixedTitle: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
     destinationFixedText: { color: '#475569', fontSize: 11, marginTop: 4 },
-    emptyText: { color: '#6B7280', fontSize: 12, lineHeight: 17 },
+    emptyText: { color: '#64748B', fontSize: 12, lineHeight: 17 },
     planTypesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    planTypeButton: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 16, backgroundColor: '#E2E8F0' },
+    planTypeButton: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 16, backgroundColor: 'rgba(226,232,240,0.72)' },
     planTypeButtonActive: { backgroundColor: '#1E3A8A' },
     planTypeButtonText: { color: '#475569', fontSize: 12, fontWeight: '600' },
     planTypeButtonTextActive: { color: '#FFFFFF' },
     quickActionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-    quickActionChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' },
+    quickActionChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(239,246,255,0.82)', borderWidth: 1, borderColor: 'rgba(191,219,254,0.72)' },
     quickActionChipText: { color: '#1D4ED8', fontSize: 12, fontWeight: '700' },
     routeDateTimeRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
     routeDateInputWrap: { flex: 1 },
     routeTimeInputWrap: { width: 110 },
     routeDateTimeLabel: { color: '#475569', fontSize: 12, fontWeight: '600', marginBottom: 6 },
-    arriveByFixedBox: { backgroundColor: '#ECFDF5', borderRadius: 12, borderWidth: 1, borderColor: '#A7F3D0', padding: 10, marginBottom: 4 },
+    arriveByFixedBox: { backgroundColor: 'rgba(236,253,245,0.82)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(167,243,208,0.72)', padding: 10, marginBottom: 4 },
     arriveByFixedLabel: { color: '#065F46', fontSize: 12, fontWeight: '600' },
     arriveByFixedValue: { color: '#047857', fontSize: 13, fontWeight: '800', marginTop: 4 },
     searchButton: { marginTop: 10, minHeight: 44, backgroundColor: '#1D4ED8', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
     searchButtonDisabled: { backgroundColor: '#93C5FD' },
     searchButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
     errorText: { color: '#B91C1C', fontSize: 12, marginTop: 8 },
-    routeCard: { marginTop: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0' },
-    routeCardActive: { borderColor: '#1D4ED8', backgroundColor: '#EFF6FF' },
-    routeSummary: { color: '#111827', fontSize: 12, fontWeight: '700', lineHeight: 18 },
-    routeDetailsBox: { marginTop: 6, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#DBEAFE' },
+    routeSelectionHint: { color: '#475569', fontSize: 11, lineHeight: 16, marginTop: -2, marginBottom: 2 },
+    routeCard: { marginTop: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    routeCardActive: { borderColor: 'rgba(29,78,216,0.72)', backgroundColor: 'rgba(239,246,255,0.82)' },
+    routeCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 },
+    routeVariantLabel: { color: '#1E3A8A', fontSize: 11, fontWeight: '700' },
+    routeSelectedBadge: { backgroundColor: 'rgba(220,252,231,0.82)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+    routeSelectedBadgeText: { color: '#166534', fontSize: 10, fontWeight: '700' },
+    routeSummary: { color: '#0F172A', fontSize: 12, fontWeight: '700', lineHeight: 18 },
+    routeDetailsBox: { marginTop: 6, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(219,234,254,0.72)' },
     routeDetailRow: { marginBottom: 8 },
     routeLegButton: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 6 },
-    routeLegButtonInteractive: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#DBEAFE' },
+    routeLegButtonInteractive: { backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(219,234,254,0.72)' },
     routeLegHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
     routeDetailMode: { color: '#1E3A8A', fontSize: 11, fontWeight: '700', marginBottom: 2 },
     routeDetailText: { color: '#334155', fontSize: 11, lineHeight: 16 },
-    legStopsBox: { marginTop: 6, marginLeft: 8, borderLeftWidth: 2, borderLeftColor: '#BFDBFE', paddingLeft: 10, gap: 8 },
+    legStopsBox: { marginTop: 6, marginLeft: 8, borderLeftWidth: 2, borderLeftColor: 'rgba(191,219,254,0.72)', paddingLeft: 10, gap: 8 },
     legStopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
     legStopBullet: { color: '#1D4ED8', fontSize: 11, fontWeight: '700', width: 18 },
     legStopContent: { flex: 1 },
@@ -1030,31 +1202,29 @@ const styles = StyleSheet.create({
     reminderHint: { color: '#475569', fontSize: 11, lineHeight: 16, marginTop: 6 },
     switchWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     switchLabel: { color: '#334155', fontSize: 12, fontWeight: '600' },
-    reminderSubheading: { color: '#111827', fontSize: 12, fontWeight: '700', marginTop: 8 },
+    reminderSubheading: { color: '#0F172A', fontSize: 12, fontWeight: '700', marginTop: 8 },
     weekdayGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-    weekdayChip: { width: 42, paddingVertical: 10, borderRadius: 10, backgroundColor: '#E2E8F0', alignItems: 'center', justifyContent: 'center' },
+    weekdayChip: { width: 42, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
     weekdayChipActive: { backgroundColor: '#0F766E' },
     weekdayChipText: { color: '#475569', fontSize: 12, fontWeight: '700' },
     weekdayChipTextActive: { color: '#FFFFFF' },
     offsetOptionsRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
-    offsetChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#E2E8F0', alignItems: 'center', justifyContent: 'center' },
+    offsetChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
     offsetChipActive: { backgroundColor: '#1D4ED8' },
     offsetChipText: { color: '#475569', fontSize: 12, fontWeight: '700' },
     offsetChipTextActive: { color: '#FFFFFF' },
-    currentPlanBox: { marginTop: 12, backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 10 },
-    currentPlanTitle: { color: '#111827', fontSize: 12, fontWeight: '700', marginBottom: 4 },
+    currentPlanBox: { marginTop: 12, backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 10 },
+    currentPlanTitle: { color: '#0F172A', fontSize: 12, fontWeight: '700', marginBottom: 4 },
     currentPlanText: { color: '#475569', fontSize: 11, lineHeight: 16 },
     currentPlanHint: { color: '#1D4ED8', fontSize: 10, fontWeight: '700', marginTop: 8 },
-    savedOptionsBox: { marginTop: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#DBEAFE', padding: 10 },
+    savedOptionsBox: { marginTop: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(219,234,254,0.72)', padding: 10 },
     savedOptionsTitle: { color: '#1E3A8A', fontSize: 12, fontWeight: '700', marginBottom: 6 },
     savedOptionsText: { color: '#475569', fontSize: 11, lineHeight: 16, marginBottom: 4 },
     modifyRouteButton: { marginTop: 8, minHeight: 42, backgroundColor: '#1D4ED8', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
     modifyRouteButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
     transportChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-    transportChip: { backgroundColor: '#DBEAFE', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: '#93C5FD' },
+    transportChip: { backgroundColor: 'rgba(219,234,254,0.72)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(147,197,253,0.72)' },
     transportChipText: { color: '#1E3A8A', fontSize: 10, fontWeight: '700' },
-    personalizeButton: { marginTop: 14, minHeight: 44, backgroundColor: '#E0F2FE', borderRadius: 12, borderWidth: 1, borderColor: '#7DD3FC', alignItems: 'center', justifyContent: 'center' },
-    personalizeButtonText: { color: '#0C4A6E', fontSize: 13, fontWeight: '700', textAlign: 'center' },
     saveButton: { marginTop: 14, minHeight: 46, backgroundColor: '#0F766E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
     saveButtonDisabled: { backgroundColor: '#99F6E4' },
     saveButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },

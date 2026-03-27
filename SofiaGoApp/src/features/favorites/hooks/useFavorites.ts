@@ -4,6 +4,7 @@ import {
     FavoritePlace,
     loadFavoritePlaces,
     addFavoritePlace,
+    reorderFavoritePlaces,
     removeFavoritePlace,
     subscribeToFavoritePlaceChanges,
     updateFavoritePlace,
@@ -46,9 +47,11 @@ export const useFavorites = () => {
         selectedStopId?: string | null;
         selectedStopName?: string | null;
         selectedLines?: FavoriteLinePreference[];
+        personalNotificationLeadMinutes?: number | null;
     }) => {
         const next = await addFavoritePlace(input);
         setFavoritePlaces(next);
+        return next;
     }, []);
 
     const removeFav = useCallback(async (favoriteId: string) => {
@@ -58,7 +61,7 @@ export const useFavorites = () => {
 
     const updateFav = useCallback(async (
         favoriteId: string,
-        updates: Partial<Pick<FavoritePlace, 'latitude' | 'longitude' | 'selectedStopId' | 'selectedStopName' | 'name' | 'defaultCommute'>> & {
+        updates: Partial<Pick<FavoritePlace, 'latitude' | 'longitude' | 'selectedStopId' | 'selectedStopName' | 'name' | 'personalNotificationLeadMinutes' | 'defaultCommute'>> & {
             selectedLines?: FavoriteLinePreference[];
         },
     ) => {
@@ -66,5 +69,19 @@ export const useFavorites = () => {
         setFavoritePlaces(next);
     }, []);
 
-    return { favoritePlaces, favoritesVisible, setFavoritesVisible, saveFavorite, createFavorite, removeFavorite: removeFav, updateFavorite: updateFav };
+    const reorderFavs = useCallback(async (favoriteIds: string[]) => {
+        const next = await reorderFavoritePlaces(favoriteIds);
+        setFavoritePlaces(next);
+    }, []);
+
+    return {
+        favoritePlaces,
+        favoritesVisible,
+        setFavoritesVisible,
+        saveFavorite,
+        createFavorite,
+        removeFavorite: removeFav,
+        updateFavorite: updateFav,
+        reorderFavorites: reorderFavs,
+    };
 };

@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, Pressable, TouchableOpacity, StyleSheet, Modal } from 'react-native';
 import { Vehicle } from '../../../types/vehicles';
-import { getVehicleIcon, formatUnixTime } from '../../../services/transitUtils';
+import { getVehicleAccentColor, getVehicleIconName, formatUnixTime } from '../../../services/transitUtils';
+import { Ionicons } from '@expo/vector-icons';
 
 interface Props {
     vehicle: Vehicle & { renderId?: string };
@@ -28,7 +29,12 @@ export const VehicleInfoPanel: React.FC<Props> = ({
                 <Pressable style={styles.backdrop} onPress={onClose} />
                 <View style={styles.panel}>
                     <View style={styles.header}>
-                        <Text style={styles.title}>{`${getVehicleIcon(vehicle.type)} Линия ${vehicle.line}`}</Text>
+                        <View style={styles.titleRow}>
+                            <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(vehicle.type) }]}>
+                                <Ionicons name={getVehicleIconName(vehicle.type) as any} size={15} color="#FFFFFF" />
+                            </View>
+                            <Text style={styles.title}>{`Линия ${vehicle.line}`}</Text>
+                        </View>
                         <Pressable style={styles.closeBtn} onPress={onClose}>
                             <Text style={styles.closeBtnText}>{'\u00D7'}</Text>
                         </Pressable>
@@ -59,18 +65,21 @@ const styles = StyleSheet.create({
     },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'transparent',
+        backgroundColor: 'rgba(0,0,0,0.18)',
     },
     panel: {
-        marginBottom: 188, marginHorizontal: 16,
-        backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, zIndex: 30, elevation: 30,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4,
+        marginBottom: 100, marginHorizontal: 16,
+        backgroundColor: 'rgba(255,255,255,0.78)', borderRadius: 18, padding: 14, zIndex: 30, elevation: 30,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8,
+        borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
     },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+    titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+    vehicleBadge: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
     title: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
-    closeBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
+    closeBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(248,250,252,0.42)', alignItems: 'center', justifyContent: 'center' },
     closeBtnText: { fontSize: 14, fontWeight: '700', color: '#6B7280' },
     info: { fontSize: 13, color: '#374151', marginBottom: 2 },
-    routeBtn: { marginTop: 8, backgroundColor: '#059669', borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
+    routeBtn: { marginTop: 8, backgroundColor: 'rgba(5,150,105,0.82)', borderRadius: 12, paddingVertical: 8, alignItems: 'center' },
     routeBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 });

@@ -3,9 +3,10 @@ import {
     ActivityIndicator, BackHandler, ScrollView, StyleSheet,
     Text, TouchableOpacity, View, Linking, Platform
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useUserLocation } from '../features/map/hooks/useUserLocation';
 import { fetchAllStops, Stop } from '../services/stopsApi';
-import { haversineDistanceMeters, inferLineTypeFromToken, getVehicleAccentColor, getVehicleIcon, formatUnixTime, VehicleType } from '../services/transitUtils';
+import { haversineDistanceMeters, inferLineTypeFromToken, getVehicleAccentColor, getVehicleIconName, formatUnixTime, VehicleType } from '../services/transitUtils';
 import { fetchStopEtas, StopEta } from '../services/cgmApi';
 import { fetchFullStopSchedule } from '../services/cgmApi/stopEtas';
 import { getEtaScheduleInfo } from '../services/cgmApi/schedules';
@@ -14,19 +15,19 @@ import { ArrivalReminderControl } from '../features/notifications/components/Arr
 
 // ── Walking‑radius config ──
 const RADIUS_BUCKETS = [
-    { key: '5min', label: '🟢 5 мин', maxMeters: 208, color: '#22C55E' },
-    { key: '10min', label: '🟡 10 мин', maxMeters: 416, color: '#EAB308' },
-    { key: '15min', label: '🔴 15 мин', maxMeters: 625, color: '#EF4444' },
+    { key: '5min', label: '5 мин', maxMeters: 208, color: '#22C55E' },
+    { key: '10min', label: '10 мин', maxMeters: 416, color: '#EAB308' },
+    { key: '15min', label: '15 мин', maxMeters: 625, color: '#EF4444' },
 ] as const;
 
 // ── Transport‑type helpers (mirrors MapScreen StopDot) ──
-const getStopTypeInfo = (type: string): { color: string; text: string } => {
+const getStopTypeInfo = (type: string): { color: string } => {
     switch (type) {
-        case 'bus': return { color: '#DC2626', text: 'А' };
-        case 'trolley': return { color: '#2563EB', text: 'ТР' };
-        case 'tram': return { color: '#EA580C', text: 'ТМ' };
-        case 'subway': return { color: '#FFFFFF', text: 'M' };
-        default: return { color: '#9CA3AF', text: '' };
+        case 'bus': return { color: '#DC2626' };
+        case 'trolley': return { color: '#2563EB' };
+        case 'tram': return { color: '#EA580C' };
+        case 'subway': return { color: '#0056A4' };
+        default: return { color: '#94A3B8' };
     }
 };
 
@@ -40,62 +41,10 @@ const resolveTypes = (stop: Stop): VehicleType[] => {
 };
 
 const MultiTypeBadge = ({ types }: { types: VehicleType[] }) => {
-    const infos = types.slice(0, 4).map((type) => ({ type, ...getStopTypeInfo(type) }));
-    const getTextColor = (type: VehicleType) => type === 'subway' ? '#0056A4' : '#FFFFFF';
-
-    if (infos.length === 2) {
-        return (
-            <View style={[st.badge, st.multiBadge]}>
-                <View style={[st.badgeHalf, st.badgeSegmentCenter, { left: 0, backgroundColor: infos[0].color }]}>
-                    <Text style={[st.badgeSegmentText, { color: getTextColor(infos[0].type) }]}>{infos[0].text}</Text>
-                </View>
-                <View style={[st.badgeHalf, st.badgeSegmentCenter, { right: 0, backgroundColor: infos[1].color }]}>
-                    <Text style={[st.badgeSegmentText, { color: getTextColor(infos[1].type) }]}>{infos[1].text}</Text>
-                </View>
-                <View style={st.badgeDividerVertical} />
-            </View>
-        );
-    }
-
-    if (infos.length === 3) {
-        return (
-            <View style={[st.badge, st.multiBadge]}>
-                <View style={[st.badgeHalfHorizontal, st.badgeSegmentCenter, { top: 0, backgroundColor: infos[0].color }]}>
-                    <Text style={[st.badgeSegmentText, { color: getTextColor(infos[0].type) }]}>{infos[0].text}</Text>
-                </View>
-                <View style={[st.badgeQuarter, st.badgeSegmentCenter, { left: 0, bottom: 0, backgroundColor: infos[1].color }]}>
-                    <Text style={[st.badgeSegmentTextSmall, { color: getTextColor(infos[1].type) }]}>{infos[1].text}</Text>
-                </View>
-                <View style={[st.badgeQuarter, st.badgeSegmentCenter, { right: 0, bottom: 0, backgroundColor: infos[2].color }]}>
-                    <Text style={[st.badgeSegmentTextSmall, { color: getTextColor(infos[2].type) }]}>{infos[2].text}</Text>
-                </View>
-                <View style={st.badgeDividerHorizontalBottom} />
-                <View style={st.badgeDividerVerticalBottom} />
-            </View>
-        );
-    }
-
+    const primaryColor = getStopTypeInfo(types[0]).color;
     return (
-        <View style={[st.badge, st.multiBadge]}>
-            {infos.map((info, index) => {
-                const positionStyle = [
-                    index === 0 && { left: 0, top: 0 },
-                    index === 1 && { right: 0, top: 0 },
-                    index === 2 && { left: 0, bottom: 0 },
-                    index === 3 && { right: 0, bottom: 0 },
-                ].find(Boolean);
-
-                return (
-                    <View
-                        key={info.type}
-                        style={[st.badgeQuarter, st.badgeSegmentCenter, positionStyle, { backgroundColor: info.color }]}
-                    >
-                        <Text style={[st.badgeSegmentTextSmall, { color: getTextColor(info.type) }]}>{info.text}</Text>
-                    </View>
-                );
-            })}
-            <View style={st.badgeDividerHorizontal} />
-            <View style={st.badgeDividerVertical} />
+        <View style={[st.badge, { backgroundColor: primaryColor }]}>
+            <Ionicons name="flag-outline" size={12} color="#FFFFFF" />
         </View>
     );
 };
@@ -105,24 +54,14 @@ const StopTypeBadge = ({ stop }: { stop: Stop }) => {
     const types = resolveTypes(stop);
     if (types.length === 0) return null;
 
-    if (types.length === 1 && types[0] === 'subway') {
-        return (
-            <View style={[st.badge, { backgroundColor: '#FFF', borderColor: '#0056A4', borderWidth: 1.5 }]}>
-                <Text style={{ color: '#0056A4', fontWeight: '900', fontSize: 10 }}>M</Text>
-            </View>
-        );
-    }
+    if (types.length > 1) return <MultiTypeBadge types={types} />;
 
-    if (types.length === 1) {
-        const info = getStopTypeInfo(types[0]);
-        return (
-            <View style={[st.badge, { backgroundColor: info.color }]}>
-                <Text style={st.badgeText}>{info.text}</Text>
-            </View>
-        );
-    }
-
-    return <MultiTypeBadge types={types} />;
+    const info = getStopTypeInfo(types[0]);
+    return (
+        <View style={[st.badge, { backgroundColor: info.color }]}>
+            <Ionicons name="flag-outline" size={12} color="#FFFFFF" />
+        </View>
+    );
 };
 
 // ── Props ──
@@ -214,13 +153,13 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
         <View style={st.page}>
             <View style={st.header}>
                 <View style={st.headerRow}>
-                    <View style={{ flex: 1 }}>
+                    <View style={st.headerCopy}>
                         <Text style={st.title}>Около мен</Text>
                         <Text style={st.subtitle}>{`${totalNearby} спирки в обхват`}</Text>
                     </View>
                     {onClose && (
                         <TouchableOpacity style={st.closeButton} onPress={onClose}>
-                            <Text style={st.closeButtonText}>{"\u00D7"}</Text>
+                            <Ionicons name="close" size={18} color="#334155" />
                         </TouchableOpacity>
                     )}
                 </View>
@@ -236,7 +175,6 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                 activeOpacity={0.7}
                                 onPress={() => setExpandedBucket(isOpen ? '' : bucket.key)}
                             >
-                                <View style={[st.bucketDot, { backgroundColor: bucket.color }]} />
                                 <Text style={st.bucketLabel}>{bucket.label}</Text>
                                 <Text style={st.bucketCount}>{bucket.stops.length} спирки</Text>
                                 <Text style={st.accordionArrow}>{isOpen ? '▲' : '▼'}</Text>
@@ -248,91 +186,92 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                         <Text style={st.emptyText}>Няма спирки в тази зона</Text>
                                     ) : (
                                         bucket.stops.map((stop) => (
-                                            <TouchableOpacity
-                                                key={stop.id}
-                                                style={[st.stopRow, expandedStopId === stop.id && st.stopRowActive]}
-                                                activeOpacity={0.7}
-                                                onPress={() => { void handleStopPress(stop.id); }}
-                                            >
-                                                <StopTypeBadge stop={stop} />
-                                                <View style={st.stopInfo}>
-                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.stopName}>{stop.name}</Text>
-                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.stopMeta}>
-                                                        {`${formatDist(stop.distanceMeters)} • Линии: ${stop.lines.slice(0, 5).join(', ')}${stop.lines.length > 5 ? '...' : ''}`}
-                                                    </Text>
-
-                                                    {expandedStopId === stop.id && (
-                                                        <View style={st.etaPanel}>
-                                                            {etasLoading ? (
-                                                                <ActivityIndicator size="small" color="#1D4ED8" style={{ marginVertical: 8 }} />
-                                                            ) : liveEtas.length === 0 ? (
-                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.emptyText}>Няма живи данни за тази спирка</Text>
-                                                            ) : (
-                                                                liveEtas.map((eta, idx) => {
-                                                                    const info = getEtaScheduleInfo(eta);
-                                                                    const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
-                                                                    const isEarly = info.delayMinutes != null && info.delayMinutes < 0;
-                                                                    const delayText = info.delayMinutes != null
-                                                                        ? (info.delayMinutes > 0 ? `+${info.delayMinutes}` : info.delayMinutes < 0 ? `${info.delayMinutes}` : 'навреме')
-                                                                        : null;
-                                                                    const schedText = info.scheduledMinSinceMidnight != null ? formatMinSinceMidnight(info.scheduledMinSinceMidnight) : null;
-                                                                    const lineLabel = eta.destination ? `${eta.line} → ${eta.destination}` : eta.line;
-
-                                                                    return (
-                                                                        <View key={`${eta.tripId}-${idx}`} style={st.etaRow}>
-                                                                            <View style={[st.etaVehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
-                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaIcon}>{getVehicleIcon(eta.type)}</Text>
-                                                                            </View>
-                                                                            <View style={st.etaMainInfo}>
-                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaLine} numberOfLines={2}>{lineLabel}</Text>
-                                                                                {(schedText || delayText) && (
-                                                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaStatusText}>
-                                                                                        {schedText ? `разп. ${schedText} ` : ''}
-                                                                                        {delayText ? (
-                                                                                            <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
-                                                                                                {delayText}
-                                                                                            </Text>
-                                                                                        ) : null}
-                                                                                    </Text>
-                                                                                )}
-                                                                            </View>
-
-                                                                            <View style={st.etaTimeWrap}>
-                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaTime}>{eta.minutesAway} мин</Text>
-                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
-                                                                            </View>
-
-                                                                            <ArrivalReminderControl stopName={stop.name} eta={eta} />
-                                                                        </View>
-                                                                    );
-                                                                })
-                                                            )}
-                                                        </View>
-                                                    )}
-                                                </View>
+                                            <View key={stop.id} style={[st.stopWrap, expandedStopId === stop.id && st.stopRowActive]}>
                                                 <TouchableOpacity
-                                                    style={st.routeBtn}
-                                                    onPress={() => {
-                                                        const url = Platform.OS === 'ios'
-                                                            ? `maps://?daddr=${stop.latitude},${stop.longitude}&dirflg=w`
-                                                            : `google.navigation:q=${stop.latitude},${stop.longitude}&mode=w`;
-                                                        Linking.canOpenURL(url).then(supported => {
-                                                            if (supported) Linking.openURL(url);
-                                                            else Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${stop.latitude},${stop.longitude}&travelmode=walking`);
-                                                        });
-                                                    }}
+                                                    style={st.stopRow}
+                                                    activeOpacity={0.7}
+                                                    onPress={() => { void handleStopPress(stop.id); }}
                                                 >
-                                                    <Text style={st.routeBtnText}>🧭</Text>
-                                                </TouchableOpacity>
-                                                {onFocusStop && (
+                                                    <StopTypeBadge stop={stop} />
+                                                    <View style={st.stopInfo}>
+                                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.stopName}>{stop.name}</Text>
+                                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.stopMeta}>
+                                                            {`${formatDist(stop.distanceMeters)} • Линии: ${stop.lines.slice(0, 5).join(', ')}${stop.lines.length > 5 ? '...' : ''}`}
+                                                        </Text>
+                                                    </View>
                                                     <TouchableOpacity
-                                                        style={st.mapBtn}
-                                                        onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
+                                                        style={st.routeBtn}
+                                                        onPress={() => {
+                                                            const url = Platform.OS === 'ios'
+                                                                ? `maps://?daddr=${stop.latitude},${stop.longitude}&dirflg=w`
+                                                                : `google.navigation:q=${stop.latitude},${stop.longitude}&mode=w`;
+                                                            Linking.canOpenURL(url).then(supported => {
+                                                                if (supported) Linking.openURL(url);
+                                                                else Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${stop.latitude},${stop.longitude}&travelmode=walking`);
+                                                            });
+                                                        }}
                                                     >
-                                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.mapBtnText}>🗺️</Text>
+                                                        <Ionicons name="navigate-outline" size={16} color="#0F172A" />
                                                     </TouchableOpacity>
+                                                    {onFocusStop && (
+                                                        <TouchableOpacity
+                                                            style={st.mapBtn}
+                                                            onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
+                                                        >
+                                                            <Ionicons name="map-outline" size={16} color="#0F172A" />
+                                                        </TouchableOpacity>
+                                                    )}
+                                                </TouchableOpacity>
+
+                                                {expandedStopId === stop.id && (
+                                                    <View style={st.etaPanel}>
+                                                        {etasLoading ? (
+                                                            <ActivityIndicator size="small" color="#1D4ED8" style={{ marginVertical: 8 }} />
+                                                        ) : liveEtas.length === 0 ? (
+                                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.emptyText}>Няма живи данни за тази спирка</Text>
+                                                        ) : (
+                                                            liveEtas.map((eta, idx) => {
+                                                                const info = getEtaScheduleInfo(eta);
+                                                                const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
+                                                                const isEarly = info.delayMinutes != null && info.delayMinutes < 0;
+                                                                const delayText = info.delayMinutes != null
+                                                                    ? (info.delayMinutes > 0 ? `+${info.delayMinutes}` : info.delayMinutes < 0 ? `${info.delayMinutes}` : 'навреме')
+                                                                    : null;
+                                                                const schedText = info.scheduledMinSinceMidnight != null ? formatMinSinceMidnight(info.scheduledMinSinceMidnight) : null;
+                                                                const lineLabel = eta.destination ? `${eta.line} → ${eta.destination}` : eta.line;
+
+                                                                return (
+                                                                    <View key={`${eta.tripId}-${idx}`} style={st.etaRow}>
+                                                                        <View style={[st.etaVehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
+                                                                            <Ionicons name={getVehicleIconName(eta.type) as any} size={14} color="#FFFFFF" />
+                                                                        </View>
+                                                                        <View style={st.etaMainInfo}>
+                                                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaLine} numberOfLines={2}>{lineLabel}</Text>
+                                                                            {(schedText || delayText) && (
+                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaStatusText}>
+                                                                                    {schedText ? `разп. ${schedText} ` : ''}
+                                                                                    {delayText ? (
+                                                                                        <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
+                                                                                            {delayText}
+                                                                                        </Text>
+                                                                                    ) : null}
+                                                                                </Text>
+                                                                            )}
+                                                                        </View>
+
+                                                                        <View style={st.etaTimeWrap}>
+                                                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaTime}>{eta.minutesAway} мин</Text>
+                                                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
+                                                                        </View>
+
+                                                                        <ArrivalReminderControl stopName={stop.name} eta={eta} compact />
+                                                                    </View>
+                                                                );
+                                                            })
+                                                        )}
+                                                    </View>
                                                 )}
-                                            </TouchableOpacity>
+                                            </View>
                                         ))
                                     )}
                                 </View>
@@ -347,153 +286,89 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
 
 // ── Styles ──
 const st = StyleSheet.create({
-    page: { flex: 1, backgroundColor: '#F8FAFC', paddingTop: 16 },
+    page: { flex: 1, backgroundColor: 'transparent', paddingTop: 8 },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8FAFC' },
     loadingText: { marginTop: 10, color: '#334155', fontSize: 14, fontWeight: '600' },
-    header: { paddingHorizontal: 16, marginBottom: 12 },
-    headerRow: { flexDirection: 'row', alignItems: 'center' },
-    title: { color: '#0F172A', fontSize: 22, fontWeight: '700' },
-    subtitle: { marginTop: 2, color: '#475569', fontSize: 12, fontWeight: '600' },
+    header: { paddingHorizontal: 14, paddingTop: 6, paddingBottom: 10 },
+    headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
+    headerCopy: { flex: 1, paddingRight: 12 },
+    title: { color: '#0F172A', fontSize: 20, fontWeight: '700' },
+    subtitle: { marginTop: 3, color: '#475569', fontSize: 12, fontWeight: '600' },
     closeButton: {
         width: 36, height: 36, borderRadius: 18,
-        backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1, borderColor: '#E2E8F0',
+        backgroundColor: 'rgba(248,250,252,0.72)', alignItems: 'center', justifyContent: 'center',
+        borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
     },
-    closeButtonText: { fontSize: 22, color: '#334155', fontWeight: '600', lineHeight: 24 },
 
     scrollArea: { flex: 1 },
-    scrollContent: { paddingHorizontal: 12, paddingBottom: 120 },
+    scrollContent: { paddingHorizontal: 12, paddingBottom: 24 },
 
     // Bucket card
     bucketCard: {
-        backgroundColor: '#FFFFFF', borderRadius: 14,
-        borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 10, overflow: 'hidden',
+        backgroundColor: 'rgba(255,255,255,0.74)', borderRadius: 18,
+        borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', marginBottom: 12, overflow: 'hidden',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.06,
+        shadowRadius: 20,
+        elevation: 2,
     },
     bucketHeader: {
         flexDirection: 'row', alignItems: 'center',
         paddingHorizontal: 14, paddingVertical: 12, gap: 8,
-        backgroundColor: '#EFF6FF',
+        backgroundColor: 'rgba(248,250,252,0.68)',
     },
-    bucketDot: { width: 12, height: 12, borderRadius: 6 },
     bucketLabel: { flex: 1, color: '#1E293B', fontSize: 15, fontWeight: '700' },
     bucketCount: { color: '#64748B', fontSize: 12, fontWeight: '600' },
     accordionArrow: { color: '#64748B', fontSize: 12, fontWeight: '700' },
-    bucketBody: { padding: 8 },
+    bucketBody: { padding: 10 },
 
     // Stop row
+    stopWrap: {
+        borderTopWidth: 1, borderTopColor: 'rgba(226,232,240,0.72)', borderRadius: 12,
+    },
     stopRow: {
         flexDirection: 'row', alignItems: 'flex-start',
-        paddingVertical: 8, paddingHorizontal: 6,
-        borderTopWidth: 1, borderTopColor: '#EDF2F7', borderRadius: 8,
+        paddingVertical: 10, paddingHorizontal: 8,
     },
-    stopRowActive: { backgroundColor: '#EFF6FF' },
-    stopInfo: { flex: 1, marginLeft: 8 },
+    stopRowActive: { backgroundColor: 'rgba(248,250,252,0.84)' },
+    stopInfo: { flex: 1, marginLeft: 10 },
     stopName: { color: '#0F172A', fontSize: 13, fontWeight: '700' },
-    stopMeta: { color: '#64748B', fontSize: 11, marginTop: 1 },
+    stopMeta: { color: '#64748B', fontSize: 11, marginTop: 3, lineHeight: 15 },
 
     // Transport badge
     badge: {
-        width: 26, height: 26, borderRadius: 13,
+        width: 22, height: 22, borderRadius: 11,
         alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1, borderColor: '#000',
-    },
-    badgeText: { color: '#FFF', fontSize: 8, fontWeight: '900' },
-    multiBadge: {
-        overflow: 'hidden',
-        position: 'relative',
-        padding: 0,
-        backgroundColor: '#FFFFFF',
-    },
-    badgeHalf: {
-        position: 'absolute',
-        top: 0,
-        bottom: 0,
-        width: '50%',
-    },
-    badgeHalfHorizontal: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        height: '50%',
-    },
-    badgeQuarter: {
-        position: 'absolute',
-        width: '50%',
-        height: '50%',
-    },
-    badgeSegmentCenter: {
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    badgeSegmentText: {
-        fontSize: 7,
-        fontWeight: '900',
-        lineHeight: 8,
-    },
-    badgeSegmentTextSmall: {
-        fontSize: 5,
-        fontWeight: '900',
-        lineHeight: 6,
-    },
-    badgeDividerVertical: {
-        position: 'absolute',
-        top: 0,
-        bottom: 0,
-        left: '50%',
-        width: 1,
-        marginLeft: -0.5,
-        backgroundColor: 'rgba(15, 23, 42, 0.35)',
-    },
-    badgeDividerHorizontal: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        top: '50%',
-        height: 1,
-        marginTop: -0.5,
-        backgroundColor: 'rgba(15, 23, 42, 0.35)',
-    },
-    badgeDividerHorizontalBottom: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        top: '50%',
-        height: 1,
-        marginTop: -0.5,
-        backgroundColor: 'rgba(15, 23, 42, 0.35)',
-    },
-    badgeDividerVerticalBottom: {
-        position: 'absolute',
-        top: '50%',
-        bottom: 0,
-        left: '50%',
-        width: 1,
-        marginLeft: -0.5,
-        backgroundColor: 'rgba(15, 23, 42, 0.35)',
     },
 
     // Route button
     routeBtn: {
         width: 30, height: 30, borderRadius: 15,
-        backgroundColor: '#DBEAFE', alignItems: 'center', justifyContent: 'center', marginLeft: 4,
-        borderWidth: 1, borderColor: '#93C5FD',
+        backgroundColor: 'rgba(248,250,252,0.72)', alignItems: 'center', justifyContent: 'center', marginLeft: 6,
+        borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
     },
-    routeBtnText: { fontSize: 14 },
     mapBtn: {
         width: 30, height: 30, borderRadius: 15,
-        backgroundColor: '#F0FDF4', alignItems: 'center', justifyContent: 'center', marginLeft: 4,
-        borderWidth: 1, borderColor: '#86EFAC',
+        backgroundColor: 'rgba(248,250,252,0.72)', alignItems: 'center', justifyContent: 'center', marginLeft: 6,
+        borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
     },
-    mapBtnText: { fontSize: 14 },
 
     // ETA panel
-    etaPanel: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0' },
+    etaPanel: {
+        marginTop: 4,
+        paddingTop: 10,
+        paddingHorizontal: 8,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(226,232,240,0.72)',
+    },
     etaRow: {
         flexDirection: 'row', alignItems: 'flex-start', gap: 6,
-        paddingVertical: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#EDF2F7',
+        paddingVertical: 8,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(226,232,240,0.72)',
     },
-    etaVehicleBadge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
-    etaIcon: { fontSize: 14, width: 20 },
+    etaVehicleBadge: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
     etaMainInfo: { flex: 1, minWidth: 0, paddingRight: 6 },
     etaLine: { color: '#1E293B', fontSize: 13, fontWeight: '800', lineHeight: 17, flexShrink: 1 },
     etaStatusText: { color: '#64748B', fontSize: 10, marginTop: 1 },

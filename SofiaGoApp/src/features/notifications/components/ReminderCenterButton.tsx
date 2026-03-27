@@ -11,6 +11,7 @@ import {
 interface Props {
     anchorStyle?: object;
     inline?: boolean;
+    opaque?: boolean;
 }
 
 const formatTime = (timestamp: number) => {
@@ -18,7 +19,7 @@ const formatTime = (timestamp: number) => {
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 };
 
-export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = false }) => {
+export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = false, opaque = false }) => {
     const [visible, setVisible] = useState(false);
     const [arrivalReminders, setArrivalReminders] = useState<StoredTransitArrivalReminder[]>([]);
     const [submittingKey, setSubmittingKey] = useState<string | null>(null);
@@ -70,7 +71,9 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
         <>
             <View style={[inline ? styles.inlineWrap : styles.fabWrap, anchorStyle]} pointerEvents="box-none">
                 <TouchableOpacity style={styles.fab} onPress={() => setVisible(true)}>
-                    <Ionicons name="notifications" size={22} color="#FFFFFF" />
+                    <View style={styles.fabIcon}>
+                        <Ionicons name="notifications-outline" size={18} color="#0F172A" />
+                    </View>
                     <View style={styles.badge}>
                         <Text style={styles.badgeText}>{countLabel}</Text>
                     </View>
@@ -80,7 +83,7 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
             <Modal transparent animationType="fade" visible={visible} statusBarTranslucent onRequestClose={() => setVisible(false)}>
                 <View style={styles.panelWrap}>
                     <Pressable style={styles.backdrop} onPress={() => setVisible(false)} />
-                    <View style={styles.panel}>
+                    <View style={[styles.panel, opaque && styles.panelOpaque]}>
                         <View style={styles.header}>
                             <View>
                                 <Text style={styles.title}>Активни напомняния</Text>
@@ -133,8 +136,8 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
 const styles = StyleSheet.create({
     fabWrap: {
         position: 'absolute',
-        top: 56,
         right: 16,
+        bottom: 178,
         zIndex: 1,
         elevation: 1,
     },
@@ -143,31 +146,43 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     fab: {
-        width: 52,
-        height: 52,
-        borderRadius: 26,
+        height: 48,
+        borderRadius: 24,
+        paddingHorizontal: 12,
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#0F766E',
+        gap: 6,
+        backgroundColor: 'rgba(255,255,255,0.78)',
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 10,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.08,
+        shadowRadius: 24,
+        elevation: 1,
+    },
+    fabIcon: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(248,250,252,0.42)',
+    },
+    fabLabel: {
+        color: '#475569',
+        fontSize: 12,
+        fontWeight: '600',
     },
     badge: {
-        position: 'absolute',
-        top: -2,
-        right: -2,
-        minWidth: 20,
-        height: 20,
-        borderRadius: 10,
+        minWidth: 18,
+        height: 18,
+        borderRadius: 9,
         backgroundColor: '#DC2626',
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: 4,
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
     },
     badgeText: {
         color: '#FFFFFF',
@@ -184,16 +199,19 @@ const styles = StyleSheet.create({
     },
     panel: {
         marginHorizontal: 16,
-        marginBottom: 110,
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        padding: 14,
+        marginBottom: 188,
+        backgroundColor: 'rgba(255,255,255,0.82)',
+        borderRadius: 24,
+        padding: 18,
         maxHeight: 420,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 6,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.12,
+        shadowRadius: 28,
         elevation: 20,
+    },
+    panelOpaque: {
+        backgroundColor: '#FFFFFF',
     },
     header: {
         flexDirection: 'row',
@@ -212,12 +230,12 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
     closeBtn: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 34,
+        height: 34,
+        borderRadius: 17,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#F1F5F9',
+        backgroundColor: 'rgba(226,232,240,0.72)',
     },
     list: {
         maxHeight: 320,
@@ -232,9 +250,9 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     card: {
-        backgroundColor: '#F8FAFC',
+        backgroundColor: 'rgba(248,250,252,0.72)',
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: 'rgba(226,232,240,0.72)',
         borderRadius: 12,
         padding: 12,
         marginBottom: 10,

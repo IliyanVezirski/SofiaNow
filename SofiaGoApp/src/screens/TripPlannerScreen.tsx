@@ -2,7 +2,6 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
-  FlatList,
   Keyboard,
   ScrollView,
   StyleSheet,
@@ -20,6 +19,7 @@ import {
   PlanType,
 } from '../services/tripPlanner';
 import * as Location from 'expo-location';
+import { Ionicons } from '@expo/vector-icons';
 import { ArrivalReminderControl } from '../features/notifications/components/ArrivalReminderControl';
 import { createStopEtaFromTripPlannerLeg } from '../features/notifications/utils/tripPlannerReminder';
 import { buildRouteGeoJSON, TripRouteGeoJSON } from '../features/tripPlanner/utils/routeGeoJson';
@@ -32,15 +32,15 @@ export interface TripLocation {
 
 /* ─── helpers ─────────────────────────────────────────────────── */
 
-const modeIcon = (mode: string) => {
+const modeIconName = (mode: string): string => {
   switch (mode) {
-    case 'WALK': return '🚶';
-    case 'BUS': return '🚌';
-    case 'TRAM': return '🚊';
-    case 'TROLLEYBUS': return '🚎';
-    case 'SUBWAY': return '🚇';
-    case 'RAIL': return '🚆';
-    default: return '🚌';
+    case 'WALK': return 'footsteps-outline';
+    case 'BUS': return 'bus-outline';
+    case 'TRAM': return 'train-outline';
+    case 'TROLLEYBUS': return 'bus-outline';
+    case 'SUBWAY': return 'subway-outline';
+    case 'RAIL': return 'train-outline';
+    default: return 'bus-outline';
   }
 };
 
@@ -141,6 +141,8 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
   const [error, setError] = useState<string | null>(null);
   const [itineraries, setItineraries] = useState<Itinerary[] | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  const resultsScrollRef = useRef<ScrollView>(null);
 
   /* back button */
   useEffect(() => {
@@ -291,7 +293,11 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
         arriveBy,
       });
       if (result.length === 0) setError('Не е намерен маршрут');
-      else setItineraries(result);
+      else {
+        setItineraries(result);
+        // Scroll to top of results after a tick so they render first
+        setTimeout(() => resultsScrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
+      }
     } catch (e: any) {
       setError(e.message ?? 'Грешка при търсене');
     } finally {
@@ -305,36 +311,46 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
     <View style={s.root}>
       {/* Header */}
       <View style={s.header}>
-        <Text style={s.title}>🗺️ Планирай пътуване</Text>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={s.title}>Планирай пътуване</Text>
+          <Text style={s.subtitle}>Маршрутизатор</Text>
+        </View>
         {onClose && (
           <TouchableOpacity onPress={onClose} style={s.closeButton}>
-            <Text style={s.closeButtonText}>✕</Text>
+            <Ionicons name="close" size={18} color="#334155" />
           </TouchableOpacity>
         )}
       </View>
 
+      {/* Collapsible form */}
       {/* Inputs */}
       <View style={s.inputRow}>
         <View style={s.inputsCol}>
-          <TextInput
-            style={s.input}
-            placeholder={autoFromLoading ? 'Задавам текуща локация...' : 'Откъде...'}
-            placeholderTextColor="#94A3B8"
-            value={fromText}
-            onChangeText={(t) => onChangeText('from', t)}
-            onFocus={() => setActiveField('from')}
-          />
-          <TextInput
-            style={s.input}
-            placeholder="До къде"
-            placeholderTextColor="#94A3B8"
-            value={toText}
-            onChangeText={(t) => onChangeText('to', t)}
-            onFocus={() => setActiveField('to')}
-          />
+          <View style={s.inputWrap}>
+            <Ionicons name="ellipse-outline" size={12} color="#22C55E" style={{ marginRight: 8 }} />
+            <TextInput
+              style={s.inputField}
+              placeholder={autoFromLoading ? 'Задавам текуща локация...' : 'Откъде...'}
+              placeholderTextColor="#94A3B8"
+              value={fromText}
+              onChangeText={(t) => onChangeText('from', t)}
+              onFocus={() => setActiveField('from')}
+            />
+          </View>
+          <View style={s.inputWrap}>
+            <Ionicons name="location" size={13} color="#EF4444" style={{ marginRight: 8 }} />
+            <TextInput
+              style={s.inputField}
+              placeholder="До къде"
+              placeholderTextColor="#94A3B8"
+              value={toText}
+              onChangeText={(t) => onChangeText('to', t)}
+              onFocus={() => setActiveField('to')}
+            />
+          </View>
         </View>
         <TouchableOpacity style={s.swapBtn} onPress={swapDirections}>
-          <Text style={s.swapIcon}>⇅</Text>
+          <Ionicons name="swap-vertical-outline" size={20} color="#475569" />
         </TouchableOpacity>
       </View>
 
@@ -343,13 +359,21 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
         <ScrollView style={s.suggestionsWrap} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
           {suggestions.map((loc, i) => (
             <TouchableOpacity key={i} style={s.suggestionItem} onPress={() => pickSuggestion(loc)}>
-              <Text style={s.suggestionText}>{loc.name}</Text>
+              <Ionicons name="location-outline" size={14} color="#64748B" style={{ marginRight: 8 }} />
+              <Text style={s.suggestionText} numberOfLines={1}>{loc.name}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       )}
 
-      {/* Plan type & search button */}
+      {/* Scrollable area: options + datetime + button + results */}
+      <ScrollView
+        ref={resultsScrollRef}
+        style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: 20 }}
+      >
+      {/* Plan type */}
       <View style={s.optionsRow}>
         {(['0', '1', '2'] as PlanType[]).map((pt) => (
           <TouchableOpacity
@@ -374,6 +398,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
               setTimeInput(getCurrentPlannerTimeInput());
             }}
           >
+            <Ionicons name="today-outline" size={12} color="#1D4ED8" />
             <Text style={s.quickDateChipText}>Днес</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -384,12 +409,14 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
               setDateInput(formatDateForInput(tomorrow));
             }}
           >
+            <Ionicons name="calendar-outline" size={12} color="#1D4ED8" />
             <Text style={s.quickDateChipText}>Утре</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={s.quickDateChip}
             onPress={() => setTimeInput(getCurrentPlannerTimeInput())}
           >
+            <Ionicons name="time-outline" size={12} color="#1D4ED8" />
             <Text style={s.quickDateChipText}>Сега</Text>
           </TouchableOpacity>
         </View>
@@ -424,12 +451,14 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
             style={[s.arriveByChip, !arriveBy && s.arriveByChipActive]}
             onPress={() => setArriveBy(false)}
           >
+            <Ionicons name="arrow-forward-outline" size={13} color={!arriveBy ? '#FFFFFF' : '#475569'} />
             <Text style={[s.arriveByChipText, !arriveBy && s.arriveByChipTextActive]}>Тръгване в</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[s.arriveByChip, arriveBy && s.arriveByChipActive]}
             onPress={() => setArriveBy(true)}
           >
+            <Ionicons name="flag-outline" size={13} color={arriveBy ? '#FFFFFF' : '#475569'} />
             <Text style={[s.arriveByChipText, arriveBy && s.arriveByChipTextActive]}>Пристигане до</Text>
           </TouchableOpacity>
         </View>
@@ -439,32 +468,32 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
         style={[s.searchBtn, (!fromLoc || !toLoc) && s.searchBtnDisabled]}
         onPress={doSearch}
         disabled={loading || !fromLoc || !toLoc}
+        activeOpacity={0.7}
       >
         {loading ? (
           <ActivityIndicator color="#FFF" />
         ) : (
-          <Text style={s.searchBtnText}>Търси маршрут</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="search-outline" size={16} color="#FFF" />
+            <Text style={s.searchBtnText}>Търси маршрут</Text>
+          </View>
         )}
       </TouchableOpacity>
 
       {error && <Text style={s.errorText}>{error}</Text>}
 
       {/* Results */}
-      {itineraries && (
-        <FlatList
-          data={itineraries}
-          keyExtractor={(_, i) => String(i)}
-          style={s.resultsList}
-          renderItem={({ item, index }) => (
-            <ItineraryCard
-              it={item}
-              expanded={expandedIdx === index}
-              onToggle={() => setExpandedIdx(expandedIdx === index ? null : index)}
-              onShowOnMap={onShowOnMap ? () => onShowOnMap(buildRouteGeoJSON(item)) : undefined}
-            />
-          )}
-        />
-      )}
+      {itineraries && itineraries.map((item, index) => (
+        <View key={index} style={{ paddingHorizontal: 14 }}>
+          <ItineraryCard
+            it={item}
+            expanded={expandedIdx === index}
+            onToggle={() => setExpandedIdx(expandedIdx === index ? null : index)}
+            onShowOnMap={onShowOnMap ? () => onShowOnMap(buildRouteGeoJSON(item)) : undefined}
+          />
+        </View>
+      ))}
+      </ScrollView>
     </View>
   );
 }
@@ -484,7 +513,7 @@ function ItineraryCard({ it, expanded, onToggle, onShowOnMap }: { it: Itinerary;
       <View style={s.cardModes}>
         {safeLegs.map((leg, i) => (
           <View key={i} style={s.legBadge}>
-            <Text style={s.legIcon}>{modeIcon(leg.mode)}</Text>
+            <Ionicons name={modeIconName(leg.mode) as any} size={16} color="#1F2937" />
             {leg.route && <Text style={s.legRoute}>{leg.route.shortName}</Text>}
           </View>
         ))}
@@ -501,7 +530,8 @@ function ItineraryCard({ it, expanded, onToggle, onShowOnMap }: { it: Itinerary;
           )}
           {canShowOnMap && (
             <TouchableOpacity style={s.showOnMapBtn} onPress={onShowOnMap}>
-              <Text style={s.showOnMapText}>🗺️ Покажи на картата</Text>
+              <Ionicons name="map-outline" size={14} color="#FFFFFF" />
+              <Text style={s.showOnMapText}>Покажи на картата</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -522,17 +552,21 @@ function LegDetail({ leg }: { leg: ItineraryLeg }) {
       <View style={[s.legLine, isWalk && s.legLineDashed]} />
       <View style={s.legInfo}>
         <View style={s.legHeaderRow}>
-          <Text style={s.legMode}>
-            {modeIcon(leg.mode)} {leg.route ? leg.route.shortName : isWalk ? 'Пешеходно' : leg.mode}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Ionicons name={modeIconName(leg.mode) as any} size={14} color="#1F2937" />
+            <Text style={s.legMode}>
+              {leg.route ? leg.route.shortName : isWalk ? 'Пешеходно' : leg.mode}
+            </Text>
+          </View>
           {reminderEta ? <ArrivalReminderControl stopName={leg.from.name} eta={reminderEta} /> : null}
         </View>
         <Text style={s.legPlace}>{leg.from.name}</Text>
         {hasStops && (
           <TouchableOpacity onPress={() => setStopsExpanded(!stopsExpanded)}>
-            <Text style={s.legStopsToggle}>
-              {stopsExpanded ? '▼' : '▶'} {leg.intermediatePlaces!.length} спирки
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name={stopsExpanded ? 'chevron-down' : 'chevron-forward'} size={13} color="#1D4ED8" />
+              <Text style={s.legStopsToggle}>{leg.intermediatePlaces!.length} спирки</Text>
+            </View>
           </TouchableOpacity>
         )}
         {hasStops && stopsExpanded && (
@@ -556,138 +590,256 @@ function LegDetail({ leg }: { leg: ItineraryLeg }) {
 /* ─── styles ─────────────────────────────────────────────────── */
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F8FAFC', paddingTop: 48 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12 },
-  title: { flex: 1, fontSize: 20, fontWeight: '700', color: '#0F172A' },
+  root: { flex: 1, backgroundColor: 'transparent', paddingTop: 4 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    paddingBottom: 6,
+  },
+  title: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
+  subtitle: { marginTop: 2, color: '#475569', fontSize: 12, fontWeight: '600' },
   closeButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: 'rgba(248,250,252,0.72)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  closeButtonText: {
-    fontSize: 22,
-    color: '#334155',
-    fontWeight: '600',
-    lineHeight: 24,
+    borderColor: 'rgba(226,232,240,0.72)',
   },
 
-  inputRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 8, alignItems: 'center' },
-  inputsCol: { flex: 1, gap: 8 },
-  input: {
-    backgroundColor: '#FFF', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10,
-    fontSize: 15, color: '#0F172A', borderWidth: 1, borderColor: '#E2E8F0',
-  },
-  swapBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E2E8F0', alignItems: 'center', justifyContent: 'center' },
-  swapIcon: { fontSize: 20, color: '#475569' },
-
-  suggestionsWrap: {
-    marginHorizontal: 16, backgroundColor: '#FFF', borderRadius: 10, borderWidth: 1,
-    borderColor: '#E2E8F0', maxHeight: 200, marginTop: 4,
-  },
-  suggestionItem: { paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E2E8F0' },
-  suggestionText: { fontSize: 14, color: '#0F172A' },
-
-  optionsRow: { flexDirection: 'row', paddingHorizontal: 16, marginTop: 12, gap: 6, flexWrap: 'wrap' },
-  planTypeBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, backgroundColor: '#E2E8F0' },
-  planTypeBtnActive: { backgroundColor: '#1E3A8A' },
-  planTypeText: { fontSize: 12, color: '#475569' },
-  planTypeTextActive: { color: '#FFF', fontWeight: '600' },
-
-  datetimeCard: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    gap: 10,
-  },
-  datetimeTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
-  datetimeQuickRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  quickDateChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: '#EFF6FF',
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-  },
-  quickDateChipText: { fontSize: 12, fontWeight: '600', color: '#1D4ED8' },
-  datetimeInputRow: { flexDirection: 'row', gap: 10 },
-  datetimeInputCol: { flex: 1 },
-  datetimeInputColSmall: { width: 112 },
-  datetimeLabel: { fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 6 },
-  datetimeInput: {
-    backgroundColor: '#F8FAFC',
+  inputRow: { flexDirection: 'row', paddingHorizontal: 14, gap: 6, alignItems: 'center' },
+  inputsCol: { flex: 1, gap: 4 },
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.72)',
     borderRadius: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
+  },
+  inputField: {
+    flex: 1,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: '#0F172A',
+  },
+  input: {
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 14,
     color: '#0F172A',
     borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderColor: 'rgba(226,232,240,0.72)',
   },
-  arriveByRow: { flexDirection: 'row', gap: 8 },
-  arriveByChip: {
-    flex: 1,
+  swapBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(248,250,252,0.72)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#E2E8F0',
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
   },
-  arriveByChipActive: { backgroundColor: '#0F766E' },
+
+  suggestionsWrap: {
+    marginHorizontal: 14,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
+    maxHeight: 180,
+    marginTop: 4,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(226,232,240,0.72)',
+  },
+  suggestionText: { fontSize: 13, color: '#0F172A', flex: 1 },
+
+  optionsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 14,
+    marginTop: 6,
+    gap: 5,
+    flexWrap: 'wrap',
+  },
+  planTypeBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(248,250,252,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
+  },
+  planTypeBtnActive: {
+    backgroundColor: 'rgba(29,78,216,0.82)',
+    borderColor: 'rgba(29,78,216,0.82)',
+  },
+  planTypeText: { fontSize: 11, color: '#475569', fontWeight: '600' },
+  planTypeTextActive: { color: '#FFF', fontWeight: '700' },
+
+  datetimeCard: {
+    marginHorizontal: 14,
+    marginTop: 6,
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.74)',
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
+    gap: 6,
+  },
+  datetimeTitle: { fontSize: 12, fontWeight: '700', color: '#0F172A' },
+  datetimeQuickRow: { flexDirection: 'row', gap: 5, flexWrap: 'wrap' },
+  quickDateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(239,246,255,0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(191,219,254,0.72)',
+  },
+  quickDateChipText: { fontSize: 10, fontWeight: '700', color: '#1D4ED8' },
+  datetimeInputRow: { flexDirection: 'row', gap: 6 },
+  datetimeInputCol: { flex: 1 },
+  datetimeInputColSmall: { width: 100 },
+  datetimeLabel: { fontSize: 10, fontWeight: '600', color: '#475569', marginBottom: 3 },
+  datetimeInput: {
+    backgroundColor: 'rgba(248,250,252,0.72)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 13,
+    color: '#0F172A',
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
+  },
+  arriveByRow: { flexDirection: 'row', gap: 5 },
+  arriveByChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(248,250,252,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
+  },
+  arriveByChipActive: {
+    backgroundColor: 'rgba(15,118,110,0.82)',
+    borderColor: 'rgba(15,118,110,0.82)',
+  },
   arriveByChipText: { fontSize: 12, fontWeight: '700', color: '#475569' },
   arriveByChipTextActive: { color: '#FFFFFF' },
 
   searchBtn: {
-    marginHorizontal: 16, marginTop: 12, backgroundColor: '#1E3A8A', borderRadius: 10,
-    paddingVertical: 12, alignItems: 'center',
+    marginHorizontal: 14,
+    marginTop: 6,
+    backgroundColor: 'rgba(29,78,216,0.82)',
+    borderRadius: 10,
+    paddingVertical: 9,
+    alignItems: 'center',
   },
   searchBtnDisabled: { opacity: 0.4 },
-  searchBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  searchBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
 
-  errorText: { color: '#DC2626', fontSize: 13, textAlign: 'center', marginTop: 8 },
+  errorText: { color: '#DC2626', fontSize: 11, textAlign: 'center', marginTop: 6 },
 
-  resultsList: { marginTop: 12, paddingHorizontal: 16 },
+  showFormHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 5,
+    marginHorizontal: 14,
+    marginTop: 2,
+    borderRadius: 8,
+    backgroundColor: 'rgba(248,250,252,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
+  },
+  showFormHintText: { fontSize: 11, color: '#475569', fontWeight: '600' },
+
+  resultsList: { marginTop: 6, paddingHorizontal: 14 },
   card: {
-    backgroundColor: '#FFF', borderRadius: 12, padding: 14, marginBottom: 10,
-    borderWidth: 1, borderColor: '#E2E8F0',
+    backgroundColor: 'rgba(255,255,255,0.74)',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
   },
   cardSummary: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  cardTime: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
-  cardDuration: { fontSize: 14, color: '#64748B' },
-  cardModes: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  legBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  cardTime: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+  cardDuration: { fontSize: 13, color: '#64748B', fontWeight: '600' },
+  cardModes: { flexDirection: 'row', gap: 5, flexWrap: 'wrap' },
+  legBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(248,250,252,0.72)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.72)',
+  },
   legIcon: { fontSize: 16 },
-  legRoute: { fontSize: 13, fontWeight: '700', color: '#1E3A8A', marginLeft: 4 },
+  legRoute: { fontSize: 12, fontWeight: '700', color: '#1D4ED8', marginLeft: 4 },
 
-  cardDetails: { marginTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E2E8F0', paddingTop: 10 },
+  cardDetails: {
+    marginTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(226,232,240,0.72)',
+    paddingTop: 10,
+  },
   legRow: { flexDirection: 'row', marginBottom: 10 },
-  legTime: { width: 45, fontSize: 12, color: '#64748B', fontWeight: '600' },
-  legLine: { width: 3, backgroundColor: '#1E3A8A', borderRadius: 1.5, marginHorizontal: 8 },
+  legTime: { width: 42, fontSize: 11, color: '#64748B', fontWeight: '600' },
+  legLine: { width: 3, backgroundColor: 'rgba(29,78,216,0.72)', borderRadius: 1.5, marginHorizontal: 6 },
   legLineDashed: { backgroundColor: '#94A3B8' },
   legInfo: { flex: 1 },
-  legHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
-  legMode: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
-  legPlace: { fontSize: 13, color: '#334155' },
-  legStopsToggle: { fontSize: 12, color: '#1E3A8A', fontWeight: '600', marginVertical: 4, paddingVertical: 2 },
+  legHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 },
+  legMode: { fontSize: 13, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
+  legPlace: { fontSize: 12, color: '#334155' },
+  legStopsToggle: { fontSize: 12, color: '#1D4ED8', fontWeight: '600', paddingVertical: 2 },
 
-  intermediateStops: { marginLeft: 4, marginBottom: 4, borderLeftWidth: 2, borderLeftColor: '#CBD5E1', paddingLeft: 10 },
-  intermediateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3, gap: 6 },
-  intermediateTime: { fontSize: 11, color: '#64748B', width: 38, fontWeight: '500' },
-  intermediateDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#94A3B8' },
-  intermediateName: { fontSize: 12, color: '#475569', flex: 1 },
+  intermediateStops: {
+    marginLeft: 4,
+    marginBottom: 4,
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(226,232,240,0.72)',
+    paddingLeft: 10,
+  },
+  intermediateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3, gap: 5 },
+  intermediateTime: { fontSize: 11, color: '#64748B', width: 36, fontWeight: '500' },
+  intermediateDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: '#94A3B8' },
+  intermediateName: { fontSize: 11, color: '#475569', flex: 1 },
   emptyLegsText: { color: '#64748B', fontSize: 12, lineHeight: 18 },
 
   showOnMapBtn: {
-    marginTop: 8, backgroundColor: '#1E3A8A', borderRadius: 8, paddingVertical: 8, alignItems: 'center',
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(29,78,216,0.82)',
+    borderRadius: 12,
+    paddingVertical: 8,
   },
-  showOnMapText: { color: '#FFF', fontSize: 14, fontWeight: '600' },
+  showOnMapText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
 });

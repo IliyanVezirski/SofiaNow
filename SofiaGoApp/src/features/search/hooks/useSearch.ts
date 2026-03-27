@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { PlaceSearchResult, searchLocations } from '../../../services/places';
+import { PlaceSearchResult, searchCentralLocations } from '../../../services/places';
 import { Stop, AvailableLine } from '../../../services/stopsApi';
-import { getVehicleIcon } from '../../../services/transitUtils';
+import { getVehicleTypeLabel } from '../../../services/transitUtils';
 
 export type CentralSearchResult =
     | { kind: 'place'; id: string; name: string; subtitle: string; latitude: number; longitude: number }
@@ -32,7 +32,7 @@ export const useSearch = (searchableStops: Stop[], staticLines: AvailableLine[])
         const timer = setTimeout(() => {
             void (async () => {
                 try {
-                    const results = await searchLocations(q, 6);
+                    const results = await searchCentralLocations(q, 6);
                     if (isMounted) setLocationSearchResults(results);
                 } catch { if (isMounted) setLocationSearchResults([]); }
                 finally { if (isMounted) setLocationSearchLoading(false); }
@@ -58,8 +58,8 @@ export const useSearch = (searchableStops: Stop[], staticLines: AvailableLine[])
             .slice(0, 8)
             .map((l) => ({
                 kind: 'line', id: `${l.routeId}:${l.line}:${l.type}`, lineInfo: l,
-                name: `${getVehicleIcon(l.type)} Линия ${l.line}`,
-                subtitle: `${l.isNight ? 'Нощна линия' : l.type} \u2022 routeId: ${l.routeId || 'н/д'}`,
+                name: `Линия ${l.line}`,
+                subtitle: `${l.isNight ? 'Нощна линия' : getVehicleTypeLabel(l.type)} • routeId: ${l.routeId || 'н/д'}`,
             }));
 
         const placeResults: CentralSearchResult[] = locationSearchResults

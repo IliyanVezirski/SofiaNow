@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Pressable, TextInput, ScrollView, TouchableOpacity, Modal, StyleSheet } from 'react-native';
+import { View, Text, Pressable, TextInput, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { CentralSearchResult } from '../hooks/useSearch';
 
 interface Props {
@@ -15,20 +16,30 @@ interface Props {
     onSaveFavorite: (name: string, lat: number, lon: number) => void;
 }
 
+const kindIcon = (kind: string): keyof typeof Ionicons.glyphMap => {
+    switch (kind) {
+        case 'place': return 'location-outline';
+        case 'line': return 'bus-outline';
+        case 'stop': return 'flag-outline';
+        default: return 'search-outline';
+    }
+};
+
 export const SearchModal: React.FC<Props> = ({
     visible, query, loading, results, onChangeQuery, onClose,
     onSelectPlace, onSelectLine, onSelectStop, onSaveFavorite,
-}) => (
-    <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
-        <View style={styles.overlay}>
-            <View style={styles.card}>
+}) => {
+    if (!visible) return null;
+    return (
+        <Pressable style={styles.overlay} onPress={onClose}>
+            <View style={styles.card} onStartShouldSetResponder={() => true}>
                 <View style={styles.header}>
-                    <Text style={styles.headerTitle}>Търсене: места, линии, спирки</Text>
-                    <Pressable onPress={onClose} style={styles.headerClose}>
-                        <Text style={styles.headerCloseText}>{'\u00D7'}</Text>
+                    <Text style={styles.headerTitle}>Търсене</Text>
+                    <Pressable onPress={onClose} style={styles.closeButton}>
+                        <Ionicons name="close" size={18} color="#334155" />
                     </Pressable>
                 </View>
-                <TextInput style={styles.input} placeholder="Търси адрес, линия или спирка..." placeholderTextColor="#6B7280" value={query} onChangeText={onChangeQuery} />
+                <TextInput style={styles.input} placeholder="Търси адрес, линия или спирка..." placeholderTextColor="#94A3B8" value={query} onChangeText={onChangeQuery} />
                 {(loading || results.length > 0) && (
                     <ScrollView style={styles.results} showsVerticalScrollIndicator nestedScrollEnabled>
                         {loading && <Text style={styles.status}>Търсене...</Text>}
@@ -36,12 +47,13 @@ export const SearchModal: React.FC<Props> = ({
                             if (result.kind === 'place') {
                                 return (
                                     <View key={`s-${result.kind}-${result.id}-${idx}`} style={styles.resultRow}>
+                                        <Ionicons name={kindIcon(result.kind)} size={16} color="#64748B" style={styles.resultIcon} />
                                         <TouchableOpacity style={styles.resultPress} onPress={() => onSelectPlace(result)}>
-                                            <Text style={styles.resultTitle} numberOfLines={1}>{`\uD83D\uDCCD ${result.name}`}</Text>
+                                            <Text style={styles.resultTitle} numberOfLines={1}>{result.name}</Text>
                                             <Text style={styles.resultSubtitle} numberOfLines={1}>{result.subtitle}</Text>
                                         </TouchableOpacity>
                                         <TouchableOpacity style={styles.favBtn} onPress={() => onSaveFavorite(result.name, result.latitude, result.longitude)}>
-                                            <Text style={styles.favBtnText}>{'\u2606'}</Text>
+                                            <Ionicons name="star-outline" size={16} color="#1D4ED8" />
                                         </TouchableOpacity>
                                     </View>
                                 );
@@ -49,8 +61,9 @@ export const SearchModal: React.FC<Props> = ({
                             if (result.kind === 'line') {
                                 return (
                                     <View key={`s-${result.kind}-${result.id}-${idx}`} style={styles.resultRow}>
+                                        <Ionicons name={kindIcon(result.kind)} size={16} color="#64748B" style={styles.resultIcon} />
                                         <TouchableOpacity style={styles.resultPress} onPress={() => onSelectLine(result)}>
-                                            <Text style={styles.resultTitle} numberOfLines={1}>{`\uD83D\uDE8C ${result.name}`}</Text>
+                                            <Text style={styles.resultTitle} numberOfLines={1}>{result.name}</Text>
                                             <Text style={styles.resultSubtitle} numberOfLines={1}>{result.subtitle}</Text>
                                         </TouchableOpacity>
                                     </View>
@@ -58,8 +71,9 @@ export const SearchModal: React.FC<Props> = ({
                             }
                             return (
                                 <View key={`s-${result.kind}-${result.id}-${idx}`} style={styles.resultRow}>
+                                    <Ionicons name={kindIcon(result.kind)} size={16} color="#64748B" style={styles.resultIcon} />
                                     <TouchableOpacity style={styles.resultPress} onPress={() => onSelectStop(result)}>
-                                        <Text style={styles.resultTitle} numberOfLines={1}>{`\uD83D\uDE8F ${result.name}`}</Text>
+                                        <Text style={styles.resultTitle} numberOfLines={1}>{result.name}</Text>
                                         <Text style={styles.resultSubtitle} numberOfLines={1}>{result.subtitle}</Text>
                                     </TouchableOpacity>
                                 </View>
@@ -68,24 +82,23 @@ export const SearchModal: React.FC<Props> = ({
                     </ScrollView>
                 )}
             </View>
-        </View>
-    </Modal>
-);
+        </Pressable>
+    );
+};
 
 const styles = StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(17,24,39,0.35)', justifyContent: 'flex-start', paddingTop: 28, paddingHorizontal: 12 },
-    card: { backgroundColor: 'rgba(255,255,255,0.98)', borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', padding: 12 },
+    overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.18)', justifyContent: 'flex-start', paddingTop: 78, paddingHorizontal: 12, zIndex: 50 },
+    card: { backgroundColor: 'rgba(255,255,255,0.82)', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 14, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.12, shadowRadius: 28, elevation: 10 },
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-    headerTitle: { color: '#111827', fontSize: 15, fontWeight: '700' },
-    headerClose: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6' },
-    headerCloseText: { color: '#374151', fontSize: 14, fontWeight: '700' },
-    input: { backgroundColor: 'rgba(255,255,255,0.96)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: '#111827', borderWidth: 1, borderColor: '#D1D5DB' },
-    results: { marginTop: 6, maxHeight: 220, backgroundColor: 'rgba(255,255,255,0.97)', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', paddingVertical: 6, paddingHorizontal: 8 },
-    status: { color: '#4B5563', fontSize: 13, paddingVertical: 8, textAlign: 'center' },
-    resultRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+    headerTitle: { color: '#0F172A', fontSize: 16, fontWeight: '700' },
+    closeButton: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    input: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#0F172A', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    results: { marginTop: 8, maxHeight: 320, backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingVertical: 6, paddingHorizontal: 8 },
+    status: { color: '#475569', fontSize: 13, paddingVertical: 8, textAlign: 'center' },
+    resultRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, paddingHorizontal: 4 },
+    resultIcon: { width: 20 },
     resultPress: { flex: 1 },
-    resultTitle: { color: '#111827', fontSize: 13, fontWeight: '700' },
-    resultSubtitle: { color: '#6B7280', fontSize: 11, marginTop: 1 },
-    favBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE' },
-    favBtnText: { color: '#1D4ED8', fontSize: 16, fontWeight: '700' },
+    resultTitle: { color: '#0F172A', fontSize: 13, fontWeight: '700' },
+    resultSubtitle: { color: '#64748B', fontSize: 11, marginTop: 2 },
+    favBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(219,234,254,0.72)', borderWidth: 1, borderColor: 'rgba(191,219,254,0.72)' },
 });

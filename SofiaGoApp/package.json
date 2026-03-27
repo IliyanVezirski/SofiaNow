@@ -16,6 +16,7 @@
     "@maplibre/maplibre-react-native": "^10.4.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@supabase/supabase-js": "^2.99.0",
+    "babel-preset-expo": "~55.0.8",
     "expo": "~55.0.5",
     "expo-asset": "~55.0.10",
     "expo-background-task": "~55.0.10",
@@ -36,14 +37,17 @@
     "react-dom": "19.2.0",
     "react-leaflet": "^5.0.0",
     "react-native": "0.83.2",
+    "react-native-gesture-handler": "~2.30.0",
     "react-native-google-mobile-ads": "^16.2.1",
     "react-native-purchases": "^9.11.2",
+    "react-native-reanimated": "4.2.1",
     "react-native-url-polyfill": "^3.0.0",
     "react-native-web": "^0.21.0"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.21",
     "@types/react": "~19.2.2",
+    "eas-cli": "^18.4.0",
     "typescript": "~5.9.2",
     "yauzl": "^3.2.1"
   },
