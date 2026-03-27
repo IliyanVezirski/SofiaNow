@@ -532,7 +532,11 @@ export default function MapScreen({
                     />
 
                     {location && (
-                        <MapboxGL.PointAnnotation id="user-location" coordinate={[location.coords.longitude, location.coords.latitude]}>
+                        <MapboxGL.PointAnnotation
+                            id="user-location"
+                            key={`user-${location.coords.latitude}-${location.coords.longitude}`}
+                            coordinate={[location.coords.longitude, location.coords.latitude]}
+                        >
                             <View style={styles.userDot} />
                         </MapboxGL.PointAnnotation>
                     )}

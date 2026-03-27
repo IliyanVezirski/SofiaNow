@@ -22,8 +22,8 @@ export const useUserLocation = () => {
                     locationSubscription = await Location.watchPositionAsync(
                         {
                             accuracy: Location.Accuracy.Balanced,
-                            timeInterval: 10000,
-                            distanceInterval: 25,
+                            timeInterval: 5000,
+                            distanceInterval: 10,
                         },
                         (nextLocation) => {
                             if (isMounted) setLocation(nextLocation);
