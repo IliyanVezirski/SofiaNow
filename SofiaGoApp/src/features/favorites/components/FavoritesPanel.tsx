@@ -9,6 +9,28 @@ import type { FavoriteEditorSection } from './FavoriteEditorModal';
 import { FavoriteRoutePlannerModal } from './FavoriteRoutePlannerModal';
 import { TripRouteGeoJSON } from '../../tripPlanner/utils/routeGeoJson';
 
+const getModeColor = (mode: string): string => {
+    switch (mode) {
+        case 'BUS': return '#2563EB';
+        case 'TRAM': return '#DC2626';
+        case 'TROLLEYBUS': return '#7C3AED';
+        case 'SUBWAY': return '#059669';
+        case 'RAIL': return '#D97706';
+        default: return '#64748B';
+    }
+};
+
+const getModeIconName = (mode: string): string => {
+    switch (mode) {
+        case 'BUS': return 'bus-outline';
+        case 'TRAM': return 'train-outline';
+        case 'TROLLEYBUS': return 'bus-outline';
+        case 'SUBWAY': return 'subway-outline';
+        case 'RAIL': return 'train-outline';
+        default: return 'bus-outline';
+    }
+};
+
 const NEW_FAVORITE_DRAFT_ID = '__new-favorite__';
 
 interface Props {
@@ -42,9 +64,11 @@ interface Props {
     onReorder: (favoriteIds: string[]) => void | Promise<void>;
     onRemove: (id: string) => void;
     onClose: () => void;
+    editRequestFavoriteId?: string | null;
+    onEditRequestHandled?: () => void;
 }
 
-export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableStops, currentPin, currentLocation, onOpenCentralPlanner, onShowRouteOnMap, onSelect, onUpdate, onCreate, onReorder, onRemove, onClose }) => {
+export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableStops, currentPin, currentLocation, onOpenCentralPlanner, onShowRouteOnMap, onSelect, onUpdate, onCreate, onReorder, onRemove, onClose, editRequestFavoriteId, onEditRequestHandled }) => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [creatingNewPlace, setCreatingNewPlace] = useState(false);
     const [editingSection, setEditingSection] = useState<FavoriteEditorSection | null>(null);
@@ -54,6 +78,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
     const [routePlannerOpenBuilder, setRoutePlannerOpenBuilder] = useState(false);
     const [submittingFavoriteId, setSubmittingFavoriteId] = useState<string | null>(null);
     const [orderedPlaces, setOrderedPlaces] = useState<FavoritePlace[]>(places);
+    const [editorLocationOnly, setEditorLocationOnly] = useState(false);
     const [editorPrefill, setEditorPrefill] = useState<{
         favoriteId: string;
         latitude?: number | null;
@@ -62,6 +87,16 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
         selectedStopName?: string | null;
         selectedLines?: FavoritePlace['selectedLines'];
     } | null>(null);
+
+    useEffect(() => {
+        if (editRequestFavoriteId) {
+            setCreatingNewPlace(false);
+            setEditingSection('location');
+            setEditingId(editRequestFavoriteId);
+            setEditorLocationOnly(true);
+            onEditRequestHandled?.();
+        }
+    }, [editRequestFavoriteId]);
 
     const editingFavorite = useMemo(() => orderedPlaces.find((place) => place.id === editingId) ?? null, [editingId, orderedPlaces]);
     const draftFavorite = useMemo<FavoritePlace | null>(() => {
@@ -185,13 +220,8 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
     };
 
     const openRoutePlanner = (favorite: FavoritePlace, openBuilder = false) => {
-        if (!hasFavoriteCoordinates(favorite)) {
-            openFavoriteEditor(favorite.id, 'location');
-            return;
-        }
-
         setActiveFavoriteId(favorite.id);
-        setRoutePlannerOpenBuilder(openBuilder);
+        setRoutePlannerOpenBuilder(openBuilder || !hasFavoriteCoordinates(favorite));
         setRoutePlannerFavoriteId(favorite.id);
     };
 
@@ -328,15 +358,9 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                             <Text style={styles.reminderBadgeText}>маршрут</Text>
                                                         </View>
                                                     ) : null}
-                                                    {fav.presetKey && (
-                                                        <View style={styles.badge}>
-                                                            <Text style={styles.badgeText}>{fav.presetKey === 'home' ? 'Дом' : 'Работа'}</Text>
-                                                        </View>
-                                                    )}
+                                                    
                                                 </View>
-                                                <Text style={styles.tabMetaText} numberOfLines={1}>
-                                                    {fav.defaultCommute?.routeLabel || (hasCoords ? 'Има зададена локация' : 'Няма зададена локация')}
-                                                </Text>
+                                                
                                             </TouchableOpacity>
                                             {orderedPlaces.length > 1 && (
                                                 <View style={styles.reorderButtons}>
@@ -368,133 +392,135 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                         {isExpanded && (
                                             <View style={styles.card}>
                                                 <View style={styles.cardHeader}>
-                                                    <View style={styles.cardHeaderMain}>
-                                                        <Text style={styles.rowName}>{fav.name}</Text>
-                                                    </View>
-                                                    <View style={styles.cardHeaderActions}>
-                                                        <TouchableOpacity style={styles.removeBtn} onPress={() => confirmRemoveFavorite(fav)}>
+                                                    <Text style={styles.rowName} numberOfLines={1}>{fav.name}</Text>
+                                                    <TouchableOpacity style={styles.removeBtn} onPress={() => confirmRemoveFavorite(fav)}>
                                                         <Ionicons name="close" size={14} color="#B91C1C" />
-                                                        </TouchableOpacity>
-                                                    </View>
+                                                    </TouchableOpacity>
                                                 </View>
 
-                                                <View style={styles.overviewCard}>
-                                                    <View style={styles.overviewRow}>
-                                                        <Text style={styles.overviewLabel}>Локация</Text>
-                                                        <Text style={styles.overviewValue}>{hasCoords ? `${fav.latitude?.toFixed(5)}, ${fav.longitude?.toFixed(5)}` : 'Не е зададена'}</Text>
+                                                {/* Status indicators */}
+                                                <View style={styles.statusRow}>
+                                                    <View style={[styles.statusChip, hasCoords ? styles.statusChipOk : styles.statusChipWarn]}>
+                                                        <Ionicons name={hasCoords ? 'location' : 'location-outline'} size={11} color={hasCoords ? '#059669' : '#94A3B8'} />
+                                                        <Text style={[styles.statusChipText, hasCoords ? styles.statusChipTextOk : styles.statusChipTextWarn]}>{hasCoords ? 'Локация' : 'Няма локация'}</Text>
                                                     </View>
-                                                    <View style={styles.overviewRow}>
-                                                        <Text style={styles.overviewLabel}>Линии</Text>
-                                                        {displayRouteLineTabs.length ? (
-                                                            <View style={styles.lineTabsRow}>
-                                                                {displayRouteLineTabs.map((tab) => {
-                                                                    const isTabActive = tab.id === activeRouteLineTabId;
-                                                                    return (
-                                                                        <TouchableOpacity
-                                                                            key={`${fav.id}-${tab.id}`}
-                                                                            style={[styles.lineTabChip, isTabActive && styles.lineTabChipActive]}
-                                                                            onPress={() => setActiveRouteLineTabIds((previous) => ({
-                                                                                ...previous,
-                                                                                [fav.id]: previous[fav.id] === tab.id ? null : tab.id,
-                                                                            }))}
-                                                                        >
-                                                                            <Text style={[styles.lineTabChipText, isTabActive && styles.lineTabChipTextActive]}>{tab.line}</Text>
-                                                                            <Ionicons name={isTabActive ? 'chevron-up' : 'chevron-down'} size={12} color={isTabActive ? '#1D4ED8' : '#374151'} />
-                                                                        </TouchableOpacity>
-                                                                    );
-                                                                })}
+                                                    <View style={[styles.statusChip, fav.defaultCommute?.itinerarySummary ? styles.statusChipOk : styles.statusChipWarn]}>
+                                                        <Ionicons name={fav.defaultCommute?.itinerarySummary ? 'navigate' : 'navigate-outline'} size={11} color={fav.defaultCommute?.itinerarySummary ? '#059669' : '#94A3B8'} />
+                                                        <Text style={[styles.statusChipText, fav.defaultCommute?.itinerarySummary ? styles.statusChipTextOk : styles.statusChipTextWarn]}>{fav.defaultCommute?.itinerarySummary ? 'Маршрут' : 'Без маршрут'}</Text>
+                                                    </View>
+                                                    {hasCommuteReminder ? (
+                                                        <View style={[styles.statusChip, styles.statusChipOk]}>
+                                                            <Ionicons name="notifications" size={11} color="#059669" />
+                                                            <Text style={[styles.statusChipText, styles.statusChipTextOk]}>Известие</Text>
+                                                        </View>
+                                                    ) : null}
+                                                </View>
+
+                                                {/* Route summary hero */}
+                                                {fav.defaultCommute?.itinerarySummary ? (
+                                                    <View style={styles.routeHero}>
+                                                        {displayRouteLineTabs.length > 0 && (
+                                                            <View style={styles.routeBadgesRow}>
+                                                                {displayRouteLineTabs.map((tab, tabIdx) => (
+                                                                    <React.Fragment key={tab.id}>
+                                                                        {tabIdx > 0 && <Ionicons name="chevron-forward" size={11} color="#94A3B8" />}
+                                                                        <View style={[styles.routeBadge, { borderLeftWidth: 3, borderLeftColor: getModeColor(tab.mode) }]}>
+                                                                            <Ionicons name={getModeIconName(tab.mode) as any} size={13} color={getModeColor(tab.mode)} />
+                                                                            <Text style={styles.routeBadgeText}>{tab.line}</Text>
+                                                                        </View>
+                                                                    </React.Fragment>
+                                                                ))}
                                                             </View>
-                                                        ) : (
-                                                            <Text style={styles.overviewValue}>{favoriteEnabledLines.length ? favoriteEnabledLines.map((entry) => entry.line).join(', ') : 'Няма избрани линии'}</Text>
+                                                        )}
+                                                        <Text style={styles.routeHeroText}>{routeSummary}</Text>
+                                                        {hasCommuteReminder && (
+                                                            <View style={styles.reminderInfoRow}>
+                                                                <Ionicons name="notifications-outline" size={12} color="#0F766E" />
+                                                                <Text style={styles.reminderInfoText}>{reminderSummary}</Text>
+                                                            </View>
                                                         )}
                                                     </View>
-                                                    {activeRouteLineTab ? (
-                                                    <View style={styles.overviewRow}>
-                                                        <Text style={styles.overviewLabel}>Спирка и линии</Text>
-                                                        <Text style={styles.overviewValue}>{activeRouteLineTab.label}</Text>
-                                                        {activeRouteStops.length ? (
+                                                ) : (
+                                                    <View style={styles.noRouteHero}>
+                                                        <Ionicons name="navigate-outline" size={20} color="#CBD5E1" />
+                                                        <Text style={styles.noRouteText}>Няма запазен маршрут</Text>
+                                                        <Text style={styles.noRouteHint}>Натисни „Маршрут" за да планираш пътуване</Text>
+                                                    </View>
+                                                )}
+
+                                                {/* Line tabs with stops — progressive disclosure */}
+                                                {displayRouteLineTabs.length > 0 && (
+                                                    <View style={styles.lineSection}>
+                                                        <View style={styles.lineTabsRow}>
+                                                            {displayRouteLineTabs.map((tab) => {
+                                                                const isTabActive = tab.id === activeRouteLineTabId;
+                                                                return (
+                                                                    <TouchableOpacity
+                                                                        key={`${fav.id}-${tab.id}`}
+                                                                        style={[styles.lineTabChip, isTabActive && styles.lineTabChipActive]}
+                                                                        onPress={() => setActiveRouteLineTabIds((previous) => ({
+                                                                            ...previous,
+                                                                            [fav.id]: previous[fav.id] === tab.id ? null : tab.id,
+                                                                        }))}
+                                                                    >
+                                                                        <Text style={[styles.lineTabChipText, isTabActive && styles.lineTabChipTextActive]}>{tab.label || tab.line}</Text>
+                                                                        <Ionicons name={isTabActive ? 'chevron-up' : 'chevron-down'} size={11} color={isTabActive ? '#1D4ED8' : '#64748B'} />
+                                                                    </TouchableOpacity>
+                                                                );
+                                                            })}
+                                                        </View>
+                                                        {activeRouteLineTab && activeRouteStops.length > 0 && (
                                                             <View style={styles.routeStopsList}>
-                                                                {activeRouteStops.map((stop, index) => (
-                                                                    <View key={`${fav.id}-${activeRouteLineTab.id}-stop-${index}`} style={styles.routeStopRow}>
-                                                                        <Text style={styles.routeStopIndex}>{`${index + 1}.`}</Text>
+                                                                {activeRouteStops.map((stop, stopIdx) => (
+                                                                    <View key={`${fav.id}-${activeRouteLineTab.id}-stop-${stopIdx}`} style={styles.routeStopRow}>
+                                                                        <Text style={styles.routeStopIndex}>{`${stopIdx + 1}.`}</Text>
                                                                         <View style={styles.routeStopContent}>
                                                                             <Text style={styles.routeStopName}>{stop.name}</Text>
                                                                             {(stop.stopCode || stop.time) ? (
-                                                                                <Text style={styles.routeStopMeta}>
-                                                                                    {[stop.stopCode, stop.time].filter(Boolean).join(' • ')}
-                                                                                </Text>
+                                                                                <Text style={styles.routeStopMeta}>{[stop.stopCode, stop.time].filter(Boolean).join(' • ')}</Text>
                                                                             ) : null}
                                                                         </View>
                                                                     </View>
                                                                 ))}
                                                             </View>
-                                                        ) : (
-                                                            <Text style={styles.overviewMeta}>
-                                                                {usingFallbackRouteStops && displayRouteLineTabs.length > 1 && !hasExplicitRouteLineStops
-                                                                    ? 'Показан е общият списък спирки за маршрута. Запази маршрута наново, за да се разделят точно по линии.'
-                                                                    : usingFallbackRouteStops
-                                                                        ? 'Показани са спирките от запазения маршрут.'
-                                                                        : 'Няма запазени спирки за тази линия.'}
-                                                            </Text>
                                                         )}
-                                                    </View>
-                                                    ) : null}
-                                                    <View style={styles.overviewRow}>
-                                                        <Text style={styles.overviewLabel}>Маршрут и известие</Text>
-                                                        <Text style={styles.overviewValue}>{routeSummary}</Text>
-                                                        <Text style={styles.overviewMeta}>{reminderSummary}</Text>
-                                                    </View>
-                                                </View>
-                                                {missingLineSetup && (
-                                                    <View style={styles.noticeBox}>
-                                                        <Text style={styles.noticeTitle}>Линиите още не са настроени</Text>
-                                                        <Text style={styles.noticeText}>Избрал си спирка, но още не си маркирал с кои линии пътуваш и за кои искаш известия.</Text>
                                                     </View>
                                                 )}
 
-                                                {!fav.defaultCommute?.itinerarySummary ? (
-                                                    <View style={styles.actionsRow}>
-                                                        <TouchableOpacity
-                                                            style={[styles.actionButton, styles.routeSettingsButton]}
-                                                            onPress={() => openRoutePlanner(fav)}
-                                                        >
-                                                            <Text style={styles.actionButtonText}>Създай маршрут</Text>
-                                                        </TouchableOpacity>
+                                                {/* Subtle notice */}
+                                                {missingLineSetup && (
+                                                    <View style={styles.noticeBox}>
+                                                        <Text style={styles.noticeText}>Настрой линиите от „Редакция"</Text>
                                                     </View>
-                                                ) : null}
+                                                )}
 
+                                                {/* Primary action */}
                                                 {hasSavedRouteGeometry ? (
-                                                    <View style={styles.actionsRow}>
-                                                        <TouchableOpacity
-                                                            style={[styles.actionButton, styles.routeSettingsButton]}
-                                                            onPress={() => onShowRouteOnMap?.(fav.defaultCommute!.routeGeoJson!)}
-                                                        >
-                                                            <Text style={styles.actionButtonText}>Покажи маршрута</Text>
-                                                        </TouchableOpacity>
-                                                    </View>
+                                                    <TouchableOpacity style={styles.primaryAction} onPress={() => onShowRouteOnMap?.(fav.defaultCommute!.routeGeoJson!)}>
+                                                        <Ionicons name="map-outline" size={15} color="#FFFFFF" />
+                                                        <Text style={styles.primaryActionText}>Покажи на картата</Text>
+                                                    </TouchableOpacity>
                                                 ) : null}
 
-                                                <View style={styles.actionsRow}>
-                                                    <TouchableOpacity
-                                                        style={[styles.actionButton, styles.actionButtonSecondary]}
-                                                        onPress={() => openFavoriteEditor(fav.id, null)}
-                                                    >
-                                                        <Text style={styles.actionButtonText}>Редакция</Text>
+                                                {/* Secondary actions */}
+                                                <View style={styles.secondaryRow}>
+                                                    <TouchableOpacity style={styles.secondaryAction} onPress={() => openRoutePlanner(fav)}>
+                                                        <Ionicons name="navigate-outline" size={14} color="#1D4ED8" />
+                                                        <Text style={styles.secondaryActionText}>Маршрут</Text>
                                                     </TouchableOpacity>
-                                                    <TouchableOpacity
-                                                        style={[styles.actionButton, !hasCoords && styles.actionButtonDisabled]}
-                                                        disabled={!hasCoords}
-                                                        onPress={() => onSelect(fav)}
-                                                    >
-                                                        <Text style={styles.actionButtonText}>Покажи локацията</Text>
+                                                    <TouchableOpacity style={styles.secondaryAction} onPress={() => openFavoriteEditor(fav.id, null)}>
+                                                        <Ionicons name="create-outline" size={14} color="#0F766E" />
+                                                        <Text style={[styles.secondaryActionText, { color: '#0F766E' }]}>Редакция</Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity style={styles.secondaryAction} disabled={!hasCoords} onPress={() => onSelect(fav)}>
+                                                        <Ionicons name="location-outline" size={14} color={hasCoords ? '#475569' : '#CBD5E1'} />
+                                                        <Text style={[styles.secondaryActionText, { color: hasCoords ? '#475569' : '#CBD5E1' }]}>Локация</Text>
                                                     </TouchableOpacity>
                                                 </View>
 
-                                                <TouchableOpacity
-                                                    style={styles.renameButton}
-                                                    onPress={() => confirmRemoveFavorite(fav)}
-                                                >
-                                                    <Text style={styles.renameButtonText}>{fav.presetKey ? 'Изтрий мястото по подразбиране' : 'Изтрий мястото'}</Text>
+                                                {/* Delete — subtle */}
+                                                <TouchableOpacity style={styles.deleteRow} onPress={() => confirmRemoveFavorite(fav)}>
+                                                    <Text style={styles.deleteRowText}>Изтрий</Text>
                                                 </TouchableOpacity>
                                             </View>
                                         )}
@@ -510,6 +536,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                 favorite={editorFavorite}
                 isDraft={creatingNewPlace}
                 initialSection={editingSection}
+                locationOnly={editorLocationOnly}
                 searchableStops={searchableStops}
                 currentPin={currentPin}
                 currentLocation={currentLocation}
@@ -518,6 +545,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                     setCreatingNewPlace(false);
                     setEditingSection(null);
                     setEditorPrefill(null);
+                    setEditorLocationOnly(false);
                 }}
                 onConfigureRoute={async (favoriteId, updates) => {
                     await onUpdate(favoriteId, updates);
@@ -726,18 +754,35 @@ const styles = StyleSheet.create({
     listContent: { paddingBottom: 4 },
     listEmptyContent: { paddingBottom: 4, minHeight: 80 },
     empty: { color: '#64748B', fontSize: 12, lineHeight: 16, paddingVertical: 8 },
-    card: { marginTop: 8, backgroundColor: 'rgba(255,255,255,0.74)', borderRadius: 14, padding: 10, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
-    cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-    cardHeaderMain: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
-    cardHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    card: { marginTop: 8, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
     badge: { backgroundColor: 'rgba(219,234,254,0.72)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
     badgeText: { color: '#1D4ED8', fontSize: 10, fontWeight: '700' },
-    rowName: { color: '#0F172A', fontSize: 15, fontWeight: '700', flexShrink: 1 },
-    overviewCard: { backgroundColor: 'rgba(255,255,255,0.72)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingHorizontal: 10, paddingVertical: 8, marginTop: 8, gap: 8 },
-    overviewRow: { gap: 3 },
-    overviewLabel: { color: '#64748B', fontSize: 11, fontWeight: '600' },
-    overviewValue: { color: '#0F172A', fontSize: 12, fontWeight: '700', lineHeight: 17 },
-    overviewMeta: { color: '#64748B', fontSize: 11, lineHeight: 16 },
+    rowName: { color: '#0F172A', fontSize: 15, fontWeight: '700', flexShrink: 1, flex: 1, marginRight: 8 },
+
+    /* Status indicators */
+    statusRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 10 },
+    statusChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, borderWidth: 1 },
+    statusChipOk: { backgroundColor: 'rgba(236,253,245,0.72)', borderColor: 'rgba(167,243,208,0.72)' },
+    statusChipWarn: { backgroundColor: 'rgba(248,250,252,0.72)', borderColor: 'rgba(226,232,240,0.72)' },
+    statusChipText: { fontSize: 10, fontWeight: '600' },
+    statusChipTextOk: { color: '#059669' },
+    statusChipTextWarn: { color: '#94A3B8' },
+
+    /* Route hero */
+    routeHero: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, padding: 10, gap: 6, marginBottom: 10 },
+    routeBadgesRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
+    routeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+    routeBadgeText: { fontSize: 12, fontWeight: '700', color: '#1D4ED8' },
+    routeHeroText: { color: '#0F172A', fontSize: 12, fontWeight: '700', lineHeight: 17 },
+    reminderInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    reminderInfoText: { color: '#0F766E', fontSize: 11, fontWeight: '600' },
+    noRouteHero: { alignItems: 'center', gap: 4, paddingVertical: 14, marginBottom: 10 },
+    noRouteText: { color: '#94A3B8', fontSize: 13, fontWeight: '600' },
+    noRouteHint: { color: '#CBD5E1', fontSize: 11 },
+
+    /* Line tabs */
+    lineSection: { marginBottom: 10, gap: 8 },
     lineTabsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
     lineTabChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
     lineTabChipActive: { backgroundColor: 'rgba(219,234,254,0.72)', borderColor: 'rgba(147,197,253,0.72)' },
@@ -749,17 +794,18 @@ const styles = StyleSheet.create({
     routeStopContent: { flex: 1, gap: 1 },
     routeStopName: { color: '#0F172A', fontSize: 12, fontWeight: '700', lineHeight: 16 },
     routeStopMeta: { color: '#64748B', fontSize: 11, lineHeight: 15 },
-    noticeBox: { marginTop: 10, backgroundColor: 'rgba(254,243,199,0.82)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 10, borderWidth: 1, borderColor: 'rgba(252,211,77,0.72)' },
-    noticeTitle: { color: '#92400E', fontSize: 12, fontWeight: '700', marginBottom: 2 },
-    noticeText: { color: '#92400E', fontSize: 11, lineHeight: 16 },
-    actionsRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'stretch' },
-    actionButton: { flex: 1, minHeight: 44, backgroundColor: '#1D4ED8', borderRadius: 10, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
-    actionButtonSecondary: { backgroundColor: '#0F766E' },
-    routeSettingsButton: { backgroundColor: '#7C3AED' },
-    actionButtonDisabled: { backgroundColor: '#93C5FD' },
-    actionButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', textAlign: 'center', includeFontPadding: false },
-    renameButton: { marginTop: 8, borderRadius: 10, paddingVertical: 10, alignItems: 'center', backgroundColor: 'rgba(254,226,226,0.72)', borderWidth: 1, borderColor: 'rgba(254,202,202,0.72)' },
-    renameButtonText: { color: '#B91C1C', fontSize: 12, fontWeight: '700' },
+    noticeBox: { backgroundColor: 'rgba(254,243,199,0.72)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(252,211,77,0.52)' },
+    noticeText: { color: '#92400E', fontSize: 11, fontWeight: '600' },
+
+    /* Actions */
+    primaryAction: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#1D4ED8', borderRadius: 12, paddingVertical: 10, marginBottom: 8 },
+    primaryActionRoute: { backgroundColor: '#7C3AED' },
+    primaryActionText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+    secondaryRow: { flexDirection: 'row', gap: 6, marginBottom: 8 },
+    secondaryAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, borderRadius: 10, backgroundColor: 'rgba(248,250,252,0.82)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    secondaryActionText: { fontSize: 11, fontWeight: '700', color: '#1D4ED8' },
+    deleteRow: { alignItems: 'center', paddingVertical: 6 },
+    deleteRowText: { color: '#B91C1C', fontSize: 11, fontWeight: '600' },
     removeBtn: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(254,226,226,0.72)' },
     removeBtnText: { color: '#B91C1C', fontSize: 14, fontWeight: '700' },
 });

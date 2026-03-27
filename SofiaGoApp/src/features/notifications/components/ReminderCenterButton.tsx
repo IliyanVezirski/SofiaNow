@@ -85,45 +85,34 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
                     <Pressable style={styles.backdrop} onPress={() => setVisible(false)} />
                     <View style={[styles.panel, opaque && styles.panelOpaque]}>
                         <View style={styles.header}>
-                            <View>
-                                <Text style={styles.title}>Активни напомняния</Text>
-                                <Text style={styles.subtitle}>{`${totalReminders} активни уведомления`}</Text>
-                            </View>
+                            <Text style={styles.title}>Напомняния</Text>
                             <TouchableOpacity style={styles.closeBtn} onPress={() => setVisible(false)}>
                                 <Ionicons name="close" size={18} color="#64748B" />
                             </TouchableOpacity>
                         </View>
 
                         <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-                            {arrivalReminders.length ? (
-                                <View style={styles.section}>
-                                    <Text style={styles.sectionTitle}>Пристигания по спирки</Text>
-                                    {arrivalReminders.map((reminder) => (
-                                        <View key={reminder.reminderKey} style={styles.card}>
-                                            <View style={styles.cardHeader}>
-                                                <View style={styles.lineBadge}>
-                                                    <Ionicons name="bus-outline" size={13} color="#1D4ED8" />
-                                                    <Text style={styles.lineBadgeText}>{reminder.line}</Text>
-                                                </View>
-                                                <TouchableOpacity
-                                                    style={styles.deleteBtn}
-                                                    onPress={() => void onRemoveArrival(reminder)}
-                                                    disabled={submittingKey === reminder.reminderKey}
-                                                >
-                                                    <Ionicons name="trash-outline" size={16} color="#B91C1C" />
-                                                </TouchableOpacity>
-                                            </View>
-                                            <Text style={styles.stopName}>{reminder.stopName}</Text>
-                                            {reminder.destination ? <Text style={styles.meta}>{reminder.destination}</Text> : null}
-                                            <Text style={styles.meta}>{`Известие: ${formatTime(reminder.remindAtTimestamp)} • Пристига: ${formatTime(reminder.arrivalTimestamp)}`}</Text>
-                                            <Text style={styles.meta}>{`${reminder.minutesBefore} мин преди пристигане`}</Text>
+                            {arrivalReminders.map((reminder) => (
+                                <View key={reminder.reminderKey} style={styles.card}>
+                                    <View style={styles.cardRow}>
+                                        <View style={styles.cardInfo}>
+                                            <Text style={styles.cardLine}>{reminder.line}</Text>
+                                            <Text style={styles.cardStop} numberOfLines={1}>{reminder.stopName}</Text>
                                         </View>
-                                    ))}
+                                        <TouchableOpacity
+                                            style={styles.deleteBtn}
+                                            onPress={() => void onRemoveArrival(reminder)}
+                                            disabled={submittingKey === reminder.reminderKey}
+                                        >
+                                            <Ionicons name="close" size={14} color="#94A3B8" />
+                                        </TouchableOpacity>
+                                    </View>
+                                    <Text style={styles.meta}>{`${formatTime(reminder.remindAtTimestamp)} • ${reminder.minutesBefore} мин преди`}</Text>
                                 </View>
-                            ) : null}
+                            ))}
 
                             {!arrivalReminders.length ? (
-                                <Text style={styles.emptyText}>Няма активни уведомления.</Text>
+                                <Text style={styles.emptyText}>Няма напомняния.</Text>
                             ) : null}
                         </ScrollView>
                     </View>
@@ -146,40 +135,32 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     fab: {
-        height: 48,
-        borderRadius: 24,
-        paddingHorizontal: 12,
+        height: 44,
+        borderRadius: 22,
+        paddingHorizontal: 10,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 6,
-        backgroundColor: 'rgba(255,255,255,0.78)',
-        borderWidth: 1,
-        borderColor: 'rgba(226,232,240,0.72)',
+        gap: 5,
+        backgroundColor: 'rgba(255,255,255,0.92)',
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.08,
-        shadowRadius: 24,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 12,
         elevation: 1,
     },
     fabIcon: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(248,250,252,0.42)',
-    },
-    fabLabel: {
-        color: '#475569',
-        fontSize: 12,
-        fontWeight: '600',
     },
     badge: {
         minWidth: 18,
         height: 18,
         borderRadius: 9,
-        backgroundColor: '#DC2626',
+        backgroundColor: '#1D4ED8',
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: 4,
@@ -200,15 +181,15 @@ const styles = StyleSheet.create({
     panel: {
         marginHorizontal: 16,
         marginBottom: 188,
-        backgroundColor: 'rgba(255,255,255,0.82)',
-        borderRadius: 24,
+        backgroundColor: 'rgba(255,255,255,0.92)',
+        borderRadius: 20,
         padding: 18,
-        maxHeight: 420,
+        maxHeight: 400,
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.12,
-        shadowRadius: 28,
-        elevation: 20,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 20,
+        elevation: 12,
     },
     panelOpaque: {
         backgroundColor: '#FFFFFF',
@@ -217,88 +198,65 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 10,
+        marginBottom: 14,
     },
     title: {
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: '700',
         color: '#0F172A',
     },
-    subtitle: {
-        fontSize: 12,
-        color: '#64748B',
-        marginTop: 2,
-    },
     closeBtn: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(226,232,240,0.72)',
-    },
-    list: {
-        maxHeight: 320,
-    },
-    section: {
-        marginBottom: 12,
-    },
-    sectionTitle: {
-        fontSize: 13,
-        fontWeight: '700',
-        color: '#334155',
-        marginBottom: 8,
-    },
-    card: {
-        backgroundColor: 'rgba(248,250,252,0.72)',
-        borderWidth: 1,
-        borderColor: 'rgba(226,232,240,0.72)',
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 10,
-    },
-    cardHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 6,
-    },
-    lineBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        backgroundColor: '#DBEAFE',
-        borderRadius: 999,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-    },
-    lineBadgeText: {
-        color: '#1D4ED8',
-        fontSize: 12,
-        fontWeight: '700',
-    },
-    deleteBtn: {
         width: 30,
         height: 30,
         borderRadius: 15,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#FEE2E2',
     },
-    stopName: {
+    list: {
+        maxHeight: 320,
+    },
+    card: {
+        paddingVertical: 10,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(226,232,240,0.6)',
+    },
+    cardRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    cardInfo: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    cardLine: {
         fontSize: 14,
         fontWeight: '700',
+        color: '#1D4ED8',
+    },
+    cardStop: {
+        flex: 1,
+        fontSize: 13,
+        fontWeight: '600',
         color: '#0F172A',
-        marginBottom: 4,
+    },
+    deleteBtn: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     meta: {
-        fontSize: 12,
-        color: '#475569',
-        marginBottom: 2,
+        fontSize: 11,
+        color: '#94A3B8',
+        marginTop: 3,
     },
     emptyText: {
         fontSize: 13,
-        color: '#64748B',
+        color: '#94A3B8',
         textAlign: 'center',
         paddingVertical: 16,
     },

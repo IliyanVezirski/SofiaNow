@@ -44,6 +44,18 @@ const modeIconName = (mode: string): string => {
   }
 };
 
+const modeColor = (mode: string): string => {
+  switch (mode) {
+    case 'WALK': return '#94A3B8';
+    case 'BUS': return '#2563EB';
+    case 'TRAM': return '#DC2626';
+    case 'TROLLEYBUS': return '#7C3AED';
+    case 'SUBWAY': return '#059669';
+    case 'RAIL': return '#D97706';
+    default: return '#64748B';
+  }
+};
+
 const fmtTime = (epoch: number) => {
   const d = new Date(epoch);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -313,7 +325,6 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
       <View style={s.header}>
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={s.title}>Планирай пътуване</Text>
-          <Text style={s.subtitle}>Маршрутизатор</Text>
         </View>
         {onClose && (
           <TouchableOpacity onPress={onClose} style={s.closeButton}>
@@ -512,10 +523,17 @@ function ItineraryCard({ it, expanded, onToggle, onShowOnMap }: { it: Itinerary;
       </View>
       <View style={s.cardModes}>
         {safeLegs.map((leg, i) => (
-          <View key={i} style={s.legBadge}>
-            <Ionicons name={modeIconName(leg.mode) as any} size={16} color="#1F2937" />
-            {leg.route && <Text style={s.legRoute}>{leg.route.shortName}</Text>}
-          </View>
+          <React.Fragment key={i}>
+            {i > 0 && <Ionicons name="chevron-forward" size={12} color="#94A3B8" />}
+            <View style={[s.legBadge, { borderLeftWidth: 3, borderLeftColor: modeColor(leg.mode) }]}>
+              <Ionicons name={modeIconName(leg.mode) as any} size={14} color={modeColor(leg.mode)} />
+              {leg.route ? (
+                <Text style={s.legRoute}>{leg.route.shortName}</Text>
+              ) : leg.mode === 'WALK' ? (
+                <Text style={s.legWalkLabel}>{fmtDuration(leg.to.arrivalTime / 1000 - leg.from.departureTime / 1000)}</Text>
+              ) : null}
+            </View>
+          </React.Fragment>
         ))}
       </View>
 
@@ -547,23 +565,41 @@ function LegDetail({ leg }: { leg: ItineraryLeg }) {
   const reminderEta = createStopEtaFromTripPlannerLeg(leg);
 
   return (
-    <View style={s.legRow}>
-      <Text style={s.legTime}>{fmtTime(leg.from.departureTime)}</Text>
-      <View style={[s.legLine, isWalk && s.legLineDashed]} />
+    <View style={[s.legRow, isWalk && s.legRowWalk]}>
+      <View style={s.legTimeCol}>
+        <Text style={s.legTime}>{fmtTime(leg.from.departureTime)}</Text>
+        <Text style={s.legTimeEnd}>{fmtTime(leg.to.arrivalTime)}</Text>
+      </View>
+      <View style={s.legTimeline}>
+        <View style={[s.legDot, { backgroundColor: modeColor(leg.mode) }]} />
+        <View style={[s.legLine, isWalk ? s.legLineWalk : { backgroundColor: modeColor(leg.mode) }]} />
+        <View style={[s.legDot, { backgroundColor: modeColor(leg.mode) }]} />
+      </View>
       <View style={s.legInfo}>
         <View style={s.legHeaderRow}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Ionicons name={modeIconName(leg.mode) as any} size={14} color="#1F2937" />
-            <Text style={s.legMode}>
+            <Ionicons name={modeIconName(leg.mode) as any} size={14} color={modeColor(leg.mode)} />
+            <Text style={[s.legMode, { color: modeColor(leg.mode) }]}>
               {leg.route ? leg.route.shortName : isWalk ? 'Пешеходно' : leg.mode}
             </Text>
           </View>
           {reminderEta ? <ArrivalReminderControl stopName={leg.from.name} eta={reminderEta} /> : null}
         </View>
-        <Text style={s.legPlace}>{leg.from.name}</Text>
+        {isWalk && (
+          <View style={s.walkInfoRow}>
+            <Ionicons name="walk-outline" size={13} color="#64748B" />
+            <Text style={s.walkInfoText}>
+              {fmtDuration(Math.round((leg.to.arrivalTime - leg.from.departureTime) / 1000))}
+            </Text>
+          </View>
+        )}
+        <View style={s.legPlaceRow}>
+          <Ionicons name="ellipse" size={7} color="#22C55E" />
+          <Text style={s.legPlace}>{leg.from.name}</Text>
+        </View>
         {hasStops && (
           <TouchableOpacity onPress={() => setStopsExpanded(!stopsExpanded)}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 11 }}>
               <Ionicons name={stopsExpanded ? 'chevron-down' : 'chevron-forward'} size={13} color="#1D4ED8" />
               <Text style={s.legStopsToggle}>{leg.intermediatePlaces!.length} спирки</Text>
             </View>
@@ -580,8 +616,10 @@ function LegDetail({ leg }: { leg: ItineraryLeg }) {
             ))}
           </View>
         )}
-        <Text style={s.legPlace}>→ {leg.to.name}</Text>
-        <Text style={s.legTime}>{fmtTime(leg.to.arrivalTime)}</Text>
+        <View style={s.legPlaceRow}>
+          <Ionicons name="location" size={8} color="#EF4444" />
+          <Text style={s.legPlace}>{leg.to.name}</Text>
+        </View>
       </View>
     </View>
   );
@@ -778,12 +816,12 @@ const s = StyleSheet.create({
 
   resultsList: { marginTop: 6, paddingHorizontal: 14 },
   card: {
-    backgroundColor: 'rgba(255,255,255,0.74)',
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: 'rgba(226,232,240,0.72)',
+    borderColor: 'rgba(226,232,240,0.6)',
   },
   cardSummary: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   cardTime: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
@@ -792,15 +830,15 @@ const s = StyleSheet.create({
   legBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(248,250,252,0.72)',
+    backgroundColor: 'rgba(248,250,252,0.82)',
     borderRadius: 8,
     paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(226,232,240,0.72)',
+    paddingVertical: 4,
+    gap: 4,
   },
   legIcon: { fontSize: 16 },
   legRoute: { fontSize: 12, fontWeight: '700', color: '#1D4ED8', marginLeft: 4 },
+  legWalkLabel: { fontSize: 11, fontWeight: '600', color: '#64748B', marginLeft: 3 },
 
   cardDetails: {
     marginTop: 10,
@@ -808,26 +846,35 @@ const s = StyleSheet.create({
     borderTopColor: 'rgba(226,232,240,0.72)',
     paddingTop: 10,
   },
-  legRow: { flexDirection: 'row', marginBottom: 10 },
-  legTime: { width: 42, fontSize: 11, color: '#64748B', fontWeight: '600' },
-  legLine: { width: 3, backgroundColor: 'rgba(29,78,216,0.72)', borderRadius: 1.5, marginHorizontal: 6 },
-  legLineDashed: { backgroundColor: '#94A3B8' },
+  legRow: { flexDirection: 'row', marginBottom: 12 },
+  legRowWalk: { backgroundColor: 'rgba(248,250,252,0.82)', borderRadius: 10, padding: 8, marginHorizontal: -4 },
+  legTimeCol: { width: 42, justifyContent: 'space-between' },
+  legTime: { fontSize: 11, color: '#64748B', fontWeight: '600' },
+  legTimeEnd: { fontSize: 11, color: '#64748B', fontWeight: '600' },
+  legTimeline: { width: 14, alignItems: 'center', marginHorizontal: 2 },
+  legDot: { width: 8, height: 8, borderRadius: 4 },
+  legLine: { flex: 1, width: 2.5, borderRadius: 1.5 },
+  legLineWalk: { borderWidth: 1, borderColor: '#94A3B8', borderStyle: 'dashed', backgroundColor: 'transparent', width: 0 },
   legInfo: { flex: 1 },
   legHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 },
-  legMode: { fontSize: 13, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
-  legPlace: { fontSize: 12, color: '#334155' },
+  legMode: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
+  legPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginVertical: 1 },
+  legPlace: { fontSize: 12, color: '#334155', flex: 1 },
+  walkInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  walkInfoText: { fontSize: 11, color: '#64748B', fontWeight: '600' },
   legStopsToggle: { fontSize: 12, color: '#1D4ED8', fontWeight: '600', paddingVertical: 2 },
 
   intermediateStops: {
     marginLeft: 4,
     marginBottom: 4,
+    marginTop: 2,
     borderLeftWidth: 2,
-    borderLeftColor: 'rgba(226,232,240,0.72)',
+    borderLeftColor: 'rgba(203,213,225,0.72)',
     paddingLeft: 10,
   },
-  intermediateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3, gap: 5 },
-  intermediateTime: { fontSize: 11, color: '#64748B', width: 36, fontWeight: '500' },
-  intermediateDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: '#94A3B8' },
+  intermediateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 6 },
+  intermediateTime: { fontSize: 11, color: '#64748B', width: 36, fontWeight: '600' },
+  intermediateDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#94A3B8' },
   intermediateName: { fontSize: 11, color: '#475569', flex: 1 },
   emptyLegsText: { color: '#64748B', fontSize: 12, lineHeight: 18 },
 

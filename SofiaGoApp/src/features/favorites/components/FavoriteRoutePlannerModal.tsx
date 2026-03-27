@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { FAVORITE_COMMUTE_NOTIFICATION_SCHEDULE_VERSION, FAVORITE_COMMUTE_WEEKDAY_OPTIONS, FavoriteCommutePlan, FavoriteCommuteRouteLineTab, FavoriteCommuteWeekday, FavoriteLinePreference, FavoritePlace, formatFavoriteCommuteWeekdays, getFavoriteCommuteNotificationShiftLabel, hasFavoriteCoordinates, resolveFavoriteCommuteNotificationWeekdays } from '../../../services/places';
+import { FAVORITE_COMMUTE_NOTIFICATION_SCHEDULE_VERSION, FAVORITE_COMMUTE_WEEKDAY_OPTIONS, FavoriteCommutePlan, FavoriteCommuteRouteLineTab, FavoriteCommuteWeekday, FavoriteLinePreference, FavoritePlace, formatFavoriteCommuteWeekdays, hasFavoriteCoordinates, resolveFavoriteCommuteNotificationWeekdays } from '../../../services/places';
 import { Itinerary, ItineraryLeg, PlanType, TripLocation, planTrip, searchLocations as searchTripLocations } from '../../../services/tripPlanner';
 import { cancelCommuteRouteNotification, scheduleCommuteRouteNotification } from '../../../services/notifications/commuteRouteNotifications';
 import { Stop } from '../../../services/stopsApi';
@@ -277,6 +277,30 @@ const getLegLabel = (mode: string) => {
     }
 };
 
+const getModeColor = (mode: string): string => {
+    switch (mode) {
+        case 'WALK': return '#94A3B8';
+        case 'BUS': return '#2563EB';
+        case 'TRAM': return '#DC2626';
+        case 'TROLLEYBUS': return '#7C3AED';
+        case 'SUBWAY': return '#059669';
+        case 'RAIL': return '#D97706';
+        default: return '#64748B';
+    }
+};
+
+const getModeIconName = (mode: string): string => {
+    switch (mode) {
+        case 'WALK': return 'footsteps-outline';
+        case 'BUS': return 'bus-outline';
+        case 'TRAM': return 'train-outline';
+        case 'TROLLEYBUS': return 'bus-outline';
+        case 'SUBWAY': return 'subway-outline';
+        case 'RAIL': return 'train-outline';
+        default: return 'bus-outline';
+    }
+};
+
 const buildStopPointSearchResults = (query: string, searchableStops: Stop[]): PlannerPointSearchResult[] => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) {
@@ -443,7 +467,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         setDestinationQuery('');
         setDestinationSearchResults([]);
         setDestinationSearchLoading(false);
-        setIsEditingDestination(false);
+        setIsEditingDestination(!hasFavoriteCoordinates(targetFavorite));
         setOriginSearchResults([]);
         setOriginSearchLoading(false);
         setPlanType(existingPlan?.planType || '0');
@@ -492,14 +516,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         reminderTime: effectiveReminderTime,
         reminderWeekdays,
     });
-    const effectiveReminderShiftLabel = getFavoriteCommuteNotificationShiftLabel({
-        arriveBy,
-        routeStartTime: effectiveRouteStartTime,
-        reminderTime: effectiveReminderTime,
-        reminderWeekdays,
-    });
     const canSaveWithoutReplanning = hasSavedRoute && !showPlannerBuilder;
-    const selectedItinerarySummary = selectedItinerary ? buildItinerarySummary(selectedItinerary) : null;
 
     const toggleReminderWeekday = (weekday: FavoriteCommuteWeekday) => {
         setReminderWeekdays((previous) => {
@@ -712,59 +729,46 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         <View style={[styles.card, inline && styles.inlineCard]}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                         <View style={styles.header}>
-                            <View style={styles.headerMain}>
-                                <Text style={styles.title}>Маршрут и известие</Text>
-                                <Text style={styles.subtitle}>Избери маршрут до мястото и кога да получиш напомняне</Text>
-                            </View>
+                            <Text style={styles.title}>Маршрут до {targetFavorite.name}</Text>
                             <Pressable onPress={onClose} style={styles.closeButton}>
                                 <Ionicons name="close" size={16} color="#334155" />
                             </Pressable>
                         </View>
 
-                        <View style={styles.placesSummaryBox}>
-                            <View style={styles.placeSummaryRow}>
-                                <Text style={styles.placeSummaryLabel}>От</Text>
-                                <Text style={styles.placeSummaryValue}>{originName || 'Моята локация'}</Text>
-                            </View>
-                            <View style={styles.placeSummaryRow}>
-                                <Text style={styles.placeSummaryLabel}>До</Text>
-                                <Text style={styles.placeSummaryValue}>{targetFavorite.name}</Text>
-                            </View>
-                        </View>
-
                         {!existingPlan?.itinerarySummary || showPlannerBuilder ? (
                             <>
-                        <Text style={styles.sectionTitle}>Начална точка</Text>
-                        <Text style={styles.sectionHint}>По подразбиране началната точка е твоята локация. Ако искаш да я смениш, потърси адрес отдолу.</Text>
-                        <TextInput
-                            style={styles.originInput}
-                            value={originQuery}
-                            onChangeText={setOriginQuery}
-                            placeholder="Промени началната точка по адрес"
-                            placeholderTextColor="#94A3B8"
-                        />
-                        {showResetToCurrentLocationButton ? (
-                            <TouchableOpacity
-                                style={styles.resetOriginButton}
-                                onPress={() => {
-                                    setOriginName('Моята локация');
-                                    setOriginLatitude(currentLocation?.latitude ?? null);
-                                    setOriginLongitude(currentLocation?.longitude ?? null);
-                                    setOriginQuery('Моята локация');
-                                    setOriginSearchResults([]);
-                                    setOriginSearchLoading(false);
-                                }}
-                            >
-                                <Ionicons name="locate" size={14} color="#1D4ED8" />
-                                <Text style={styles.resetOriginButtonText}>Върни моята локация</Text>
-                            </TouchableOpacity>
-                        ) : null}
+                        {/* Origin — compact inline row */}
+                        <View style={styles.pointRow}>
+                            <Ionicons name="navigate-circle-outline" size={18} color="#1D4ED8" />
+                            <TextInput
+                                style={styles.pointInput}
+                                value={originQuery}
+                                onChangeText={setOriginQuery}
+                                placeholder="Откъде тръгваш?"
+                                placeholderTextColor="#94A3B8"
+                            />
+                            {showResetToCurrentLocationButton ? (
+                                <TouchableOpacity
+                                    style={styles.pointResetBtn}
+                                    onPress={() => {
+                                        setOriginName('Моята локация');
+                                        setOriginLatitude(currentLocation?.latitude ?? null);
+                                        setOriginLongitude(currentLocation?.longitude ?? null);
+                                        setOriginQuery('Моята локация');
+                                        setOriginSearchResults([]);
+                                        setOriginSearchLoading(false);
+                                    }}
+                                >
+                                    <Ionicons name="locate" size={16} color="#1D4ED8" />
+                                </TouchableOpacity>
+                            ) : null}
+                        </View>
                         {(originSearchLoading || originCombinedResults.length > 0) && (
-                            <ScrollView style={styles.originResultsList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                            <ScrollView style={styles.resultsList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                                 {originCombinedResults.map((result) => (
                                     <TouchableOpacity
                                         key={`${result.kind}-${result.id}`}
-                                        style={styles.originResultRow}
+                                        style={styles.resultRow}
                                         onPress={() => {
                                             setOriginName(result.name);
                                             setOriginLatitude(result.latitude);
@@ -773,24 +777,23 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                             setOriginSearchResults([]);
                                         }}
                                     >
-                                        <Text style={styles.originResultTitle}>{result.name}</Text>
-                                        <Text style={styles.originResultSubtitle}>{result.subtitle}</Text>
+                                        <Text style={styles.resultTitle}>{result.name}</Text>
+                                        <Text style={styles.resultSubtitle}>{result.subtitle}</Text>
                                     </TouchableOpacity>
                                 ))}
-                                {originSearchLoading && <Text style={styles.originSearchStatus}>Търсене...</Text>}
+                                {originSearchLoading && <Text style={styles.resultStatus}>Търсене...</Text>}
                             </ScrollView>
                         )}
-                        <Text style={styles.sectionTitle}>Крайна точка</Text>
+
+                        {/* Destination — tap to edit */}
                         <TouchableOpacity
-                            style={[styles.destinationFixedBox, isEditingDestination && styles.destinationFixedBoxActive]}
+                            style={[styles.pointRow, isEditingDestination && styles.pointRowActive]}
                             onPress={() => setIsEditingDestination((previous) => !previous)}
+                            activeOpacity={0.7}
                         >
-                            <Text style={styles.destinationFixedTitle}>{targetFavorite.name}</Text>
-                            <Text style={styles.destinationFixedText}>
-                                {Number.isFinite(destinationLatitude) && Number.isFinite(destinationLongitude)
-                                    ? `${(destinationLatitude as number).toFixed(5)}, ${(destinationLongitude as number).toFixed(5)}`
-                                    : 'Няма зададена локация'}
-                            </Text>
+                            <Ionicons name="location" size={18} color="#EF4444" />
+                            <Text style={styles.pointLabel} numberOfLines={1}>{targetFavorite.name}</Text>
+                            <Ionicons name={isEditingDestination ? 'chevron-up' : 'pencil-outline'} size={14} color="#94A3B8" />
                         </TouchableOpacity>
                         {isEditingDestination && (
                             <>
@@ -798,15 +801,15 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                     style={styles.originInput}
                                     value={destinationQuery}
                                     onChangeText={setDestinationQuery}
-                                    placeholder="Търси нов адрес за крайната точка"
+                                    placeholder="Търси нов адрес"
                                     placeholderTextColor="#94A3B8"
                                 />
                                 {(destinationSearchLoading || destinationCombinedResults.length > 0) && (
-                                    <ScrollView style={styles.originResultsList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                                    <ScrollView style={styles.resultsList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                                         {destinationCombinedResults.map((result) => (
                                             <TouchableOpacity
                                                 key={`${result.kind}-${result.id}`}
-                                                style={styles.originResultRow}
+                                                style={styles.resultRow}
                                                 onPress={() => {
                                                     setDestinationLatitude(result.latitude);
                                                     setDestinationLongitude(result.longitude);
@@ -815,83 +818,58 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                                     setIsEditingDestination(false);
                                                 }}
                                             >
-                                                <Text style={styles.originResultTitle}>{result.name}</Text>
-                                                <Text style={styles.originResultSubtitle}>{result.subtitle}</Text>
+                                                <Text style={styles.resultTitle}>{result.name}</Text>
+                                                <Text style={styles.resultSubtitle}>{result.subtitle}</Text>
                                             </TouchableOpacity>
                                         ))}
-                                        {destinationSearchLoading && <Text style={styles.originSearchStatus}>Търсене...</Text>}
+                                        {destinationSearchLoading && <Text style={styles.resultStatus}>Търсене...</Text>}
                                     </ScrollView>
                                 )}
                             </>
                         )}
 
-                        <Text style={styles.sectionTitle}>Тип маршрут</Text>
-                        <View style={styles.planTypesRow}>
+                        {/* Options — single row, no section titles */}
+                        <View style={styles.optionsRow}>
                             {(['0', '1', '2'] as PlanType[]).map((type) => (
-                                <TouchableOpacity key={type} style={[styles.planTypeButton, planType === type && styles.planTypeButtonActive]} onPress={() => setPlanType(type)}>
-                                    <Text style={[styles.planTypeButtonText, planType === type && styles.planTypeButtonTextActive]}>{PLAN_LABELS[type]}</Text>
+                                <TouchableOpacity key={type} style={[styles.optionChip, planType === type && styles.optionChipActive]} onPress={() => setPlanType(type)}>
+                                    <Text style={[styles.optionChipText, planType === type && styles.optionChipTextActive]}>{PLAN_LABELS[type]}</Text>
                                 </TouchableOpacity>
                             ))}
                         </View>
 
-                        <Text style={styles.sectionTitle}>Ден и час за маршрута</Text>
-                        <View style={styles.quickActionRow}>
+                        {/* Date & Time — inline with quick actions */}
+                        <View style={styles.dateTimeRow}>
+                            <View style={styles.dateTimeInputWrap}>
+                                <TextInput
+                                    style={styles.dateTimeInput}
+                                    value={routeDateInput}
+                                    onChangeText={(value) => setRouteDateInput(normalizeDateInput(value))}
+                                    placeholder="ДД.ММ.ГГГГ"
+                                    placeholderTextColor="#94A3B8"
+                                    keyboardType="number-pad"
+                                />
+                            </View>
+                            <View style={styles.dateTimeSep} />
+                            <View style={styles.timeInputWrap}>
+                                <TextInput
+                                    style={styles.dateTimeInput}
+                                    value={routeTimeInput}
+                                    onChangeText={(value) => setRouteTimeInput(normalizeTimeInput(value))}
+                                    placeholder="ЧЧ:ММ"
+                                    placeholderTextColor="#94A3B8"
+                                    keyboardType="numbers-and-punctuation"
+                                />
+                            </View>
                             <TouchableOpacity
-                                style={styles.quickActionChip}
+                                style={styles.quickChip}
                                 onPress={() => {
                                     const now = new Date();
                                     setRouteDateInput(formatDateForInput(now));
                                     setRouteTimeInput(formatTimeForInput(now));
                                 }}
                             >
-                                <Text style={styles.quickActionChipText}>Днес</Text>
+                                <Text style={styles.quickChipText}>Сега</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.quickActionChip}
-                                onPress={() => {
-                                    const tomorrow = new Date();
-                                    tomorrow.setDate(tomorrow.getDate() + 1);
-                                    setRouteDateInput(formatDateForInput(tomorrow));
-                                }}
-                            >
-                                <Text style={styles.quickActionChipText}>Утре</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.quickActionChip}
-                                onPress={() => setRouteTimeInput(formatTimeForInput(new Date()))}
-                            >
-                                <Text style={styles.quickActionChipText}>Сега</Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        <View style={styles.routeDateTimeRow}>
-                            <View style={styles.routeDateInputWrap}>
-                                <Text style={styles.routeDateTimeLabel}>Дата</Text>
-                                <TextInput
-                                    style={styles.originInput}
-                                    value={routeDateInput}
-                                    onChangeText={(value) => setRouteDateInput(normalizeDateInput(value))}
-                                    placeholder="24.03.2026"
-                                    placeholderTextColor="#94A3B8"
-                                    keyboardType="number-pad"
-                                />
-                            </View>
-                            <View style={styles.routeTimeInputWrap}>
-                                <Text style={styles.routeDateTimeLabel}>Час</Text>
-                                <TextInput
-                                    style={styles.originInput}
-                                    value={routeTimeInput}
-                                    onChangeText={(value) => setRouteTimeInput(normalizeTimeInput(value))}
-                                    placeholder="08:30"
-                                    placeholderTextColor="#94A3B8"
-                                    keyboardType="numbers-and-punctuation"
-                                />
-                            </View>
-                        </View>
-
-                        <View style={styles.arriveByFixedBox}>
-                            <Text style={styles.arriveByFixedLabel}>Режим на маршрута</Text>
-                            <Text style={styles.arriveByFixedValue}>Пристигане до</Text>
                         </View>
 
                         <TouchableOpacity style={[styles.searchButton, !canPlanRoute && styles.searchButtonDisabled]} disabled={!canPlanRoute || loading} onPress={doPlanRoute}>
@@ -904,12 +882,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
 
                         {!!itineraries.length && (showPlannerBuilder || showSavedRouteDetails) && (
                             <>
-                                <Text style={styles.sectionTitle}>Избери маршрут</Text>
-                                <Text style={styles.routeSelectionHint}>
-                                    {selectedItinerarySummary
-                                        ? `Избран маршрут: ${selectedItinerarySummary}`
-                                        : 'Няма избран маршрут. Натисни вариант, за да го избереш.'}
-                                </Text>
+                                <Text style={styles.sectionTitle}>{itineraries.length > 1 ? 'Избери вариант' : 'Намерен маршрут'}</Text>
                                 {itineraries.map((itinerary, index) => {
                                     const active = index === selectedItineraryIndex;
                                     return (
@@ -921,20 +894,26 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                                     setExpandedLegKey(null);
                                                 }}
                                             >
-                                                <View style={styles.routeCardHeader}>
-                                                    <Text style={styles.routeVariantLabel}>{`Вариант ${index + 1}`}</Text>
-                                                    {active ? (
-                                                        <View style={styles.routeSelectedBadge}>
-                                                            <Text style={styles.routeSelectedBadgeText}>Избран</Text>
-                                                        </View>
-                                                    ) : null}
+                                                <View style={styles.cardSummary}>
+                                                    <Text style={styles.cardTime}>{fmtTime(itinerary.startTime)} → {fmtTime(itinerary.endTime)}</Text>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                        <Text style={styles.cardDuration}>{fmtDuration(itinerary.duration)}</Text>
+                                                        {active && <Ionicons name="checkmark-circle" size={16} color="#059669" />}
+                                                    </View>
                                                 </View>
-                                                <Text style={styles.routeSummary}>{buildItinerarySummary(itinerary)}</Text>
-                                                <View style={styles.transportChipsRow}>
-                                                    {buildTransportLabels(itinerary).map((label) => (
-                                                        <View key={`${itinerary.startTime}-${index}-${label}`} style={styles.transportChip}>
-                                                            <Text style={styles.transportChipText}>{label}</Text>
-                                                        </View>
+                                                <View style={styles.cardModes}>
+                                                    {itinerary.legs.map((leg, legIdx) => (
+                                                        <React.Fragment key={legIdx}>
+                                                            {legIdx > 0 && <Ionicons name="chevron-forward" size={12} color="#94A3B8" />}
+                                                            <View style={[styles.legBadge, { borderLeftWidth: 3, borderLeftColor: getModeColor(leg.mode) }]}>
+                                                                <Ionicons name={getModeIconName(leg.mode) as any} size={14} color={getModeColor(leg.mode)} />
+                                                                {leg.route ? (
+                                                                    <Text style={styles.legRoute}>{leg.route.shortName}</Text>
+                                                                ) : leg.mode === 'WALK' ? (
+                                                                    <Text style={styles.legWalkLabel}>{fmtDuration(Math.round((leg.to.arrivalTime - leg.from.departureTime) / 1000))}</Text>
+                                                                ) : null}
+                                                            </View>
+                                                        </React.Fragment>
                                                     ))}
                                                 </View>
                                             </TouchableOpacity>
@@ -945,39 +924,70 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                                         const hasVehicle = !!leg.route?.shortName;
                                                         const legStops = buildLegStops(leg);
                                                         const isExpanded = expandedLegKey === legKey;
+                                                        const isWalk = leg.mode === 'WALK';
+                                                        const hasStops = leg.intermediatePlaces && leg.intermediatePlaces.length > 0;
 
                                                         return (
-                                                            <View key={legKey} style={styles.routeDetailRow}>
-                                                                <TouchableOpacity
-                                                                    style={[styles.routeLegButton, hasVehicle && styles.routeLegButtonInteractive]}
-                                                                    disabled={!hasVehicle}
-                                                                    onPress={() => setExpandedLegKey((previous) => previous === legKey ? null : legKey)}
-                                                                >
-                                                                    <View style={styles.routeLegHeader}>
-                                                                        <Text style={styles.routeDetailMode}>
-                                                                            {leg.route?.shortName ? `${getLegLabel(leg.mode)} ${leg.route.shortName}` : getLegLabel(leg.mode)}
-                                                                        </Text>
+                                                            <View key={legKey} style={[styles.legRow, isWalk && styles.legRowWalk]}>
+                                                                <View style={styles.legTimeCol}>
+                                                                    <Text style={styles.legTime}>{fmtTime(leg.from.departureTime)}</Text>
+                                                                    <Text style={styles.legTime}>{fmtTime(leg.to.arrivalTime)}</Text>
+                                                                </View>
+                                                                <View style={styles.legTimeline}>
+                                                                    <View style={[styles.legDot, { backgroundColor: getModeColor(leg.mode) }]} />
+                                                                    <View style={[styles.legLine, isWalk ? styles.legLineWalk : { backgroundColor: getModeColor(leg.mode) }]} />
+                                                                    <View style={[styles.legDot, { backgroundColor: getModeColor(leg.mode) }]} />
+                                                                </View>
+                                                                <View style={styles.legInfo}>
+                                                                    <View style={styles.legHeaderRow}>
+                                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                                            <Ionicons name={getModeIconName(leg.mode) as any} size={14} color={getModeColor(leg.mode)} />
+                                                                            <Text style={[styles.legMode, { color: getModeColor(leg.mode) }]}>
+                                                                                {leg.route?.shortName ? `${getLegLabel(leg.mode)} ${leg.route.shortName}` : getLegLabel(leg.mode)}
+                                                                            </Text>
+                                                                        </View>
                                                                         {hasVehicle ? (
-                                                                            <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={14} color="#1E3A8A" />
+                                                                            <TouchableOpacity onPress={() => setExpandedLegKey((previous) => previous === legKey ? null : legKey)}>
+                                                                                <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={14} color="#1E3A8A" />
+                                                                            </TouchableOpacity>
                                                                         ) : null}
                                                                     </View>
-                                                                    <Text style={styles.routeDetailText}>{`${leg.from.name} • ${fmtTime(leg.from.departureTime)} → ${leg.to.name} • ${fmtTime(leg.to.arrivalTime)}`}</Text>
-                                                                </TouchableOpacity>
-                                                                {hasVehicle && isExpanded ? (
-                                                                    <View style={styles.legStopsBox}>
-                                                                        {legStops.map((place, stopIndex) => (
-                                                                            <View key={`${legKey}-stop-${stopIndex}`} style={styles.legStopRow}>
-                                                                                <Text style={styles.legStopBullet}>{stopIndex + 1}.</Text>
-                                                                                <View style={styles.legStopContent}>
-                                                                                    <Text style={styles.legStopName}>{place.name}</Text>
-                                                                                    <Text style={styles.legStopMeta}>
-                                                                                        {place.stop?.code ? `${place.stop.code} • ` : ''}{`${fmtTime(place.arrivalTime || place.departureTime)}`}
-                                                                                    </Text>
-                                                                                </View>
-                                                                            </View>
-                                                                        ))}
+                                                                    {isWalk && (
+                                                                        <View style={styles.walkInfoRow}>
+                                                                            <Ionicons name="walk-outline" size={13} color="#64748B" />
+                                                                            <Text style={styles.walkInfoText}>
+                                                                                {fmtDuration(Math.round((leg.to.arrivalTime - leg.from.departureTime) / 1000))}
+                                                                            </Text>
+                                                                        </View>
+                                                                    )}
+                                                                    <View style={styles.legPlaceRow}>
+                                                                        <Ionicons name="ellipse" size={7} color="#22C55E" />
+                                                                        <Text style={styles.legPlace}>{leg.from.name}</Text>
                                                                     </View>
-                                                                ) : null}
+                                                                    {hasStops && (
+                                                                        <TouchableOpacity onPress={() => setExpandedLegKey((previous) => previous === legKey ? null : legKey)}>
+                                                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 11 }}>
+                                                                                <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={13} color="#1D4ED8" />
+                                                                                <Text style={styles.legStopsToggle}>{leg.intermediatePlaces!.length} спирки</Text>
+                                                                            </View>
+                                                                        </TouchableOpacity>
+                                                                    )}
+                                                                    {hasStops && isExpanded && (
+                                                                        <View style={styles.intermediateStops}>
+                                                                            {leg.intermediatePlaces!.map((place, idx) => (
+                                                                                <View key={idx} style={styles.intermediateRow}>
+                                                                                    <Text style={styles.intermediateTime}>{fmtTime(place.arrivalTime)}</Text>
+                                                                                    <View style={styles.intermediateDot} />
+                                                                                    <Text style={styles.intermediateName}>{place.name}</Text>
+                                                                                </View>
+                                                                            ))}
+                                                                        </View>
+                                                                    )}
+                                                                    <View style={styles.legPlaceRow}>
+                                                                        <Ionicons name="location" size={8} color="#EF4444" />
+                                                                        <Text style={styles.legPlace}>{leg.to.name}</Text>
+                                                                    </View>
+                                                                </View>
                                                             </View>
                                                         );
                                                     })}
@@ -991,7 +1001,8 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                                                 }
                                                             }}
                                                         >
-                                                            <Text style={styles.showOnMapButtonText}>Покажи целия маршрут на картата</Text>
+                                                            <Ionicons name="map-outline" size={14} color="#FFFFFF" />
+                                                            <Text style={styles.showOnMapButtonText}>Покажи на картата</Text>
                                                         </TouchableOpacity>
                                                     ) : null}
                                                 </View>
@@ -1004,21 +1015,13 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
 
                         {(showPlannerBuilder || !existingPlan?.itinerarySummary || showSavedRouteDetails) ? (
                             <>
-                        <Text style={styles.sectionTitle}>Известяване</Text>
-                        <View style={styles.reminderRow}>
-                            <View style={styles.switchWrap}>
-                                <Text style={styles.switchLabel}>Известявай ме</Text>
-                                <Switch value={notificationEnabled} onValueChange={setNotificationEnabled} />
-                            </View>
+                        <View style={styles.notifyRow}>
+                            <Ionicons name={notificationEnabled ? 'notifications' : 'notifications-outline'} size={16} color={notificationEnabled ? '#0F766E' : '#94A3B8'} />
+                            <Text style={styles.notifyLabel}>Известие</Text>
+                            <Switch value={notificationEnabled} onValueChange={setNotificationEnabled} />
                         </View>
                         {notificationEnabled && arriveBy ? (
                             <>
-                                <Text style={styles.reminderHint}>
-                                    {effectiveRouteStartTime
-                                        ? `Начало на маршрута: ${effectiveRouteStartTime}. Известието ще е по-рано.`
-                                        : 'Запази маршрут, за да включиш известие.'}
-                                </Text>
-                                <Text style={styles.reminderSubheading}>Повтаряй в дни</Text>
                                 <View style={styles.weekdayGrid}>
                                     {FAVORITE_COMMUTE_WEEKDAY_OPTIONS.map((option) => {
                                         const active = reminderWeekdays.includes(option.value);
@@ -1033,7 +1036,6 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                         );
                                     })}
                                 </View>
-                                <Text style={styles.reminderHint}>{`Дни: ${formatFavoriteCommuteWeekdays(reminderWeekdays)}`}</Text>
                                 <View style={styles.offsetOptionsRow}>
                                     {REMINDER_OFFSET_OPTIONS.map((option) => (
                                         <TouchableOpacity
@@ -1048,66 +1050,59 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                     ))}
                                 </View>
                                 {effectiveReminderTime ? (
-                                    <Text style={styles.reminderHint}>{`Уведомление: ${effectiveReminderTime}`}</Text>
-                                ) : null}
-                                {effectiveReminderShiftLabel ? (
-                                    <Text style={styles.reminderHint}>{`Пускане: ${formatFavoriteCommuteWeekdays(effectiveNotificationWeekdays)} • ${effectiveReminderShiftLabel}`}</Text>
+                                    <Text style={styles.reminderHint}>{`Известие в ${effectiveReminderTime} • ${formatFavoriteCommuteWeekdays(effectiveNotificationWeekdays)}`}</Text>
                                 ) : null}
                             </>
                         ) : null}
                             </>
                         ) : null}
 
-                        {existingPlan?.itinerarySummary ? (
-                            <TouchableOpacity
-                                style={styles.currentPlanBox}
-                                onPress={() => void openSavedRouteDetails()}
-                            >
-                                <Text style={styles.currentPlanTitle}>Текущ запазен маршрут</Text>
-                                <Text style={styles.currentPlanText}>{existingPlan.routeLabel}</Text>
+                        {existingPlan?.itinerarySummary && !showPlannerBuilder && !showSavedRouteDetails ? (
+                            <View style={styles.currentPlanBox}>
                                 <Text style={styles.currentPlanText}>{existingPlan.itinerarySummary}</Text>
-                                {!!(existingPlan.transportLabels || []).length ? (
-                                    <View style={styles.transportChipsRow}>
-                                        {existingPlan.transportLabels?.map((label) => (
-                                            <View key={`saved-${label}`} style={styles.transportChip}>
-                                                <Text style={styles.transportChipText}>{label}</Text>
-                                            </View>
-                                        ))}
-                                    </View>
+                                {existingPlan.notificationEnabled && existingPlan.reminderTime ? (
+                                    <Text style={styles.currentPlanMeta}>{`${formatFavoriteCommuteWeekdays(existingPlan.notificationWeekdays)} • ${existingPlan.reminderTime}`}</Text>
                                 ) : null}
-                                <Text style={styles.currentPlanText}>
-                                    {existingPlan.routeDate && existingPlan.routeTime
-                                        ? `Пристигане до ${existingPlan.routeDate} ${existingPlan.routeTime}`
-                                        : 'Без зададен ден и час за маршрута'}
-                                </Text>
-                                <Text style={styles.currentPlanText}>
-                                    {existingPlan.reminderTime
-                                        ? `Известяване: ${formatFavoriteCommuteWeekdays(existingPlan.notificationWeekdays)} • ${existingPlan.reminderOffsetMinutes || 5} мин по-рано (${existingPlan.reminderTime})${getFavoriteCommuteNotificationShiftLabel(existingPlan) ? ` • ${getFavoriteCommuteNotificationShiftLabel(existingPlan)}` : ''}`
-                                        : 'Без известяване'}
-                                </Text>
-                                <Text style={styles.currentPlanText}>{`Предпочитание: ${PLAN_LABELS[existingPlan.planType]}`}</Text>
-                                <Text style={styles.currentPlanHint}>Натисни, за да отвориш маршрута и избраните опции</Text>
-                            </TouchableOpacity>
-                        ) : null}
-
-                        {existingPlan?.itinerarySummary && showSavedRouteDetails && !showPlannerBuilder ? (
-                            <View style={styles.savedOptionsBox}>
-                                <Text style={styles.savedOptionsTitle}>Избрани опции</Text>
-                                <Text style={styles.savedOptionsText}>{`Предпочитание: ${PLAN_LABELS[existingPlan.planType]}`}</Text>
-                                <Text style={styles.savedOptionsText}>{`Дата: ${existingPlan.routeDate || 'няма'} • Час: ${existingPlan.routeTime || 'няма'}`}</Text>
-                                <Text style={styles.savedOptionsText}>{existingPlan.notificationEnabled ? 'Уведомленията са включени' : 'Уведомленията са изключени'}</Text>
-                                <Text style={styles.savedOptionsText}>Седмичните дни и 5/10 мин могат да се редактират директно от секцията за известие по-горе.</Text>
-                                <TouchableOpacity
-                                    style={styles.modifyRouteButton}
-                                    onPress={() => setShowPlannerBuilder(true)}
-                                >
-                                    <Text style={styles.modifyRouteButtonText}>Промени маршрута</Text>
-                                </TouchableOpacity>
+                                <View style={styles.currentPlanActions}>
+                                    <TouchableOpacity style={styles.currentPlanBtn} onPress={() => void openSavedRouteDetails()}>
+                                        <Ionicons name="search-outline" size={13} color="#1D4ED8" />
+                                        <Text style={styles.currentPlanBtnText}>Детайли</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.currentPlanBtn} onPress={() => setShowPlannerBuilder(true)}>
+                                        <Ionicons name="refresh-outline" size={13} color="#1D4ED8" />
+                                        <Text style={styles.currentPlanBtnText}>Нов маршрут</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.currentPlanBtn}
+                                        onPress={() => {
+                                            Alert.alert('Изчисти маршрута', 'Сигурен ли си?', [
+                                                { text: 'Отказ', style: 'cancel' },
+                                                {
+                                                    text: 'Изчисти',
+                                                    style: 'destructive',
+                                                    onPress: async () => {
+                                                        await cancelCommuteRouteNotification(targetFavorite.id);
+                                                        await onSave(targetFavorite.id, {
+                                                            commutePlan: null,
+                                                            destinationLatitude: targetFavorite.latitude,
+                                                            destinationLongitude: targetFavorite.longitude,
+                                                        });
+                                                        onClose();
+                                                    },
+                                                },
+                                            ]);
+                                        }}
+                                    >
+                                        <Ionicons name="trash-outline" size={13} color="#94A3B8" />
+                                    </TouchableOpacity>
+                                </View>
                             </View>
                         ) : null}
 
-                        <TouchableOpacity style={[styles.saveButton, !selectedItinerary && !canSaveWithoutReplanning && styles.saveButtonDisabled]} disabled={!selectedItinerary && !canSaveWithoutReplanning} onPress={savePlan}>
-                            <Text style={styles.saveButtonText}>{canSaveWithoutReplanning ? 'Запази известието' : 'Запази маршрут и час'}</Text>
+
+
+                        <TouchableOpacity style={[styles.saveButton, !selectedItinerary && styles.saveButtonDisabled]} disabled={!selectedItinerary} onPress={savePlan}>
+                            <Text style={styles.saveButtonText}>Запази маршрут</Text>
                         </TouchableOpacity>
             </ScrollView>
         </View>
@@ -1130,102 +1125,111 @@ const styles = StyleSheet.create({
     overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.18)', justifyContent: 'flex-start', paddingTop: 78, paddingHorizontal: 12 },
     card: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', maxHeight: '92%', padding: 14, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.12, shadowRadius: 28 },
     inlineCard: { maxHeight: undefined, marginTop: 8, paddingHorizontal: 10, paddingVertical: 10 },
-    content: { paddingBottom: 8 },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 12 },
-    headerMain: { flex: 1, paddingRight: 4 },
-    title: { color: '#0F172A', fontSize: 16, fontWeight: '700' },
-    subtitle: { color: '#475569', fontSize: 12, marginTop: 2 },
-    placesSummaryBox: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 10, marginBottom: 6 },
-    placeSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-    placeSummaryLabel: { width: 24, color: '#475569', fontSize: 12, fontWeight: '700' },
-    placeSummaryValue: { flex: 1, color: '#0F172A', fontSize: 12, fontWeight: '700' },
+    content: { paddingBottom: 8, gap: 8 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+    title: { color: '#0F172A', fontSize: 16, fontWeight: '700', flex: 1 },
     closeButton: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', flexShrink: 0 },
-    closeButtonText: { color: '#334155', fontSize: 18, fontWeight: '700', lineHeight: 20 },
-    sectionTitle: { color: '#0F172A', fontSize: 13, fontWeight: '700', marginBottom: 8, marginTop: 6 },
-    sectionHint: { color: '#475569', fontSize: 11, lineHeight: 16, marginBottom: 8 },
-    originInput: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingHorizontal: 12, paddingVertical: 10, color: '#0F172A', fontSize: 14 },
-    resetOriginButton: { marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 40, backgroundColor: 'rgba(239,246,255,0.82)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(191,219,254,0.72)' },
-    resetOriginButtonText: { color: '#1D4ED8', fontSize: 12, fontWeight: '700' },
-    originResultsList: { maxHeight: 180, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', backgroundColor: 'rgba(248,250,252,0.72)', padding: 8, marginTop: 8 },
-    originResultRow: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: '#FFFFFF', marginBottom: 8, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
-    originResultTitle: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
-    originResultSubtitle: { color: '#64748B', fontSize: 11, marginTop: 2 },
-    originSearchStatus: { color: '#475569', fontSize: 12, textAlign: 'center', paddingVertical: 8 },
-    destinationFixedBox: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 10 },
-    destinationFixedBoxActive: { backgroundColor: 'rgba(239,246,255,0.82)', borderColor: 'rgba(147,197,253,0.72)' },
-    destinationFixedTitle: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
-    destinationFixedText: { color: '#475569', fontSize: 11, marginTop: 4 },
-    emptyText: { color: '#64748B', fontSize: 12, lineHeight: 17 },
-    planTypesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    planTypeButton: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 16, backgroundColor: 'rgba(226,232,240,0.72)' },
-    planTypeButtonActive: { backgroundColor: '#1E3A8A' },
-    planTypeButtonText: { color: '#475569', fontSize: 12, fontWeight: '600' },
-    planTypeButtonTextActive: { color: '#FFFFFF' },
-    quickActionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-    quickActionChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(239,246,255,0.82)', borderWidth: 1, borderColor: 'rgba(191,219,254,0.72)' },
-    quickActionChipText: { color: '#1D4ED8', fontSize: 12, fontWeight: '700' },
-    routeDateTimeRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
-    routeDateInputWrap: { flex: 1 },
-    routeTimeInputWrap: { width: 110 },
-    routeDateTimeLabel: { color: '#475569', fontSize: 12, fontWeight: '600', marginBottom: 6 },
-    arriveByFixedBox: { backgroundColor: 'rgba(236,253,245,0.82)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(167,243,208,0.72)', padding: 10, marginBottom: 4 },
-    arriveByFixedLabel: { color: '#065F46', fontSize: 12, fontWeight: '600' },
-    arriveByFixedValue: { color: '#047857', fontSize: 13, fontWeight: '800', marginTop: 4 },
-    searchButton: { marginTop: 10, minHeight: 44, backgroundColor: '#1D4ED8', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    sectionTitle: { color: '#0F172A', fontSize: 13, fontWeight: '700', marginTop: 4 },
+
+    /* Origin / Destination rows */
+    pointRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingHorizontal: 10, paddingVertical: 2 },
+    pointRowActive: { backgroundColor: 'rgba(239,246,255,0.82)', borderColor: 'rgba(147,197,253,0.72)' },
+    pointInput: { flex: 1, color: '#0F172A', fontSize: 13, paddingVertical: 10 },
+    pointLabel: { flex: 1, color: '#0F172A', fontSize: 13, fontWeight: '600', paddingVertical: 10 },
+    pointResetBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+    originInput: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingHorizontal: 12, paddingVertical: 10, color: '#0F172A', fontSize: 13 },
+
+    /* Search results */
+    resultsList: { maxHeight: 160, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', backgroundColor: 'rgba(248,250,252,0.72)', padding: 6 },
+    resultRow: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: '#FFFFFF', marginBottom: 4 },
+    resultTitle: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
+    resultSubtitle: { color: '#64748B', fontSize: 11, marginTop: 2 },
+    resultStatus: { color: '#475569', fontSize: 12, textAlign: 'center', paddingVertical: 8 },
+
+    /* Options chips */
+    optionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    optionChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 999, backgroundColor: 'rgba(226,232,240,0.72)' },
+    optionChipActive: { backgroundColor: '#1E3A8A' },
+    optionChipText: { color: '#475569', fontSize: 11, fontWeight: '600' },
+    optionChipTextActive: { color: '#FFFFFF' },
+
+    /* Date/Time */
+    dateTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    dateTimeInputWrap: { flex: 1 },
+    timeInputWrap: { width: 80 },
+    dateTimeSep: { width: 1, height: 20, backgroundColor: 'rgba(226,232,240,0.72)' },
+    dateTimeInput: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingHorizontal: 10, paddingVertical: 9, color: '#0F172A', fontSize: 13, textAlign: 'center' },
+    quickChip: { paddingHorizontal: 10, paddingVertical: 9, borderRadius: 999, backgroundColor: 'rgba(239,246,255,0.82)', borderWidth: 1, borderColor: 'rgba(191,219,254,0.72)' },
+    quickChipText: { color: '#1D4ED8', fontSize: 11, fontWeight: '700' },
+
+    /* Search action */
+    searchButton: { minHeight: 44, backgroundColor: '#1D4ED8', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
     searchButtonDisabled: { backgroundColor: '#93C5FD' },
     searchButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
-    errorText: { color: '#B91C1C', fontSize: 12, marginTop: 8 },
-    routeSelectionHint: { color: '#475569', fontSize: 11, lineHeight: 16, marginTop: -2, marginBottom: 2 },
-    routeCard: { marginTop: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
-    routeCardActive: { borderColor: 'rgba(29,78,216,0.72)', backgroundColor: 'rgba(239,246,255,0.82)' },
-    routeCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 },
-    routeVariantLabel: { color: '#1E3A8A', fontSize: 11, fontWeight: '700' },
-    routeSelectedBadge: { backgroundColor: 'rgba(220,252,231,0.82)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-    routeSelectedBadgeText: { color: '#166534', fontSize: 10, fontWeight: '700' },
-    routeSummary: { color: '#0F172A', fontSize: 12, fontWeight: '700', lineHeight: 18 },
-    routeDetailsBox: { marginTop: 6, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(219,234,254,0.72)' },
-    routeDetailRow: { marginBottom: 8 },
-    routeLegButton: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 6 },
-    routeLegButtonInteractive: { backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(219,234,254,0.72)' },
-    routeLegHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-    routeDetailMode: { color: '#1E3A8A', fontSize: 11, fontWeight: '700', marginBottom: 2 },
-    routeDetailText: { color: '#334155', fontSize: 11, lineHeight: 16 },
-    legStopsBox: { marginTop: 6, marginLeft: 8, borderLeftWidth: 2, borderLeftColor: 'rgba(191,219,254,0.72)', paddingLeft: 10, gap: 8 },
-    legStopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-    legStopBullet: { color: '#1D4ED8', fontSize: 11, fontWeight: '700', width: 18 },
-    legStopContent: { flex: 1 },
-    legStopName: { color: '#0F172A', fontSize: 11, fontWeight: '700' },
-    legStopMeta: { color: '#64748B', fontSize: 10, marginTop: 2 },
-    showOnMapButton: { marginTop: 4, minHeight: 42, backgroundColor: '#1E3A8A', borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
-    showOnMapButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', textAlign: 'center' },
-    reminderRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
-    reminderHint: { color: '#475569', fontSize: 11, lineHeight: 16, marginTop: 6 },
-    switchWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    switchLabel: { color: '#334155', fontSize: 12, fontWeight: '600' },
-    reminderSubheading: { color: '#0F172A', fontSize: 12, fontWeight: '700', marginTop: 8 },
-    weekdayGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-    weekdayChip: { width: 42, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
+    errorText: { color: '#B91C1C', fontSize: 12 },
+
+    /* Route cards */
+    routeCard: { paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.6)' },
+    routeCardActive: { borderColor: 'rgba(29,78,216,0.6)', backgroundColor: 'rgba(239,246,255,0.82)' },
+    cardSummary: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+    cardTime: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+    cardDuration: { fontSize: 13, color: '#64748B', fontWeight: '600' },
+    cardModes: { flexDirection: 'row', gap: 5, flexWrap: 'wrap' },
+    legBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(248,250,252,0.82)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, gap: 4 },
+    legRoute: { fontSize: 12, fontWeight: '700', color: '#1D4ED8', marginLeft: 4 },
+    legWalkLabel: { fontSize: 11, fontWeight: '600', color: '#64748B', marginLeft: 3 },
+
+    /* Route details */
+    routeDetailsBox: { marginTop: 6, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.6)' },
+    legRow: { flexDirection: 'row', marginBottom: 12 },
+    legRowWalk: { backgroundColor: 'rgba(248,250,252,0.82)', borderRadius: 10, padding: 8, marginHorizontal: -4 },
+    legTimeCol: { width: 42, justifyContent: 'space-between' },
+    legTime: { fontSize: 11, color: '#64748B', fontWeight: '600' },
+    legTimeline: { width: 14, alignItems: 'center', marginHorizontal: 2 },
+    legDot: { width: 8, height: 8, borderRadius: 4 },
+    legLine: { flex: 1, width: 2.5, borderRadius: 1.5 },
+    legLineWalk: { borderWidth: 1, borderColor: '#94A3B8', borderStyle: 'dashed', backgroundColor: 'transparent', width: 0 },
+    legInfo: { flex: 1 },
+    legHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 },
+    legMode: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
+    legPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginVertical: 1 },
+    legPlace: { fontSize: 12, color: '#334155', flex: 1 },
+    walkInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+    walkInfoText: { fontSize: 11, color: '#64748B', fontWeight: '600' },
+    legStopsToggle: { fontSize: 12, color: '#1D4ED8', fontWeight: '600', paddingVertical: 2 },
+    intermediateStops: { marginLeft: 4, marginBottom: 4, marginTop: 2, borderLeftWidth: 2, borderLeftColor: 'rgba(203,213,225,0.72)', paddingLeft: 10 },
+    intermediateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 6 },
+    intermediateTime: { fontSize: 11, color: '#64748B', width: 36, fontWeight: '600' },
+    intermediateDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#94A3B8' },
+    intermediateName: { fontSize: 11, color: '#475569', flex: 1 },
+    showOnMapButton: { marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: 'rgba(29,78,216,0.82)', borderRadius: 12, paddingVertical: 8 },
+    showOnMapButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+
+    /* Notification */
+    notifyRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+    notifyLabel: { flex: 1, color: '#334155', fontSize: 13, fontWeight: '600' },
+    reminderHint: { color: '#475569', fontSize: 11, lineHeight: 16 },
+    weekdayGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    weekdayChip: { width: 40, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
     weekdayChipActive: { backgroundColor: '#0F766E' },
-    weekdayChipText: { color: '#475569', fontSize: 12, fontWeight: '700' },
+    weekdayChipText: { color: '#475569', fontSize: 11, fontWeight: '700' },
     weekdayChipTextActive: { color: '#FFFFFF' },
-    offsetOptionsRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
-    offsetChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
+    offsetOptionsRow: { flexDirection: 'row', gap: 6 },
+    offsetChip: { flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
     offsetChipActive: { backgroundColor: '#1D4ED8' },
-    offsetChipText: { color: '#475569', fontSize: 12, fontWeight: '700' },
+    offsetChipText: { color: '#475569', fontSize: 11, fontWeight: '700' },
     offsetChipTextActive: { color: '#FFFFFF' },
-    currentPlanBox: { marginTop: 12, backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 10 },
-    currentPlanTitle: { color: '#0F172A', fontSize: 12, fontWeight: '700', marginBottom: 4 },
-    currentPlanText: { color: '#475569', fontSize: 11, lineHeight: 16 },
-    currentPlanHint: { color: '#1D4ED8', fontSize: 10, fontWeight: '700', marginTop: 8 },
-    savedOptionsBox: { marginTop: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(219,234,254,0.72)', padding: 10 },
-    savedOptionsTitle: { color: '#1E3A8A', fontSize: 12, fontWeight: '700', marginBottom: 6 },
-    savedOptionsText: { color: '#475569', fontSize: 11, lineHeight: 16, marginBottom: 4 },
-    modifyRouteButton: { marginTop: 8, minHeight: 42, backgroundColor: '#1D4ED8', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-    modifyRouteButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
-    transportChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-    transportChip: { backgroundColor: 'rgba(219,234,254,0.72)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(147,197,253,0.72)' },
-    transportChipText: { color: '#1E3A8A', fontSize: 10, fontWeight: '700' },
-    saveButton: { marginTop: 14, minHeight: 46, backgroundColor: '#0F766E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-    saveButtonDisabled: { backgroundColor: '#99F6E4' },
+
+    /* Saved plan */
+    currentPlanBox: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 10, gap: 6 },
+    currentPlanText: { color: '#0F172A', fontSize: 12, fontWeight: '600' },
+    currentPlanMeta: { color: '#0F766E', fontSize: 11 },
+    currentPlanActions: { flexDirection: 'row', gap: 6, marginTop: 2 },
+    currentPlanBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    currentPlanBtnText: { color: '#1D4ED8', fontSize: 10, fontWeight: '700' },
+
+    /* Save */
+    saveButton: { minHeight: 46, backgroundColor: '#1D4ED8', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    saveButtonDisabled: { backgroundColor: '#93C5FD' },
     saveButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 });

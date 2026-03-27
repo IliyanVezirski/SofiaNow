@@ -1,5 +1,10 @@
 {
   "dependencies": {
+    "expo": "^55.0.8",
     "gtfs-realtime-bindings": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.10",
+    "typescript": "~5.9.2"
   }
 }

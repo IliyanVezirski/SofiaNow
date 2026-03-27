@@ -596,7 +596,10 @@ export const fetchOsrmRoute = async (stops: Array<{ latitude: number; longitude:
     return data.routes[0].geometry.coordinates as [number, number][];
 };
 
-const enrichDirectionWithOsrm = async (direction: LineRouteDirection): Promise<LineRouteDirection> => {
+const enrichDirectionWithOsrm = async (direction: LineRouteDirection, vehicleType?: string): Promise<LineRouteDirection> => {
+    if (vehicleType && vehicleType !== 'bus') {
+        return direction;
+    }
     try {
         const osrmCoords = await fetchOsrmRoute(direction.stops);
         return { ...direction, coordinates: osrmCoords };
@@ -761,7 +764,7 @@ export const fetchLineRouteGeometry = async (
             return null;
         }
 
-        const directions = await Promise.all(rawDirections.map(enrichDirectionWithOsrm));
+        const directions = await Promise.all(rawDirections.map((d) => enrichDirectionWithOsrm(d, type)));
 
         return {
             line: displayLine || normalizedTargetLine,
@@ -827,7 +830,7 @@ export const fetchLineRouteGeometryByRouteId = async (routeId: string): Promise<
                 : null;
         }
 
-        const directions = await Promise.all(rawDirections.map(enrichDirectionWithOsrm));
+        const directions = await Promise.all(rawDirections.map((d) => enrichDirectionWithOsrm(d, routeMetadata.type)));
 
         return {
             line: displayLine || routeMetadata.line,

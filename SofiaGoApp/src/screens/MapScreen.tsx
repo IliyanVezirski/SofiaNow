@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, LogBox } from 'react-native';
+import { Animated, Easing, StyleSheet, View, Text, TouchableOpacity, LogBox } from 'react-native';
 import MapboxGL from '@maplibre/maplibre-react-native';
 
 import { RouteSelection } from '../types/routes';
@@ -44,6 +44,7 @@ import { RouteStopsPanel } from '../features/routing/components/RouteStopsPanel'
 import { ReportModal } from '../features/reporting/components/ReportModal';
 import { DroppedPinPanel } from '../features/droppedPin/components/DroppedPinPanel';
 import { ReminderCenterButton } from '../features/notifications/components/ReminderCenterButton';
+import { SettingsModal } from '../features/settings/components/SettingsModal';
 
 import { INITIAL_ZOOM_LEVEL, MAP_STYLE, MAX_RENDERED_STOPS, DEFAULT_CENTER_COORDINATE, createFallbackBounds, getDirectionAccentColor, getDirectionArrowSamples } from '../features/map/constants';
 
@@ -203,6 +204,59 @@ export default function MapScreen({
     const camera = useMapCamera();
     const bounds = useMapBounds();
 
+    // ── Smooth user location animation ──
+    const animatedLat = useRef(new Animated.Value(0)).current;
+    const animatedLon = useRef(new Animated.Value(0)).current;
+    const smoothCoord = useRef<[number, number] | null>(null);
+    const isFirstLocation = useRef(true);
+
+    useEffect(() => {
+        if (!location) return;
+        const lat = location.coords.latitude;
+        const lon = location.coords.longitude;
+
+        if (isFirstLocation.current) {
+            isFirstLocation.current = false;
+            animatedLat.setValue(lat);
+            animatedLon.setValue(lon);
+            smoothCoord.current = [lon, lat];
+            return;
+        }
+
+        const latListener = animatedLat.addListener(({ value }) => {
+            if (smoothCoord.current) smoothCoord.current[1] = value;
+        });
+        const lonListener = animatedLon.addListener(({ value }) => {
+            if (smoothCoord.current) smoothCoord.current[0] = value;
+        });
+
+        Animated.parallel([
+            Animated.timing(animatedLat, { toValue: lat, duration: 1200, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+            Animated.timing(animatedLon, { toValue: lon, duration: 1200, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+        ]).start(() => {
+            animatedLat.removeListener(latListener);
+            animatedLon.removeListener(lonListener);
+            smoothCoord.current = [lon, lat];
+        });
+
+        return () => {
+            animatedLat.removeListener(latListener);
+            animatedLon.removeListener(lonListener);
+        };
+    }, [location?.coords.latitude, location?.coords.longitude]);
+
+    const userLocationGeoJSON = useMemo(() => {
+        if (!location) return null;
+        return {
+            type: 'Feature' as const,
+            geometry: {
+                type: 'Point' as const,
+                coordinates: [location.coords.longitude, location.coords.latitude],
+            },
+            properties: {},
+        };
+    }, [location?.coords.latitude, location?.coords.longitude]);
+
     const walkingRadiiGeoJSON = useMemo(() => {
         if (!location) return null;
         const lon = location.coords.longitude;
@@ -255,7 +309,12 @@ export default function MapScreen({
     const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
     const selectedVehicleIdRef = useRef<string | null>(null);
     const [droppedPin, setDroppedPin] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [editRequestFavoriteId, setEditRequestFavoriteId] = useState<string | null>(null);
     const [userLocationVisible, setUserLocationVisible] = useState(true);
+    const [settingsVisible, setSettingsVisible] = useState(false);
+    const [settingsExpanded, setSettingsExpanded] = useState(false);
+    const settingsSlideAnim = useRef(new Animated.Value(0)).current;
+    const settingsAutoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const selectedVehicle = useMemo(() => {
         if (!selectedVehicleId) return null;
@@ -278,6 +337,15 @@ export default function MapScreen({
             && favorite.latitude!.toFixed(6) === normalizedLatitude
             && favorite.longitude!.toFixed(6) === normalizedLongitude
         ));
+    }, [droppedPin, favorites.favoritePlaces]);
+    const droppedPinMatchingFavoriteId = useMemo(() => {
+        if (!droppedPin) return null;
+        const lat = droppedPin.latitude.toFixed(6);
+        const lon = droppedPin.longitude.toFixed(6);
+        const match = favorites.favoritePlaces.find((f) =>
+            hasFavoriteCoordinates(f) && f.latitude!.toFixed(6) === lat && f.longitude!.toFixed(6) === lon,
+        );
+        return match?.id ?? null;
     }, [droppedPin, favorites.favoritePlaces]);
     const routing = useRouteGeometry(
         highlightedRoute,
@@ -433,15 +501,17 @@ export default function MapScreen({
             const north = Math.max(Number(visibleBounds[0][1]), Number(visibleBounds[1][1]));
             const south = Math.min(Number(visibleBounds[0][1]), Number(visibleBounds[1][1]));
             if ([north, south, east, west].every(Number.isFinite)) {
+                const centerLat = (north + south) / 2;
+                const centerLon = (east + west) / 2;
                 if (location) {
+                    const thresholdLat = (north - south) * 0.2;
+                    const thresholdLon = (east - west) * 0.2;
                     setUserLocationVisible(
-                        location.coords.latitude <= north &&
-                        location.coords.latitude >= south &&
-                        location.coords.longitude <= east &&
-                        location.coords.longitude >= west
+                        Math.abs(location.coords.latitude - centerLat) < thresholdLat &&
+                        Math.abs(location.coords.longitude - centerLon) < thresholdLon
                     );
                 }
-                camera.setMapCenterCoordinate([(east + west) / 2, (north + south) / 2]);
+                camera.setMapCenterCoordinate([centerLon, centerLat]);
                 bounds.scheduleBoundsUpdate({ north, south, east, west });
                 return;
             }
@@ -452,11 +522,11 @@ export default function MapScreen({
             if (Number.isFinite(lon) && Number.isFinite(lat)) {
                 const fallbackBounds = createFallbackBounds(lat, lon);
                 if (location) {
+                    const thresholdLat = (fallbackBounds.north - fallbackBounds.south) * 0.2;
+                    const thresholdLon = (fallbackBounds.east - fallbackBounds.west) * 0.2;
                     setUserLocationVisible(
-                        location.coords.latitude <= fallbackBounds.north &&
-                        location.coords.latitude >= fallbackBounds.south &&
-                        location.coords.longitude <= fallbackBounds.east &&
-                        location.coords.longitude >= fallbackBounds.west
+                        Math.abs(location.coords.latitude - lat) < thresholdLat &&
+                        Math.abs(location.coords.longitude - lon) < thresholdLon
                     );
                 }
                 bounds.scheduleBoundsUpdate(fallbackBounds);
@@ -531,14 +601,17 @@ export default function MapScreen({
                         animationDuration={(camera.tripCameraBounds || camera.routeCameraBounds) ? 800 : 0}
                     />
 
-                    {location && (
-                        <MapboxGL.PointAnnotation
-                            id="user-location"
-                            key={`user-${location.coords.latitude}-${location.coords.longitude}`}
-                            coordinate={[location.coords.longitude, location.coords.latitude]}
-                        >
-                            <View style={styles.userDot} />
-                        </MapboxGL.PointAnnotation>
+                    {userLocationGeoJSON && (
+                        <MapboxGL.ShapeSource id="user-location-source" shape={userLocationGeoJSON as any}>
+                            <MapboxGL.CircleLayer
+                                id="user-location-outer"
+                                style={{ circleRadius: 12, circleColor: '#FFFFFF', circleOpacity: 0.9 }}
+                            />
+                            <MapboxGL.CircleLayer
+                                id="user-location-inner"
+                                style={{ circleRadius: 10, circleColor: '#007AFF' }}
+                            />
+                        </MapboxGL.ShapeSource>
                     )}
 
                     {walkingRadiiGeoJSON && (
@@ -579,16 +652,26 @@ export default function MapScreen({
 
                     {/* Route geometry lines */}
                     {!hasTripRoute && routing.routeGeometry?.directions.map((direction, index) => (
-                        <MapboxGL.ShapeSource
-                            id={`route-source-${routing.routeGeometry!.line}-${index}`}
-                            key={`route-source-${routing.routeGeometry!.line}-${index}`}
-                            shape={{ type: 'Feature', properties: { routeColor: getDirectionAccentColor(index) }, geometry: { type: 'LineString', coordinates: direction.coordinates } }}
-                        >
-                            <MapboxGL.LineLayer
-                                id={`route-layer-${routing.routeGeometry!.line}-${index}`}
-                                style={{ lineColor: ['get', 'routeColor'], lineWidth: 4, lineOpacity: 0.9 }}
-                            />
-                        </MapboxGL.ShapeSource>
+                        <React.Fragment key={`route-group-${routing.routeGeometry!.line}-${index}`}>
+                            <MapboxGL.ShapeSource
+                                id={`route-outline-${routing.routeGeometry!.line}-${index}`}
+                                shape={{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: direction.coordinates } }}
+                            >
+                                <MapboxGL.LineLayer
+                                    id={`route-outline-layer-${routing.routeGeometry!.line}-${index}`}
+                                    style={{ lineColor: '#FFFFFF', lineWidth: 7, lineOpacity: 0.85, lineCap: 'round', lineJoin: 'round' }}
+                                />
+                            </MapboxGL.ShapeSource>
+                            <MapboxGL.ShapeSource
+                                id={`route-source-${routing.routeGeometry!.line}-${index}`}
+                                shape={{ type: 'Feature', properties: { routeColor: getDirectionAccentColor(index) }, geometry: { type: 'LineString', coordinates: direction.coordinates } }}
+                            >
+                                <MapboxGL.LineLayer
+                                    id={`route-layer-${routing.routeGeometry!.line}-${index}`}
+                                    style={{ lineColor: ['get', 'routeColor'], lineWidth: 4, lineOpacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
+                                />
+                            </MapboxGL.ShapeSource>
+                        </React.Fragment>
                     ))}
 
                     {/* Route direction arrows */}
@@ -604,11 +687,12 @@ export default function MapScreen({
                     {!hasTripRoute && routing.routeGeometry?.directions.map((direction, dirIdx) =>
                         direction.stops.map((stop, stopIdx) => {
                             const annId = `route-stop-v${routing.routeGeometryVersion}-${dirIdx}-${stop.id}-${stopIdx}`;
+                            const isSelected = selectedStop.selectedStopAnnotationId === annId;
                             return (
                                 <MapboxGL.PointAnnotation
-                                    key={`${annId}-${selectedStop.selectedStopAnnotationId === annId ? 'selected' : 'idle'}`} id={annId} coordinate={[stop.longitude, stop.latitude]}
+                                    key={`${annId}-${isSelected ? 'selected' : 'idle'}`} id={annId} coordinate={[stop.longitude, stop.latitude]}
                                     ref={(ref) => { stopAnnotationRefs.current[annId] = ref; }}
-                                    selected={selectedStop.selectedStopAnnotationId === annId}
+                                    selected={isSelected}
                                     onSelected={() => {
                                         void (async () => {
                                             await selectedStop.openRouteStopDetails(stop, direction.name || `Посока ${dirIdx + 1}`, annId, stopsHook.stopById, routing.routeGeometry?.line, highlightedRoute?.line);
@@ -617,13 +701,13 @@ export default function MapScreen({
                                     }}
                                     onDeselected={() => { if (selectedStop.selectedStopIdRef.current === stop.id) selectedStop.closeSelectedStop(); }}
                                 >
-                                    <View style={{ alignItems: 'center', zIndex: 20, elevation: 20 }}>
-                                        <View style={[styles.routeStopDot, { backgroundColor: getDirectionAccentColor(dirIdx), borderColor: getDirectionAccentColor(dirIdx) }, selectedStop.selectedStopAnnotationId === annId && styles.routeStopDotSelected]}>
-                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.routeStopText}>{stopIdx + 1}</Text>
-                                        </View>
-                                        <View style={[styles.routeStopLabel, selectedStop.selectedStopAnnotationId === annId && styles.routeStopLabelSelected]}>
-                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.routeStopName} numberOfLines={1}>{stop.name}</Text>
-                                        </View>
+                                    <View style={{ alignItems: 'center' }}>
+                                        <View style={[styles.routeStopDot, { borderColor: getDirectionAccentColor(dirIdx) }, isSelected && styles.routeStopDotSelected]} />
+                                        {isSelected && (
+                                            <View style={styles.routeStopLabel}>
+                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.routeStopName} numberOfLines={1}>{stop.name}</Text>
+                                            </View>
+                                        )}
                                     </View>
                                 </MapboxGL.PointAnnotation>
                             );
@@ -657,6 +741,20 @@ export default function MapScreen({
                         return (
                             <>
                                 {liveCoords.length >= 2 && (
+                                    <>
+                                    <MapboxGL.ShapeSource
+                                        id="vehicle-route-outline"
+                                        shape={{
+                                            type: 'Feature',
+                                            properties: {},
+                                            geometry: { type: 'LineString', coordinates: liveCoords },
+                                        }}
+                                    >
+                                        <MapboxGL.LineLayer
+                                            id="vehicle-route-outline-layer"
+                                            style={{ lineColor: '#FFFFFF', lineWidth: 7, lineOpacity: 0.85, lineCap: 'round', lineJoin: 'round' }}
+                                        />
+                                    </MapboxGL.ShapeSource>
                                     <MapboxGL.ShapeSource
                                         id="vehicle-route-line"
                                         shape={{
@@ -667,24 +765,22 @@ export default function MapScreen({
                                     >
                                         <MapboxGL.LineLayer
                                             id="vehicle-route-layer"
-                                            style={{
-                                                lineColor: '#059669',
-                                                lineWidth: 4,
-                                                lineOpacity: 0.85,
-                                            }}
+                                            style={{ lineColor: '#059669', lineWidth: 4, lineOpacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
                                         />
                                     </MapboxGL.ShapeSource>
+                                    </>
                                 )}
 
                                 {vehicleRoute.vehicleRouteStops.map((stop, idx) => {
                                     const annId = `vr-stop-${stop.stopId}-${idx}`;
+                                    const isSelected = selectedStop.selectedStopAnnotationId === annId;
                                     return (
                                         <MapboxGL.PointAnnotation
-                                            key={`${annId}-${selectedStop.selectedStopAnnotationId === annId ? 'selected' : 'idle'}`}
+                                            key={`${annId}-${isSelected ? 'selected' : 'idle'}`}
                                             id={annId}
                                             ref={(ref) => { stopAnnotationRefs.current[annId] = ref; }}
                                             coordinate={[stop.longitude, stop.latitude]}
-                                            selected={selectedStop.selectedStopAnnotationId === annId}
+                                            selected={isSelected}
                                             onSelected={async () => {
                                                 selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
                                                 selectedStop.selectedStopIdRef.current = stop.stopId;
@@ -711,14 +807,14 @@ export default function MapScreen({
                                                 if (selectedStop.selectedStopIdRef.current === stop.stopId) selectedStop.closeSelectedStop();
                                             }}
                                         >
-                                            <View style={{ alignItems: 'center', zIndex: 20, elevation: 20 }}>
-                                                <View style={[styles.vehicleRouteStopDot, selectedStop.selectedStopAnnotationId === annId && styles.vehicleRouteStopDotSelected]}>
-                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleRouteStopText}>{idx + 1}</Text>
-                                                </View>
-                                                <View style={styles.vehicleRouteStopLabel}>
-                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleRouteStopName} numberOfLines={1}>{stop.stopName}</Text>
-                                                    {stop.arrivalTimestamp ? <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleRouteStopTime}>{formatUnixTime(stop.arrivalTimestamp)}</Text> : null}
-                                                </View>
+                                            <View style={{ alignItems: 'center' }}>
+                                                <View style={[styles.vehicleRouteStopDot, isSelected && styles.vehicleRouteStopDotSelected]} />
+                                                {isSelected && (
+                                                    <View style={styles.vehicleRouteStopLabel}>
+                                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleRouteStopName} numberOfLines={1}>{stop.stopName}</Text>
+                                                        {stop.arrivalTimestamp ? <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleRouteStopTime}>{formatUnixTime(stop.arrivalTimestamp)}</Text> : null}
+                                                    </View>
+                                                )}
                                             </View>
                                         </MapboxGL.PointAnnotation>
                                     );
@@ -769,21 +865,62 @@ export default function MapScreen({
                     {/* Dropped pin */}
                     {!hasTripRoute && droppedPin && (
                         <MapboxGL.PointAnnotation key="dropped-pin" id="dropped-pin" coordinate={[droppedPin.longitude, droppedPin.latitude]}>
-                            <Text style={styles.droppedPinIcon}>{'\uD83D\uDCCD'}</Text>
+                            <View style={styles.droppedPinDot} />
                         </MapboxGL.PointAnnotation>
                     )}
 
                     {/* Trip planner route overlay */}
                     {tripPlannerRoute && tripPlannerRoute.features.map((feature, idx) => (
-                        <MapboxGL.ShapeSource key={`trip-leg-${idx}`} id={`trip-leg-${idx}`} shape={{ type: 'Feature', properties: {}, geometry: feature.geometry }}>
-                            <MapboxGL.LineLayer id={`trip-leg-layer-${idx}`} style={{
-                                lineColor: feature.properties.color,
-                                lineWidth: feature.properties.mode === 'WALK' ? 3 : 5,
-                                lineOpacity: 0.9,
-                                lineDasharray: feature.properties.mode === 'WALK' ? [2, 3] : [],
-                            }} />
-                        </MapboxGL.ShapeSource>
+                        <React.Fragment key={`trip-leg-group-${idx}`}>
+                            {/* Outline / casing for better visibility */}
+                            <MapboxGL.ShapeSource key={`trip-leg-outline-${idx}`} id={`trip-leg-outline-${idx}`} shape={{ type: 'Feature', properties: {}, geometry: feature.geometry }}>
+                                <MapboxGL.LineLayer id={`trip-leg-outline-layer-${idx}`} style={{
+                                    lineColor: '#FFFFFF',
+                                    lineWidth: feature.properties.mode === 'WALK' ? 7 : 8,
+                                    lineOpacity: 0.85,
+                                    lineCap: 'round',
+                                    lineJoin: 'round',
+                                }} />
+                            </MapboxGL.ShapeSource>
+                            {/* Main colored line */}
+                            <MapboxGL.ShapeSource key={`trip-leg-${idx}`} id={`trip-leg-${idx}`} shape={{ type: 'Feature', properties: {}, geometry: feature.geometry }}>
+                                <MapboxGL.LineLayer id={`trip-leg-layer-${idx}`} style={{
+                                    lineColor: feature.properties.color,
+                                    lineWidth: feature.properties.mode === 'WALK' ? 4 : 5,
+                                    lineOpacity: 1,
+                                    lineCap: feature.properties.mode === 'WALK' ? 'butt' : 'round',
+                                    lineJoin: 'round',
+                                    lineDasharray: feature.properties.mode === 'WALK' ? [0.8, 1.8] : [],
+                                }} />
+                            </MapboxGL.ShapeSource>
+                        </React.Fragment>
                     ))}
+
+                    {/* Trip planner direction arrows */}
+                    {tripPlannerRoute && tripPlannerRoute.features.map((feature, idx) =>
+                        getDirectionArrowSamples(feature.geometry.coordinates, feature.properties.mode === 'WALK' ? 6 : 10).map((arrow, aIdx) => (
+                            <MapboxGL.PointAnnotation key={`trip-arrow-${idx}-${aIdx}`} id={`trip-arrow-${idx}-${aIdx}`} coordinate={arrow.coordinate}>
+                                <Text style={[styles.tripDirectionArrow, { color: feature.properties.mode === 'WALK' ? '#64748B' : feature.properties.color, transform: [{ rotate: `${arrow.headingDegrees}deg` }] }]}>{'\u25B2'}</Text>
+                            </MapboxGL.PointAnnotation>
+                        ))
+                    )}
+
+                    {/* Trip planner mode change markers */}
+                    {tripPlannerRoute && tripPlannerRoute.features.map((feature, idx) => {
+                        if (idx === 0) return null;
+                        const prevMode = tripPlannerRoute.features[idx - 1].properties.mode;
+                        const currMode = feature.properties.mode;
+                        if (prevMode === currMode) return null;
+                        const coord = feature.geometry.coordinates[0];
+                        const modeIcon = currMode === 'WALK' ? 'walk-outline' : currMode === 'BUS' ? 'bus-outline' : currMode === 'TRAM' ? 'train-outline' : currMode === 'TROLLEYBUS' ? 'bus-outline' : currMode === 'SUBWAY' ? 'subway-outline' : currMode === 'RAIL' ? 'train-outline' : 'swap-horizontal-outline';
+                        return (
+                            <MapboxGL.PointAnnotation key={`trip-mode-${idx}`} id={`trip-mode-${idx}`} coordinate={coord}>
+                                <View style={[styles.tripModeMarker, { borderColor: feature.properties.color }]}>
+                                    <Ionicons name={modeIcon as any} size={13} color={feature.properties.color} />
+                                </View>
+                            </MapboxGL.PointAnnotation>
+                        );
+                    })}
 
                     {/* Trip planner stops */}
                     {tripPlannerRoute && tripPlannerRoute.transitStops.map((stop, idx) => (
@@ -825,6 +962,43 @@ export default function MapScreen({
                     )}
                 </MapboxGL.MapView>
 
+                <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                        if (settingsAutoHideTimer.current) { clearTimeout(settingsAutoHideTimer.current); settingsAutoHideTimer.current = null; }
+                        if (settingsExpanded) {
+                            setSettingsVisible(true);
+                            setSettingsExpanded(false);
+                            Animated.timing(settingsSlideAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+                        } else {
+                            setSettingsExpanded(true);
+                            Animated.timing(settingsSlideAnim, {
+                                toValue: 1,
+                                duration: 250,
+                                easing: Easing.out(Easing.cubic),
+                                useNativeDriver: true,
+                            }).start();
+                            settingsAutoHideTimer.current = setTimeout(() => {
+                                setSettingsExpanded(false);
+                                Animated.timing(settingsSlideAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+                                settingsAutoHideTimer.current = null;
+                            }, 2000);
+                        }
+                    }}
+                    style={{ position: 'absolute', left: 0, bottom: 106, zIndex: 2 }}
+                >
+                    <Animated.View style={[styles.settingsNub, {
+                        transform: [{ translateX: settingsSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [-34, 0] }) }],
+                    }]}>
+                        <Animated.View style={{ opacity: settingsSlideAnim.interpolate({ inputRange: [0, 0.3], outputRange: [1, 0], extrapolate: 'clamp' }), position: 'absolute', right: 7 }}>
+                            <View style={styles.settingsNubLine} />
+                        </Animated.View>
+                        <Animated.View style={{ opacity: settingsSlideAnim.interpolate({ inputRange: [0.3, 0.8], outputRange: [0, 1], extrapolate: 'clamp' }) }}>
+                            <Ionicons name="settings-outline" size={20} color="#0F172A" />
+                        </Animated.View>
+                    </Animated.View>
+                </TouchableOpacity>
+
                 <View style={styles.floatingRowWrap}>
                     <ReminderCenterButton inline opaque={!!selectedStop.selectedStop || search.searchModalVisible || favorites.favoritesVisible || !!filterPanelVisible} />
                     {isActive && location && !userLocationVisible && (
@@ -839,17 +1013,17 @@ export default function MapScreen({
                 {/* Clear route buttons */}
                 {vehicleRoute.hasVehicleRoute && (
                     <TouchableOpacity style={styles.clearRouteButton} onPress={vehicleRoute.clearVehicleRoute}>
-                        <Text style={styles.clearRouteButtonText}>{'\u2715'}</Text>
+                        <Ionicons name="close" size={18} color="#334155" />
                     </TouchableOpacity>
                 )}
                 {tripPlannerRoute && onClearTripRoute && (
                     <TouchableOpacity style={[styles.clearRouteButton, { top: vehicleRoute.hasVehicleRoute ? 100 : 50 }]} onPress={onClearTripRoute}>
-                        <Text style={styles.clearRouteButtonText}>{'\u2715'}</Text>
+                        <Ionicons name="close" size={18} color="#334155" />
                     </TouchableOpacity>
                 )}
                 {!!highlightedRoute && !!onClearHighlightedRoute && !tripPlannerRoute && (
                     <TouchableOpacity style={[styles.clearRouteButton, { top: vehicleRoute.hasVehicleRoute ? 100 : 50 }]} onPress={onClearHighlightedRoute}>
-                        <Text style={styles.clearRouteButtonText}>{'\u2715'}</Text>
+                        <Ionicons name="close" size={18} color="#334155" />
                     </TouchableOpacity>
                 )}
 
@@ -905,6 +1079,8 @@ export default function MapScreen({
                     onCreate={favorites.createFavorite}
                     onRemove={favorites.removeFavorite}
                     onClose={() => favorites.setFavoritesVisible(false)}
+                    editRequestFavoriteId={editRequestFavoriteId}
+                    onEditRequestHandled={() => setEditRequestFavoriteId(null)}
                 />
 
                 {filterPanelVisible && !filters.isRouteMode && (
@@ -966,6 +1142,10 @@ export default function MapScreen({
                             onBuildRouteFromCoordinate(droppedPin.latitude, droppedPin.longitude, location?.coords.latitude, location?.coords.longitude);
                             setDroppedPin(null);
                         } : undefined}
+                        onEditLocation={droppedPinMatchingFavoriteId ? () => {
+                            setEditRequestFavoriteId(droppedPinMatchingFavoriteId);
+                            favorites.setFavoritesVisible(true);
+                        } : undefined}
                     />
                 )}
 
@@ -1010,6 +1190,7 @@ export default function MapScreen({
                 />
 
                 <ReportModal visible={reporting.reportModalVisible} onClose={reporting.closeReportModal} />
+                <SettingsModal visible={settingsVisible} onClose={() => setSettingsVisible(false)} />
             </View>
         </View>
     );
@@ -1019,7 +1200,6 @@ const styles = StyleSheet.create({
     page: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     container: { height: '100%', width: '100%', backgroundColor: '#F8FAFC' },
     map: { flex: 1 },
-    userDot: { width: 20, height: 20, backgroundColor: '#007AFF', borderRadius: 10, borderWidth: 3, borderColor: 'white' },
     vehicleMarkerWrap: { alignItems: 'center', justifyContent: 'center', zIndex: 10, elevation: 10 },
     stopDotBase: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.9)', elevation: 2, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 2 },
     stopDotBaseSelected: { backgroundColor: '#FFFFFF', transform: [{ scale: 1.35 }], shadowOpacity: 0.18, shadowRadius: 4, zIndex: 10 },
@@ -1028,27 +1208,25 @@ const styles = StyleSheet.create({
     stopDotSelected: { backgroundColor: '#1D4ED8', transform: [{ scale: 1.3 }] },
     stopLabelContainer: { position: 'absolute', bottom: 28, left: -60, width: 140, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center', elevation: 5, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
     stopLabelText: { color: '#0F172A', fontSize: 10, fontWeight: '700', textAlign: 'center' },
-    routeStopDot: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.9)' },
-    routeStopDotSelected: { backgroundColor: '#FFFFFF', transform: [{ scale: 1.3 }] },
-    routeStopText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
-    routeStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2, maxWidth: 120, elevation: 3, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
-    routeStopLabelSelected: { borderWidth: 1.5, borderColor: '#1D4ED8' },
+    routeStopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFFFFF', borderWidth: 2, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 2, elevation: 2 },
+    routeStopDotSelected: { width: 14, height: 14, borderRadius: 7, borderWidth: 2.5, transform: [{ scale: 1.15 }] },
+    routeStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginTop: 3, maxWidth: 120, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 3 },
     routeStopName: { fontSize: 9, fontWeight: '600', color: '#0F172A', textAlign: 'center' },
-    vehicleRouteStopDot: { width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' },
-    vehicleRouteStopDotSelected: { backgroundColor: '#FFFFFF', transform: [{ scale: 1.3 }] },
-    vehicleRouteStopText: { color: '#059669', fontSize: 8, fontWeight: '700' },
-    vehicleRouteStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2, maxWidth: 120, elevation: 3, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    vehicleRouteStopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#059669', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 2, elevation: 2 },
+    vehicleRouteStopDotSelected: { width: 14, height: 14, borderRadius: 7, borderWidth: 2.5, transform: [{ scale: 1.15 }] },
+    vehicleRouteStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginTop: 3, maxWidth: 120, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 3 },
     vehicleRouteStopName: { fontSize: 9, fontWeight: '600', color: '#0F172A', textAlign: 'center' },
     vehicleRouteStopTime: { fontSize: 9, fontWeight: '700', color: '#059669', textAlign: 'center' },
-    routeDirectionArrow: { fontSize: 22, fontWeight: '900', textShadowColor: 'rgba(255,255,255,0.95)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 2 },
-    droppedPinIcon: { fontSize: 28, lineHeight: 28, textShadowColor: 'rgba(220,38,38,0.35)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4 },
-    tripStopDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.9)' },
-    tripStopDotSelected: { backgroundColor: '#FFFFFF', transform: [{ scale: 1.3 }] },
-    tripEndpointMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#059669', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3, elevation: 5 },
+    routeDirectionArrow: { fontSize: 16, fontWeight: '900', textShadowColor: 'rgba(255,255,255,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+    tripDirectionArrow: { fontSize: 16, fontWeight: '900', textShadowColor: 'rgba(255,255,255,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+    tripModeMarker: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.25, shadowRadius: 3, elevation: 5 },
+    droppedPinDot: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#1D4ED8', borderWidth: 2.5, borderColor: '#FFFFFF', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 4 },
+    tripStopDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#FFFFFF', borderWidth: 2.5, borderColor: '#2563EB', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 3 },
+    tripStopDotSelected: { width: 18, height: 18, borderRadius: 9, borderWidth: 3, borderColor: '#1D4ED8', transform: [{ scale: 1.15 }] },
+    tripEndpointMarker: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#059669', alignItems: 'center', justifyContent: 'center', borderWidth: 2.5, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 4, elevation: 6 },
     tripEndpointMarkerEnd: { backgroundColor: '#DC2626' },
     tripEndpointText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
-    clearRouteButton: { position: 'absolute', top: 50, left: 16, backgroundColor: 'white', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 10, zIndex: 30 },
-    clearRouteButtonText: { fontSize: 20, color: '#E63946', fontWeight: '700' },
+    clearRouteButton: { position: 'absolute', top: 50, left: 16, backgroundColor: 'rgba(255,255,255,0.92)', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 4, zIndex: 30 },
     floatingRowWrap: {
         position: 'absolute',
         right: 16,
@@ -1058,6 +1236,26 @@ const styles = StyleSheet.create({
         gap: 8,
         zIndex: 0,
         elevation: 0,
+    },
+    settingsNub: {
+        width: 52,
+        height: 48,
+        borderTopRightRadius: 24,
+        borderBottomRightRadius: 24,
+        backgroundColor: 'rgba(255,255,255,0.82)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+        elevation: 1,
+    },
+    settingsNubLine: {
+        width: 3.5,
+        height: 18,
+        borderRadius: 2,
+        backgroundColor: 'rgba(15,23,42,0.18)',
     },
     recenterFloatingButton: {
         height: 48,
