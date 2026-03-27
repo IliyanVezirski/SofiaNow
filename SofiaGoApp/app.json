@@ -1,5 +1,6 @@
 {
   "expo": {
+    "owner": "iliaynski90",
     "name": "SofiaGo",
     "slug": "SofiaGoApp",
     "version": "1.0.0",
@@ -53,7 +54,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "c4a2bbe7-4780-4338-a307-908bae73f2fc"
+        "projectId": "7d3194fc-e8b2-4dc1-8304-3dac9f853f79"
       }
     }
   }
