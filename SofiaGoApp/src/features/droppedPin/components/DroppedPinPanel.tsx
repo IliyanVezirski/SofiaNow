@@ -8,9 +8,10 @@ interface Props {
     onSaveFavorite?: () => void;
     onBuildRoute?: () => void;
     onEditLocation?: () => void;
+    primaryActionLabel?: string;
 }
 
-export const DroppedPinPanel: React.FC<Props> = ({ pin, onClose, onSaveFavorite, onBuildRoute, onEditLocation }) => (
+export const DroppedPinPanel: React.FC<Props> = ({ pin, onClose, onSaveFavorite, onBuildRoute, onEditLocation, primaryActionLabel }) => (
     <View style={styles.panel}>
         <View style={styles.header}>
             <Text style={styles.title}>{`${pin.latitude.toFixed(5)}, ${pin.longitude.toFixed(5)}`}</Text>
@@ -34,7 +35,7 @@ export const DroppedPinPanel: React.FC<Props> = ({ pin, onClose, onSaveFavorite,
             {onBuildRoute && (
                 <TouchableOpacity style={[styles.actionBtn, styles.actionBtnRoute]} onPress={onBuildRoute}>
                     <Ionicons name="navigate-outline" size={14} color="#FFFFFF" />
-                    <Text style={[styles.actionBtnText, styles.actionBtnTextRoute]}>Маршрут</Text>
+                    <Text style={[styles.actionBtnText, styles.actionBtnTextRoute]}>{primaryActionLabel ?? 'Маршрут'}</Text>
                 </TouchableOpacity>
             )}
         </View>

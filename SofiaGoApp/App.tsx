@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { AppState, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import * as NavigationBar from 'expo-navigation-bar';
@@ -13,6 +14,15 @@ import { TripLocation } from './src/services/tripPlanner';
 import { initializeTransitArrivalNotifications, refreshTransitArrivalReminders } from './src/services/notifications/transitArrivalNotifications';
 import { ensureTransitReminderBackgroundTaskRegistered } from './src/services/notifications/transitReminderBackgroundTask';
 import { ReminderCenterButton } from './src/features/notifications/components/ReminderCenterButton';
+import { MapExperienceMode } from './src/features/map/components/MapModeSwitcher';
+import { ParkingCarsScreen } from './src/features/parkingZones/components/ParkingCarsScreen';
+import { ParkingPaymentScreen } from './src/features/parkingZones/components/ParkingPaymentScreen';
+import { ParkingLotsScreen } from './src/features/parkingZones/components/ParkingLotsModal';
+import { ParkingZonesScreen } from './src/features/parkingZones/components/ParkingZonesScreen';
+import { useParkingCatalog } from './src/features/parkingZones/hooks/useParkingCatalog';
+import { useParkingCars } from './src/features/parkingZones/hooks/useParkingCars';
+import { parkingZonesFeatureCollection } from './src/features/parkingZones/data/parkingZones.static';
+import type { ParkingZoneGeometry, ParkingZoneId } from './src/features/parkingZones/types';
 import { loadFavoritePlaces, reconcileFavoriteCommuteNotifications } from './src/services/places';
 import { TripRouteGeoJSON } from './src/features/tripPlanner/utils/routeGeoJson';
 import { FAVORITE_COMMUTE_ROUTE_NOTIFICATION_ACTION_SHOW_ROUTE } from './src/services/notifications/commuteRouteNotifications';
@@ -32,6 +42,51 @@ type HomeActionButton = {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
+  active?: boolean;
+};
+
+type ParkingActionKey = 'zone' | 'pay' | 'lots' | 'search' | 'cars';
+
+const MAP_EXPERIENCE_MODE_STORAGE_KEY = '@sofiago:map:experience-mode:v1';
+const PARKING_ACTION_KEY_STORAGE_KEY = '@sofiago:parking:action:v1';
+const DEFAULT_MAP_EXPERIENCE_MODE: MapExperienceMode = 'transit';
+const DEFAULT_PARKING_ACTION_KEY: ParkingActionKey = 'pay';
+
+const isParkingActionKey = (value: string): value is ParkingActionKey => value === 'zone' || value === 'pay' || value === 'lots' || value === 'search' || value === 'cars';
+
+type MapCameraBounds = {
+  ne: [number, number];
+  sw: [number, number];
+};
+
+const collectZoneCoordinates = (geometry: ParkingZoneGeometry): [number, number][] => {
+  if (geometry.type === 'Polygon') {
+    return geometry.coordinates.flatMap((ring) => ring);
+  }
+
+  return geometry.coordinates.flatMap((polygon) => polygon.flatMap((ring) => ring));
+};
+
+const buildZoneCameraBounds = (geometry: ParkingZoneGeometry): MapCameraBounds | null => {
+  const points = collectZoneCoordinates(geometry).filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+  if (!points.length) {
+    return null;
+  }
+
+  const longitudes = points.map((point) => point[0]);
+  const latitudes = points.map((point) => point[1]);
+  const west = Math.min(...longitudes);
+  const east = Math.max(...longitudes);
+  const south = Math.min(...latitudes);
+  const north = Math.max(...latitudes);
+
+  const latPadding = Math.max((north - south) * 0.14, 0.0012);
+  const lonPadding = Math.max((east - west) * 0.14, 0.0016);
+
+  return {
+    ne: [east + lonPadding, north + latPadding],
+    sw: [west - lonPadding, south - latPadding],
+  };
 };
 
 const extractDelayHighlight = (body: string | null | undefined) => {
@@ -154,16 +209,18 @@ export default function App() {
       .catch(() => undefined);
 
     const notificationResponseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      const favoriteId = String((response.notification.request.content.data as { favoriteId?: unknown } | undefined)?.favoriteId || '').trim();
-      if (response.actionIdentifier === FAVORITE_COMMUTE_ROUTE_NOTIFICATION_ACTION_SHOW_ROUTE) {
-        void showFavoriteRouteFromNotification(favoriteId).finally(() => {
-          void Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
-        });
-        return;
-      }
+      void (async () => {
+        const favoriteId = String((response.notification.request.content.data as { favoriteId?: unknown } | undefined)?.favoriteId || '').trim();
+        if (response.actionIdentifier === FAVORITE_COMMUTE_ROUTE_NOTIFICATION_ACTION_SHOW_ROUTE) {
+          void showFavoriteRouteFromNotification(favoriteId).finally(() => {
+            void Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+          });
+          return;
+        }
 
-      openNotificationModal(response);
-      void Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+        openNotificationModal(response);
+        void Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+      })();
     });
 
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
@@ -192,8 +249,87 @@ export default function App() {
   const [plannerInitialFromToken, setPlannerInitialFromToken] = useState(0);
   const [searchVisible, setSearchVisible] = useState(false);
   const [favoritesVisible, setFavoritesVisible] = useState(false);
+  const [mapExperienceMode, setMapExperienceMode] = useState<MapExperienceMode>(DEFAULT_MAP_EXPERIENCE_MODE);
+  const [parkingActionKey, setParkingActionKey] = useState<ParkingActionKey>(DEFAULT_PARKING_ACTION_KEY);
+  const [parkingZonesVisible, setParkingZonesVisible] = useState(false);
+  const [parkingPaymentVisible, setParkingPaymentVisible] = useState(false);
+  const [parkingLotsVisible, setParkingLotsVisible] = useState(false);
+  const [parkingCarsVisible, setParkingCarsVisible] = useState(false);
+  const [parkingDetectedZoneId, setParkingDetectedZoneId] = useState<ParkingZoneId | null>(null);
+  const [focusedParkingZoneFeatureId, setFocusedParkingZoneFeatureId] = useState<string | null>(null);
+  const [focusParkingZoneBounds, setFocusParkingZoneBounds] = useState<MapCameraBounds | null>(null);
+  const [focusParkingZoneToken, setFocusParkingZoneToken] = useState(0);
+  const [navigationPrefsHydrated, setNavigationPrefsHydrated] = useState(false);
+  const parkingCatalog = useParkingCatalog();
+  const parkingCars = useParkingCars();
 
-  const homeActionButtons: HomeActionButton[] = [
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const [storedMode, storedParkingAction] = await Promise.all([
+          AsyncStorage.getItem(MAP_EXPERIENCE_MODE_STORAGE_KEY),
+          AsyncStorage.getItem(PARKING_ACTION_KEY_STORAGE_KEY),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextMode = storedMode === 'parking' || storedMode === 'transit' ? storedMode : null;
+        const nextParkingAction = storedParkingAction && isParkingActionKey(storedParkingAction) ? storedParkingAction : null;
+
+        if (nextMode) {
+          setMapExperienceMode(nextMode);
+        } else {
+          setMapExperienceMode(DEFAULT_MAP_EXPERIENCE_MODE);
+        }
+
+        if (nextParkingAction) {
+          setParkingActionKey(nextParkingAction);
+
+          if (nextMode === 'parking' && nextParkingAction === 'lots') {
+            setParkingLotsVisible(true);
+          }
+        } else {
+          setParkingActionKey(DEFAULT_PARKING_ACTION_KEY);
+        }
+      } catch (error) {
+        console.warn('Failed to load navigation preferences:', error);
+      } finally {
+        if (!cancelled) {
+          setNavigationPrefsHydrated(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!navigationPrefsHydrated) {
+      return;
+    }
+
+    void AsyncStorage.setItem(MAP_EXPERIENCE_MODE_STORAGE_KEY, mapExperienceMode).catch((error) => {
+      console.warn('Failed to save map experience mode:', error);
+    });
+  }, [mapExperienceMode, navigationPrefsHydrated]);
+
+  useEffect(() => {
+    if (!navigationPrefsHydrated) {
+      return;
+    }
+
+    void AsyncStorage.setItem(PARKING_ACTION_KEY_STORAGE_KEY, parkingActionKey).catch((error) => {
+      console.warn('Failed to save parking action:', error);
+    });
+  }, [navigationPrefsHydrated, parkingActionKey]);
+
+  const transitHomeActionButtons: HomeActionButton[] = [
     {
       key: 'nearby',
       label: 'До мен',
@@ -248,11 +384,97 @@ export default function App() {
     },
   ];
 
+  const hasDetectedParkingZone = !!parkingDetectedZoneId;
+  const hasOpenParkingPanel = parkingZonesVisible || parkingPaymentVisible || parkingLotsVisible || parkingCarsVisible;
+  const allowParkingActionHighlight = hasDetectedParkingZone || hasOpenParkingPanel;
+
+  const parkingHomeActionButtons: HomeActionButton[] = [
+    {
+      key: 'zone',
+      label: 'Зони',
+      icon: 'map-outline',
+      active: allowParkingActionHighlight && parkingActionKey === 'zone',
+      onPress: () => {
+        setActiveTab('map');
+        setParkingActionKey('zone');
+        setParkingCarsVisible(false);
+        setParkingPaymentVisible(false);
+        setParkingLotsVisible(false);
+        setParkingZonesVisible(true);
+      },
+    },
+    {
+      key: 'pay',
+      label: 'Плати',
+      icon: 'card-outline',
+      active: allowParkingActionHighlight && parkingActionKey === 'pay',
+      onPress: () => {
+        setActiveTab('map');
+        setParkingActionKey('pay');
+        setParkingZonesVisible(false);
+        setParkingCarsVisible(false);
+        setParkingLotsVisible(false);
+        setParkingPaymentVisible(true);
+      },
+    },
+    {
+      key: 'lots',
+      label: 'Паркинги',
+      icon: 'business-outline',
+      active: allowParkingActionHighlight && parkingActionKey === 'lots',
+      onPress: () => {
+        setActiveTab('map');
+        setParkingActionKey('lots');
+        setParkingZonesVisible(false);
+        setParkingCarsVisible(false);
+        setParkingPaymentVisible(false);
+        setParkingLotsVisible(true);
+      },
+    },
+    {
+      key: 'search',
+      label: 'Търсене',
+      icon: 'search-outline',
+      active: searchVisible,
+      onPress: () => {
+        setActiveTab('map');
+        setParkingActionKey('search');
+        setParkingZonesVisible(false);
+        setParkingCarsVisible(false);
+        setParkingLotsVisible(false);
+        setParkingPaymentVisible(false);
+        setMapFiltersVisible(false);
+        setDismissTransientPanelsToken((prev) => prev + 1);
+        setTimeout(() => setOpenSearchToken((prev) => prev + 1), 0);
+      },
+    },
+    {
+      key: 'cars',
+      label: 'Моите коли',
+      icon: 'car-outline',
+      active: allowParkingActionHighlight && parkingActionKey === 'cars',
+      onPress: () => {
+        setActiveTab('map');
+        setParkingActionKey('cars');
+        setParkingZonesVisible(false);
+        setParkingLotsVisible(false);
+        setParkingPaymentVisible(false);
+        setParkingCarsVisible(true);
+      },
+    },
+  ];
+
+  const homeActionButtons = activeTab === 'map' && mapExperienceMode === 'parking'
+    ? parkingHomeActionButtons
+    : transitHomeActionButtons;
+
   return (
     <View style={styles.container}>
       <View style={styles.screenWrap}>
         <MapScreen
           isActive={activeTab === 'map' || activeTab === 'nearby' || activeTab === 'schedules' || activeTab === 'planner'}
+          parkingLots={parkingCatalog.lots}
+          preferredMapExperienceMode={mapExperienceMode}
           highlightedRoute={selectedRoute}
           onClearHighlightedRoute={() => setSelectedRoute(null)}
           showReportButton={false}
@@ -269,10 +491,19 @@ export default function App() {
           dismissTransientPanelsToken={dismissTransientPanelsToken}
           focusStopCoordinate={focusStopCoordinate}
           focusStopId={focusStopId}
+          focusedParkingZoneFeatureId={focusedParkingZoneFeatureId}
+          focusParkingZoneBounds={focusParkingZoneBounds}
+          focusParkingZoneToken={focusParkingZoneToken}
+          onClearFocusedParkingZone={() => {
+            setFocusedParkingZoneFeatureId(null);
+            setFocusParkingZoneBounds(null);
+          }}
           tripPlannerRoute={tripPlannerRoute}
           onClearTripRoute={() => setTripPlannerRoute(null)}
           onSearchVisibilityChange={setSearchVisible}
           onFavoritesVisibilityChange={setFavoritesVisible}
+          onMapExperienceModeChange={setMapExperienceMode}
+          onParkingZoneChange={setParkingDetectedZoneId}
           onBuildRouteFromCoordinate={(destinationLatitude, destinationLongitude, currentLatitude, currentLongitude) => {
             if (Number.isFinite(currentLatitude) && Number.isFinite(currentLongitude)) {
               setPlannerInitialFrom({
@@ -362,14 +593,86 @@ export default function App() {
             </View>
           </View>
         )}
+        {parkingLotsVisible && (
+          <View style={styles.nearbyPopupOverlay}>
+            <Pressable style={styles.nearbyPopupBackdrop} onPress={() => setParkingLotsVisible(false)} />
+            <View style={styles.schedulesPopupCard}>
+              <ParkingLotsScreen
+                parkingLots={parkingCatalog.lots}
+                onClose={() => setParkingLotsVisible(false)}
+              />
+            </View>
+          </View>
+        )}
+        {parkingZonesVisible && (
+          <View style={styles.nearbyPopupOverlay}>
+            <Pressable style={styles.nearbyPopupBackdrop} onPress={() => setParkingZonesVisible(false)} />
+            <View style={styles.schedulesPopupCard}>
+              <ParkingZonesScreen
+                selectedZoneFeatureId={focusedParkingZoneFeatureId}
+                onClose={() => setParkingZonesVisible(false)}
+                onShowZoneOnMap={(zoneFeatureId) => {
+                  const selectedZone = parkingZonesFeatureCollection.features.find((feature) => feature.properties.id === zoneFeatureId) ?? null;
+                  const nextBounds = selectedZone ? buildZoneCameraBounds(selectedZone.geometry) : null;
+
+                  if (!nextBounds) {
+                    return;
+                  }
+
+                  setFocusedParkingZoneFeatureId(zoneFeatureId);
+                  setFocusParkingZoneBounds(nextBounds);
+                  setFocusParkingZoneToken((value) => value + 1);
+                  setParkingActionKey('zone');
+                  setActiveTab('map');
+                  setParkingZonesVisible(false);
+                }}
+              />
+            </View>
+          </View>
+        )}
+        {parkingPaymentVisible && (
+          <View style={styles.nearbyPopupOverlay}>
+            <Pressable style={styles.nearbyPopupBackdrop} onPress={() => setParkingPaymentVisible(false)} />
+            <View style={styles.schedulesPopupCard}>
+              <ParkingPaymentScreen
+                cars={parkingCars.cars}
+                defaultZoneId={parkingDetectedZoneId}
+                onClose={() => setParkingPaymentVisible(false)}
+                onOpenManageCars={() => {
+                  setParkingPaymentVisible(false);
+                  setParkingActionKey('cars');
+                  setParkingCarsVisible(true);
+                }}
+              />
+            </View>
+          </View>
+        )}
+        {parkingCarsVisible && (
+          <View style={styles.nearbyPopupOverlay}>
+            <Pressable style={styles.nearbyPopupBackdrop} onPress={() => setParkingCarsVisible(false)} />
+            <View style={styles.schedulesPopupCard}>
+              <ParkingCarsScreen
+                cars={parkingCars.cars}
+                loading={parkingCars.loading}
+                onAddCar={parkingCars.addCar}
+                onRemoveCar={parkingCars.removeCar}
+                onUpdateCar={parkingCars.updateCar}
+                onSetDefaultCar={parkingCars.setDefaultCar}
+                onClose={() => setParkingCarsVisible(false)}
+              />
+            </View>
+          </View>
+        )}
       </View>
 
       <View style={styles.homeActionBarWrap}>
         <View style={styles.homeActionBar}>
           {homeActionButtons.map((button) => {
-            const isActive = button.key === activeTab
-              || (button.key === 'search' && searchVisible)
-              || (button.key === 'favorites' && favoritesVisible);
+            const isActive = typeof button.active === 'boolean'
+              ? button.active
+              : button.key === activeTab
+                || (button.key === 'search' && searchVisible)
+                || (button.key === 'favorites' && favoritesVisible);
             return (
               <TouchableOpacity
                 key={button.key}
@@ -490,7 +793,8 @@ const styles = StyleSheet.create({
     paddingTop: 78,
     paddingHorizontal: 12,
     paddingBottom: 80,
-    zIndex: 40,
+    zIndex: 2000,
+    elevation: 2000,
   },
   nearbyPopupBackdrop: {
     ...StyleSheet.absoluteFillObject,

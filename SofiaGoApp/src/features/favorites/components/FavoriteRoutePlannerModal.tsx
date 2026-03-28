@@ -347,6 +347,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
     const [planType, setPlanType] = useState<PlanType>('0');
     const [routeDateInput, setRouteDateInput] = useState(formatDateForInput(initialNow));
     const [routeTimeInput, setRouteTimeInput] = useState(formatTimeForInput(initialNow));
+    const [arriveBy, setArriveBy] = useState(true);
     const [reminderOffsetMinutes, setReminderOffsetMinutes] = useState<number>(5);
     const [reminderWeekdays, setReminderWeekdays] = useState<FavoriteCommuteWeekday[]>(FAVORITE_COMMUTE_WEEKDAY_OPTIONS.map((option) => option.value));
     const [itineraries, setItineraries] = useState<Itinerary[]>([]);
@@ -494,7 +495,6 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
     }
 
     const existingPlan = targetFavorite.defaultCommute;
-    const arriveBy = true;
     const canPlanRoute = Number.isFinite(originLatitude) && Number.isFinite(originLongitude) && Number.isFinite(destinationLatitude) && Number.isFinite(destinationLongitude);
     const isOriginAtCurrentLocation = !!currentLocation
         && Number.isFinite(originLatitude)
@@ -565,7 +565,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                 type: planType,
                 date: formatDateForApi(parsedDate),
                 time: routeTimeInput.trim(),
-                arriveBy: true,
+                arriveBy,
             });
             if (!result.length) {
                 setError('Не е намерен маршрут.');
@@ -835,6 +835,24 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                     <Text style={[styles.optionChipText, planType === type && styles.optionChipTextActive]}>{PLAN_LABELS[type]}</Text>
                                 </TouchableOpacity>
                             ))}
+                        </View>
+
+                        {/* Arrive by / Depart at */}
+                        <View style={styles.arriveByRow}>
+                            <TouchableOpacity
+                                style={[styles.arriveByChip, !arriveBy && styles.arriveByChipActive]}
+                                onPress={() => setArriveBy(false)}
+                            >
+                                <Ionicons name="arrow-forward-outline" size={13} color={!arriveBy ? '#FFFFFF' : '#475569'} />
+                                <Text style={[styles.arriveByChipText, !arriveBy && styles.arriveByChipTextActive]}>Тръгване в</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.arriveByChip, arriveBy && styles.arriveByChipActive]}
+                                onPress={() => setArriveBy(true)}
+                            >
+                                <Ionicons name="flag-outline" size={13} color={arriveBy ? '#FFFFFF' : '#475569'} />
+                                <Text style={[styles.arriveByChipText, arriveBy && styles.arriveByChipTextActive]}>Пристигане до</Text>
+                            </TouchableOpacity>
                         </View>
 
                         {/* Date & Time — inline with quick actions */}
@@ -1154,6 +1172,11 @@ const styles = StyleSheet.create({
     optionChipTextActive: { color: '#FFFFFF' },
 
     /* Date/Time */
+    arriveByRow: { flexDirection: 'row', gap: 6, marginBottom: 2 },
+    arriveByChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, backgroundColor: 'rgba(241,245,249,0.8)' },
+    arriveByChipActive: { backgroundColor: '#1D4ED8' },
+    arriveByChipText: { fontSize: 12, fontWeight: '700', color: '#475569' },
+    arriveByChipTextActive: { color: '#FFFFFF' },
     dateTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     dateTimeInputWrap: { flex: 1 },
     timeInputWrap: { width: 80 },

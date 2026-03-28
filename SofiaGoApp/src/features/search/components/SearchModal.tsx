@@ -8,12 +8,14 @@ interface Props {
     query: string;
     loading: boolean;
     results: CentralSearchResult[];
+    placeholder?: string;
+    allowSaveFavorite?: boolean;
     onChangeQuery: (q: string) => void;
     onClose: () => void;
     onSelectPlace: (result: CentralSearchResult & { kind: 'place' }) => void;
     onSelectLine: (result: CentralSearchResult & { kind: 'line' }) => void;
     onSelectStop: (result: CentralSearchResult & { kind: 'stop' }) => void;
-    onSaveFavorite: (name: string, lat: number, lon: number) => void;
+    onSaveFavorite: (name: string, lat: number, lon: number) => void | Promise<void>;
 }
 
 const kindIcon = (kind: string): keyof typeof Ionicons.glyphMap => {
@@ -26,22 +28,23 @@ const kindIcon = (kind: string): keyof typeof Ionicons.glyphMap => {
 };
 
 export const SearchModal: React.FC<Props> = ({
-    visible, query, loading, results, onChangeQuery, onClose,
+    visible, query, loading, results, placeholder, allowSaveFavorite = true, onChangeQuery, onClose,
     onSelectPlace, onSelectLine, onSelectStop, onSaveFavorite,
 }) => {
     if (!visible) return null;
     return (
-        <Pressable style={styles.overlay} onPress={onClose}>
-            <View style={styles.card} onStartShouldSetResponder={() => true}>
+        <View style={styles.overlay}>
+            <Pressable style={styles.backdrop} onPress={onClose} />
+            <View style={styles.card}>
                 <View style={styles.header}>
                     <Text style={styles.headerTitle}>Търсене</Text>
                     <Pressable onPress={onClose} style={styles.closeButton}>
                         <Ionicons name="close" size={18} color="#334155" />
                     </Pressable>
                 </View>
-                <TextInput style={styles.input} placeholder="Търси адрес, линия или спирка..." placeholderTextColor="#94A3B8" value={query} onChangeText={onChangeQuery} />
+                <TextInput style={styles.input} placeholder={placeholder ?? 'Търси адрес, линия или спирка...'} placeholderTextColor="#94A3B8" value={query} onChangeText={onChangeQuery} />
                 {(loading || results.length > 0) && (
-                    <ScrollView style={styles.results} showsVerticalScrollIndicator nestedScrollEnabled>
+                    <ScrollView style={styles.results} showsVerticalScrollIndicator nestedScrollEnabled keyboardShouldPersistTaps="handled">
                         {loading && <Text style={styles.status}>Търсене...</Text>}
                         {!loading && results.map((result, idx) => {
                             if (result.kind === 'place') {
@@ -52,9 +55,11 @@ export const SearchModal: React.FC<Props> = ({
                                             <Text style={styles.resultTitle} numberOfLines={1}>{result.name}</Text>
                                             <Text style={styles.resultSubtitle} numberOfLines={1}>{result.subtitle}</Text>
                                         </TouchableOpacity>
-                                        <TouchableOpacity style={styles.favBtn} onPress={() => onSaveFavorite(result.name, result.latitude, result.longitude)}>
-                                            <Ionicons name="star-outline" size={16} color="#1D4ED8" />
-                                        </TouchableOpacity>
+                                        {allowSaveFavorite && (
+                                            <TouchableOpacity hitSlop={8} style={styles.favBtn} onPress={() => { void onSaveFavorite(result.name, result.latitude, result.longitude); }}>
+                                                <Ionicons name="star-outline" size={16} color="#1D4ED8" />
+                                            </TouchableOpacity>
+                                        )}
                                     </View>
                                 );
                             }
@@ -82,12 +87,13 @@ export const SearchModal: React.FC<Props> = ({
                     </ScrollView>
                 )}
             </View>
-        </Pressable>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
     overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.18)', justifyContent: 'flex-start', paddingTop: 78, paddingHorizontal: 12, zIndex: 50 },
+    backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
     card: { backgroundColor: 'rgba(255,255,255,0.82)', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 14, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.12, shadowRadius: 28, elevation: 10 },
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
     headerTitle: { color: '#0F172A', fontSize: 16, fontWeight: '700' },

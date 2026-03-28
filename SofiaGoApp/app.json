@@ -21,7 +21,7 @@
         "backgroundColor": "#ffffff"
       },
       "notification": {
-        "icon": "./assets/app-icon-new.png",
+        "icon": "./assets/android-icon-monochrome.png",
         "color": "#0F766E"
       },
       "package": "com.iliyanvezirski.SofiaGoApp"
@@ -41,7 +41,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/app-icon-new.png",
+          "icon": "./assets/android-icon-monochrome.png",
           "color": "#0F766E",
           "defaultChannel": "transit-arrivals-v2"
         }
