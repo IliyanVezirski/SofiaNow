@@ -110,12 +110,13 @@ export const validateParkingCarPlate = (value: string): ParkingCarPlateValidatio
         };
     }
 
-    if (normalizedPlate.length < 6 || normalizedPlate.length > 10) {
+    // Bulgarian plate format: 1-2 letters + 4 digits + 2 letters (e.g. CB1234AB, E1234AB)
+    if (!/^[A-Z]{1,2}\d{4}[A-Z]{2}$/.test(normalizedPlate)) {
         return {
             isValid: false,
             normalizedPlate,
             displayPlate,
-            error: 'Номерът трябва да е между 6 и 10 символа в SMS формат.',
+            error: 'Буквите трябва да са латински - XX9999XX',
         };
     }
 

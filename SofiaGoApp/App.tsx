@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { AppState, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
@@ -131,6 +131,7 @@ export default function App() {
 
     if (commutePlan.routeGeoJson) {
       setTripPlannerRoute(commutePlan.routeGeoJson);
+      setTripRouteSource('favorites');
       setMapFiltersVisible(false);
       setDismissTransientPanelsToken((value) => value + 1);
       setActiveTab('map');
@@ -244,6 +245,7 @@ export default function App() {
   const [focusStopCoordinate, setFocusStopCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
   const [focusStopId, setFocusStopId] = useState<string | null>(null);
   const [tripPlannerRoute, setTripPlannerRoute] = useState<TripRouteGeoJSON | null>(null);
+  const [tripRouteSource, setTripRouteSource] = useState<'planner' | 'favorites' | null>(null);
   const [plannerInitialFrom, setPlannerInitialFrom] = useState<TripLocation | null>(null);
   const [plannerInitialTo, setPlannerInitialTo] = useState<TripLocation | null>(null);
   const [plannerInitialFromToken, setPlannerInitialFromToken] = useState(0);
@@ -400,6 +402,7 @@ export default function App() {
         setParkingCarsVisible(false);
         setParkingPaymentVisible(false);
         setParkingLotsVisible(false);
+        setDismissTransientPanelsToken((prev) => prev + 1);
         setParkingZonesVisible(true);
       },
     },
@@ -414,6 +417,7 @@ export default function App() {
         setParkingZonesVisible(false);
         setParkingCarsVisible(false);
         setParkingLotsVisible(false);
+        setDismissTransientPanelsToken((prev) => prev + 1);
         setParkingPaymentVisible(true);
       },
     },
@@ -428,6 +432,7 @@ export default function App() {
         setParkingZonesVisible(false);
         setParkingCarsVisible(false);
         setParkingPaymentVisible(false);
+        setDismissTransientPanelsToken((prev) => prev + 1);
         setParkingLotsVisible(true);
       },
     },
@@ -459,6 +464,7 @@ export default function App() {
         setParkingZonesVisible(false);
         setParkingLotsVisible(false);
         setParkingPaymentVisible(false);
+        setDismissTransientPanelsToken((prev) => prev + 1);
         setParkingCarsVisible(true);
       },
     },
@@ -467,6 +473,22 @@ export default function App() {
   const homeActionButtons = activeTab === 'map' && mapExperienceMode === 'parking'
     ? parkingHomeActionButtons
     : transitHomeActionButtons;
+  const plannerVisible = activeTab === 'planner';
+
+  const handleCloseShownTripRoute = useCallback(() => {
+    setTripPlannerRoute(null);
+    if (tripRouteSource === 'favorites') {
+      setTripRouteSource(null);
+      setActiveTab('map');
+      if (!favoritesVisible) {
+        setTimeout(() => setToggleFavoritesToken((value) => value + 1), 0);
+      }
+      return;
+    }
+
+    setTripRouteSource(null);
+    setActiveTab('planner');
+  }, [favoritesVisible, tripRouteSource]);
 
   return (
     <View style={styles.container}>
@@ -480,8 +502,9 @@ export default function App() {
           showReportButton={false}
           filterPanelVisible={mapFiltersVisible}
           onCloseFilterPanel={() => setMapFiltersVisible(false)}
-          onShowTripRoute={(route) => {
+          onShowTripRoute={(route, source) => {
             setTripPlannerRoute(route);
+            setTripRouteSource(source === 'favorites' ? 'favorites' : 'planner');
             setMapFiltersVisible(false);
             setDismissTransientPanelsToken((value) => value + 1);
             setActiveTab('map');
@@ -499,7 +522,7 @@ export default function App() {
             setFocusParkingZoneBounds(null);
           }}
           tripPlannerRoute={tripPlannerRoute}
-          onClearTripRoute={() => setTripPlannerRoute(null)}
+          onClearTripRoute={handleCloseShownTripRoute}
           onSearchVisibilityChange={setSearchVisible}
           onFavoritesVisibilityChange={setFavoritesVisible}
           onMapExperienceModeChange={setMapExperienceMode}
@@ -542,24 +565,23 @@ export default function App() {
             </View>
           </View>
         )}
-        {activeTab === 'planner' && (
-          <View style={styles.nearbyPopupOverlay}>
-            <Pressable style={styles.nearbyPopupBackdrop} onPress={() => setActiveTab('map')} />
-            <View style={styles.plannerPopupCard}>
-              <TripPlannerScreen
-                onClose={() => setActiveTab('map')}
-                isActive={activeTab === 'planner'}
-                initialFromLocation={plannerInitialFrom}
-                initialToLocation={plannerInitialTo}
-                initialFromToken={plannerInitialFromToken}
-                onShowOnMap={(route) => {
-                  setTripPlannerRoute(route);
-                  setActiveTab('map');
-                }}
-              />
-            </View>
+        <View style={[styles.nearbyPopupOverlay, !plannerVisible && styles.hiddenPersistentOverlay]} pointerEvents={plannerVisible ? 'auto' : 'none'}>
+          <Pressable style={styles.nearbyPopupBackdrop} onPress={() => setActiveTab('map')} />
+          <View style={styles.plannerPopupCard}>
+            <TripPlannerScreen
+              onClose={() => setActiveTab('map')}
+              isActive={plannerVisible}
+              initialFromLocation={plannerInitialFrom}
+              initialToLocation={plannerInitialTo}
+              initialFromToken={plannerInitialFromToken}
+              onShowOnMap={(route) => {
+                setTripPlannerRoute(route);
+                setTripRouteSource('planner');
+                setActiveTab('map');
+              }}
+            />
           </View>
-        )}
+        </View>
         {activeTab === 'nearby' && (
           <View style={styles.nearbyPopupOverlay}>
             <Pressable style={styles.nearbyPopupBackdrop} onPress={() => setActiveTab('map')} />
@@ -796,6 +818,9 @@ const styles = StyleSheet.create({
     zIndex: 2000,
     elevation: 2000,
   },
+  hiddenPersistentOverlay: {
+    display: 'none',
+  },
   nearbyPopupBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15, 23, 42, 0.18)',
@@ -822,8 +847,8 @@ const styles = StyleSheet.create({
     left: 14,
     right: 14,
     bottom: 18,
-    zIndex: 999,
-    elevation: 999,
+    zIndex: 5000,
+    elevation: 5000,
   },
   homeActionBar: {
     flexDirection: 'row',

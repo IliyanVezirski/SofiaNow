@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FAVORITE_COMMUTE_NOTIFICATION_SCHEDULE_VERSION, FAVORITE_COMMUTE_WEEKDAY_OPTIONS, FavoriteCommutePlan, FavoriteCommuteRouteLineTab, FavoriteCommuteWeekday, FavoriteLinePreference, FavoritePlace, formatFavoriteCommuteWeekdays, hasFavoriteCoordinates, resolveFavoriteCommuteNotificationWeekdays } from '../../../services/places';
 import { Itinerary, ItineraryLeg, PlanType, TripLocation, planTrip, searchLocations as searchTripLocations } from '../../../services/tripPlanner';
@@ -55,7 +55,16 @@ const fmtDuration = (secs: number) => {
     return `${Math.floor(minutes / 60)} ч ${minutes % 60} мин`;
 };
 
-const REMINDER_OFFSET_OPTIONS = [5, 10] as const;
+const normalizeReminderOffsetInput = (value: string) => value.replace(/[^\d]/g, '').slice(0, 3);
+
+const parseReminderOffsetMinutes = (value: unknown) => {
+    const normalized = Math.round(Number(value));
+    if (!Number.isFinite(normalized) || normalized < 1 || normalized > 120) {
+        return null;
+    }
+
+    return normalized;
+};
 
 const formatDateForApi = (date: Date) => {
     const year = date.getFullYear();
@@ -349,6 +358,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
     const [routeTimeInput, setRouteTimeInput] = useState(formatTimeForInput(initialNow));
     const [arriveBy, setArriveBy] = useState(true);
     const [reminderOffsetMinutes, setReminderOffsetMinutes] = useState<number>(5);
+    const [reminderOffsetInput, setReminderOffsetInput] = useState('5');
     const [reminderWeekdays, setReminderWeekdays] = useState<FavoriteCommuteWeekday[]>(FAVORITE_COMMUTE_WEEKDAY_OPTIONS.map((option) => option.value));
     const [itineraries, setItineraries] = useState<Itinerary[]>([]);
     const [selectedItineraryIndex, setSelectedItineraryIndex] = useState<number | null>(0);
@@ -441,7 +451,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
     }, [destinationQuery, isEditingDestination, visible]);
 
     useEffect(() => {
-        if (!visible || !targetFavorite) {
+        if (!targetFavorite) {
             return;
         }
 
@@ -474,7 +484,9 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         setPlanType(existingPlan?.planType || '0');
         setRouteDateInput(existingPlan?.routeDate || formatDateForInput(new Date()));
         setRouteTimeInput(existingPlan?.routeTime || formatTimeForInput(new Date()));
-        setReminderOffsetMinutes(existingPlan?.reminderOffsetMinutes === 10 ? 10 : 5);
+        const normalizedReminderOffsetMinutes = parseReminderOffsetMinutes(existingPlan?.reminderOffsetMinutes) ?? 5;
+        setReminderOffsetMinutes(normalizedReminderOffsetMinutes);
+        setReminderOffsetInput(String(normalizedReminderOffsetMinutes));
         setReminderWeekdays(existingPlan?.reminderWeekdays?.length ? existingPlan.reminderWeekdays : FAVORITE_COMMUTE_WEEKDAY_OPTIONS.map((option) => option.value));
         setSelectedItineraryIndex(existingPlan?.itineraryIndex || 0);
         setNotificationEnabled(existingPlan?.notificationEnabled || false);
@@ -485,7 +497,6 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         setShowPlannerBuilder(openBuilderByDefault || !existingPlan?.itinerarySummary);
     }, [
         openBuilderByDefault,
-        visible,
         targetFavorite?.id,
         targetFavorite?.defaultCommute?.lastPlannedAt,
     ]);
@@ -532,6 +543,18 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         });
     };
 
+    const commitReminderOffsetInput = () => {
+        const parsed = parseReminderOffsetMinutes(reminderOffsetInput);
+        if (parsed == null) {
+            Alert.alert('Невалидни минути', 'Въведи стойност между 1 и 120 минути.');
+            setReminderOffsetInput(String(reminderOffsetMinutes));
+            return;
+        }
+
+        setReminderOffsetMinutes(parsed);
+        setReminderOffsetInput(String(parsed));
+    };
+
     const doPlanRoute = async () => {
         await fetchPlannedRoutes();
     };
@@ -570,8 +593,13 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
             if (!result.length) {
                 setError('Не е намерен маршрут.');
             } else {
+                const preferredItineraryIndex = typeof existingPlan?.itineraryIndex === 'number'
+                    && existingPlan.itineraryIndex >= 0
+                    && existingPlan.itineraryIndex < result.length
+                    ? existingPlan.itineraryIndex
+                    : 0;
                 setItineraries(result);
-                setSelectedItineraryIndex(null);
+                setSelectedItineraryIndex(preferredItineraryIndex);
                 setExpandedLegKey(null);
             }
         } catch (routeError: any) {
@@ -1014,9 +1042,6 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                                             style={styles.showOnMapButton}
                                                             onPress={() => {
                                                                 onShowOnMap(buildRouteGeoJSON(itinerary));
-                                                                if (!inline) {
-                                                                    onClose();
-                                                                }
                                                             }}
                                                         >
                                                             <Ionicons name="map-outline" size={14} color="#FFFFFF" />
@@ -1054,18 +1079,20 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                                         );
                                     })}
                                 </View>
-                                <View style={styles.offsetOptionsRow}>
-                                    {REMINDER_OFFSET_OPTIONS.map((option) => (
-                                        <TouchableOpacity
-                                            key={option}
-                                            style={[styles.offsetChip, reminderOffsetMinutes === option && styles.offsetChipActive]}
-                                            onPress={() => setReminderOffsetMinutes(option)}
-                                        >
-                                            <Text style={[styles.offsetChipText, reminderOffsetMinutes === option && styles.offsetChipTextActive]}>
-                                                {`${option} мин по-рано`}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
+                                <View style={styles.reminderMinutesRow}>
+                                    <Text style={styles.reminderMinutesLabel}>Извести ме</Text>
+                                    <TextInput
+                                        style={styles.reminderMinutesInput}
+                                        value={reminderOffsetInput}
+                                        onChangeText={(value) => setReminderOffsetInput(normalizeReminderOffsetInput(value))}
+                                        onBlur={commitReminderOffsetInput}
+                                        onSubmitEditing={commitReminderOffsetInput}
+                                        keyboardType="number-pad"
+                                        returnKeyType="done"
+                                        placeholder="5"
+                                        placeholderTextColor="#94A3B8"
+                                    />
+                                    <Text style={styles.reminderMinutesSuffix}>мин по-рано</Text>
                                 </View>
                                 {effectiveReminderTime ? (
                                     <Text style={styles.reminderHint}>{`Известие в ${effectiveReminderTime} • ${formatFavoriteCommuteWeekdays(effectiveNotificationWeekdays)}`}</Text>
@@ -1140,7 +1167,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
 };
 
 const styles = StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.18)', justifyContent: 'flex-start', paddingTop: 78, paddingHorizontal: 12 },
+    overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.18)', justifyContent: 'flex-start', paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 56) + 22 : 78, paddingHorizontal: 12 },
     card: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', maxHeight: '92%', padding: 14, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.12, shadowRadius: 28 },
     inlineCard: { maxHeight: undefined, marginTop: 8, paddingHorizontal: 10, paddingVertical: 10 },
     content: { paddingBottom: 8, gap: 8 },
@@ -1172,14 +1199,14 @@ const styles = StyleSheet.create({
     optionChipTextActive: { color: '#FFFFFF' },
 
     /* Date/Time */
-    arriveByRow: { flexDirection: 'row', gap: 6, marginBottom: 2 },
+    arriveByRow: { flexDirection: 'row', gap: 6, marginBottom: 2, flexWrap: 'wrap' },
     arriveByChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, backgroundColor: 'rgba(241,245,249,0.8)' },
     arriveByChipActive: { backgroundColor: '#1D4ED8' },
     arriveByChipText: { fontSize: 12, fontWeight: '700', color: '#475569' },
     arriveByChipTextActive: { color: '#FFFFFF' },
     dateTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     dateTimeInputWrap: { flex: 1 },
-    timeInputWrap: { width: 80 },
+    timeInputWrap: { minWidth: 80, maxWidth: 112, flexShrink: 1 },
     dateTimeSep: { width: 1, height: 20, backgroundColor: 'rgba(226,232,240,0.72)' },
     dateTimeInput: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingHorizontal: 10, paddingVertical: 9, color: '#0F172A', fontSize: 13, textAlign: 'center' },
     quickChip: { paddingHorizontal: 10, paddingVertical: 9, borderRadius: 999, backgroundColor: 'rgba(239,246,255,0.82)', borderWidth: 1, borderColor: 'rgba(191,219,254,0.72)' },
@@ -1206,7 +1233,7 @@ const styles = StyleSheet.create({
     routeDetailsBox: { marginTop: 6, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.6)' },
     legRow: { flexDirection: 'row', marginBottom: 12 },
     legRowWalk: { backgroundColor: 'rgba(248,250,252,0.82)', borderRadius: 10, padding: 8, marginHorizontal: -4 },
-    legTimeCol: { width: 42, justifyContent: 'space-between' },
+    legTimeCol: { minWidth: 42, justifyContent: 'space-between' },
     legTime: { fontSize: 11, color: '#64748B', fontWeight: '600' },
     legTimeline: { width: 14, alignItems: 'center', marginHorizontal: 2 },
     legDot: { width: 8, height: 8, borderRadius: 4 },
@@ -1222,7 +1249,7 @@ const styles = StyleSheet.create({
     legStopsToggle: { fontSize: 12, color: '#1D4ED8', fontWeight: '600', paddingVertical: 2 },
     intermediateStops: { marginLeft: 4, marginBottom: 4, marginTop: 2, borderLeftWidth: 2, borderLeftColor: 'rgba(203,213,225,0.72)', paddingLeft: 10 },
     intermediateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 6 },
-    intermediateTime: { fontSize: 11, color: '#64748B', width: 36, fontWeight: '600' },
+    intermediateTime: { fontSize: 11, color: '#64748B', minWidth: 36, fontWeight: '600' },
     intermediateDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#94A3B8' },
     intermediateName: { fontSize: 11, color: '#475569', flex: 1 },
     showOnMapButton: { marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: 'rgba(29,78,216,0.82)', borderRadius: 12, paddingVertical: 8 },
@@ -1233,15 +1260,15 @@ const styles = StyleSheet.create({
     notifyLabel: { flex: 1, color: '#334155', fontSize: 13, fontWeight: '600' },
     reminderHint: { color: '#475569', fontSize: 11, lineHeight: 16 },
     weekdayGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-    weekdayChip: { width: 40, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
+    weekdayChip: { minWidth: 40, paddingHorizontal: 8, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
     weekdayChipActive: { backgroundColor: '#0F766E' },
     weekdayChipText: { color: '#475569', fontSize: 11, fontWeight: '700' },
     weekdayChipTextActive: { color: '#FFFFFF' },
     offsetOptionsRow: { flexDirection: 'row', gap: 6 },
-    offsetChip: { flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
-    offsetChipActive: { backgroundColor: '#1D4ED8' },
-    offsetChipText: { color: '#475569', fontSize: 11, fontWeight: '700' },
-    offsetChipTextActive: { color: '#FFFFFF' },
+    reminderMinutesRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+    reminderMinutesLabel: { color: '#475569', fontSize: 11, fontWeight: '600' },
+    reminderMinutesInput: { minWidth: 56, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(226,232,240,0.9)', paddingHorizontal: 10, paddingVertical: 8, color: '#0F172A', fontSize: 12, fontWeight: '700', backgroundColor: 'rgba(248,250,252,0.72)', textAlign: 'center' },
+    reminderMinutesSuffix: { color: '#475569', fontSize: 11, fontWeight: '600' },
 
     /* Saved plan */
     currentPlanBox: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', padding: 10, gap: 6 },

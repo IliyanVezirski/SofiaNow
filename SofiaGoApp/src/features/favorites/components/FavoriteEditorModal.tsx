@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FavoriteLinePreference, FavoritePlace, PlaceSearchResult, formatFavoriteCommuteWeekdays, getFavoriteCommuteNotificationShiftLabel, getFavoritePresetLabel, hasFavoriteCoordinates, searchLocations } from '../../../services/places';
 import { Stop, summarizeStopDirections } from '../../../services/stopsApi';
 
-export type FavoriteEditorSection = 'name' | 'location' | 'stop' | 'lines';
+export type FavoriteEditorSection = 'name' | 'location';
 
 interface Props {
     visible: boolean;
@@ -47,7 +47,16 @@ interface Props {
     onRemoveSavedRoute?: (favoriteId: string) => Promise<void> | void;
 }
 
-const REMINDER_OFFSET_OPTIONS = [5, 10] as const;
+const normalizeReminderOffsetInput = (value: string) => value.replace(/[^\d]/g, '').slice(0, 3);
+
+const parseReminderOffsetMinutes = (value: unknown) => {
+    const normalized = Math.round(Number(value));
+    if (!Number.isFinite(normalized) || normalized < 1 || normalized > 120) {
+        return null;
+    }
+
+    return normalized;
+};
 
 const sortLines = (lines: string[]) => [...lines].sort((left, right) => left.localeCompare(right, 'bg', { numeric: true }));
 
@@ -78,9 +87,9 @@ export const FavoriteEditorModal: React.FC<Props> = ({
     onUpdateRouteNotificationSettings,
     onRemoveSavedRoute,
 }) => {
+    const { height } = useWindowDimensions();
     const nameInputRef = useRef<TextInput | null>(null);
     const locationSearchInputRef = useRef<TextInput | null>(null);
-    const stopInputRef = useRef<TextInput | null>(null);
     const [name, setName] = useState('');
     const [latitude, setLatitude] = useState<number | null>(null);
     const [longitude, setLongitude] = useState<number | null>(null);
@@ -88,12 +97,12 @@ export const FavoriteEditorModal: React.FC<Props> = ({
     const [locationSearchResults, setLocationSearchResults] = useState<PlaceSearchResult[]>([]);
     const [locationSearchLoading, setLocationSearchLoading] = useState(false);
     const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
-    const [stopQuery, setStopQuery] = useState('');
     const [linePreferences, setLinePreferences] = useState<FavoriteLinePreference[]>([]);
     const [activeSection, setActiveSection] = useState<FavoriteEditorSection | null>(null);
     const [routeNotificationEnabled, setRouteNotificationEnabled] = useState(false);
     const [routeNotificationPending, setRouteNotificationPending] = useState(false);
     const [routeReminderOffsetMinutes, setRouteReminderOffsetMinutes] = useState<number>(5);
+    const [routeReminderOffsetInput, setRouteReminderOffsetInput] = useState('5');
     const [personalNotificationLeadMinutes, setPersonalNotificationLeadMinutes] = useState<number>(5);
 
     useEffect(() => {
@@ -108,11 +117,13 @@ export const FavoriteEditorModal: React.FC<Props> = ({
         setLocationSearchResults([]);
         setLocationSearchLoading(false);
         setSelectedStopId(favorite.selectedStopId);
-        setStopQuery(favorite.selectedStopName || '');
         setLinePreferences(favorite.selectedLines || []);
+        const normalizedReminderOffsetMinutes = parseReminderOffsetMinutes(favorite.defaultCommute?.reminderOffsetMinutes) ?? 5;
+        const normalizedPersonalLeadMinutes = parseReminderOffsetMinutes(favorite.personalNotificationLeadMinutes) ?? 5;
         setRouteNotificationEnabled(!!favorite.defaultCommute?.notificationEnabled);
-        setRouteReminderOffsetMinutes(favorite.defaultCommute?.reminderOffsetMinutes === 10 ? 10 : 5);
-        setPersonalNotificationLeadMinutes(favorite.personalNotificationLeadMinutes === 10 ? 10 : 5);
+        setRouteReminderOffsetMinutes(normalizedReminderOffsetMinutes);
+        setRouteReminderOffsetInput(String(normalizedReminderOffsetMinutes));
+        setPersonalNotificationLeadMinutes(normalizedPersonalLeadMinutes);
         setActiveSection(initialSection ?? null);
     }, [favorite, initialSection, isDraft, visible]);
 
@@ -129,11 +140,6 @@ export const FavoriteEditorModal: React.FC<Props> = ({
 
             if (activeSection === 'location') {
                 locationSearchInputRef.current?.focus();
-                return;
-            }
-
-            if (activeSection === 'stop') {
-                stopInputRef.current?.focus();
             }
         }, 120);
 
@@ -236,20 +242,6 @@ export const FavoriteEditorModal: React.FC<Props> = ({
         }
     }, [favorite?.selectedLines, linePreferences, selectedStopLines]);
 
-    const visibleStops = useMemo(() => {
-        const normalizedQuery = stopQuery.trim().toLowerCase();
-        const base = normalizedQuery
-            ? searchableStops.filter((stop) => (
-                stop.name.toLowerCase().includes(normalizedQuery)
-                || stop.id.toLowerCase().includes(normalizedQuery)
-            ))
-            : searchableStops;
-
-        const selected = selectedStopId ? searchableStops.find((stop) => stop.id === selectedStopId) : null;
-        const combined = selected ? [selected, ...base.filter((stop) => stop.id !== selected.id)] : base;
-        return combined.slice(0, 18);
-    }, [searchableStops, selectedStopId, stopQuery]);
-
     const locationStopResults = useMemo(() => {
         const normalizedQuery = locationQuery.trim().toLowerCase();
         if (!normalizedQuery) {
@@ -273,8 +265,6 @@ export const FavoriteEditorModal: React.FC<Props> = ({
     const enabledLines = linePreferences.filter((entry) => entry.enabled);
     const hasSavedRoute = !!favorite.defaultCommute?.itinerarySummary;
     const locationSummary = hasCoordinates ? `${latitude?.toFixed(5)}, ${longitude?.toFixed(5)}` : 'Не е зададена';
-    const stopSummary = selectedStop?.name || 'Не е избрана';
-    const linesSummary = enabledLines.length ? enabledLines.map((entry) => entry.line).join(', ') : 'Няма избрани линии';
     const hasPersonalNotifications = linePreferences.some((entry) => entry.enabled && entry.notificationsEnabled);
 
     const toggleSection = (section: FavoriteEditorSection) => {
@@ -321,16 +311,24 @@ export const FavoriteEditorModal: React.FC<Props> = ({
             return;
         }
 
-        const normalizedValue = value === 10 ? 10 : 5;
+        const normalizedValue = parseReminderOffsetMinutes(value);
+        if (normalizedValue == null) {
+            Alert.alert('Невалидни минути', 'Въведи стойност между 1 и 120 минути.');
+            setRouteReminderOffsetInput(String(routeReminderOffsetMinutes));
+            return;
+        }
+
         const previousValue = routeReminderOffsetMinutes;
         setRouteNotificationPending(true);
         setRouteReminderOffsetMinutes(normalizedValue);
+        setRouteReminderOffsetInput(String(normalizedValue));
         setPersonalNotificationLeadMinutes(normalizedValue);
 
         try {
             const result = await onUpdateRouteNotificationSettings(favorite.id, { reminderOffsetMinutes: normalizedValue });
             if (!result.ok) {
                 setRouteReminderOffsetMinutes(previousValue);
+                setRouteReminderOffsetInput(String(previousValue));
                 setPersonalNotificationLeadMinutes(previousValue);
                 Alert.alert('Неуспешно', result.message);
                 return;
@@ -339,6 +337,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
             Alert.alert('Маршрутното известие е обновено', result.message);
         } catch {
             setRouteReminderOffsetMinutes(previousValue);
+            setRouteReminderOffsetInput(String(previousValue));
             setPersonalNotificationLeadMinutes(previousValue);
             Alert.alert('Грешка', 'Неуспешна промяна на времето за маршрутното известие.');
         } finally {
@@ -346,12 +345,20 @@ export const FavoriteEditorModal: React.FC<Props> = ({
         }
     };
 
-    const handlePersonalNotificationLeadMinutesChange = (value: number) => {
-        const normalizedValue = value === 10 ? 10 : 5;
-        setPersonalNotificationLeadMinutes(normalizedValue);
-        if (hasSavedRoute) {
-            setRouteReminderOffsetMinutes(normalizedValue);
+    const commitRouteReminderOffsetInput = async () => {
+        const parsed = parseReminderOffsetMinutes(routeReminderOffsetInput);
+        if (parsed == null) {
+            Alert.alert('Невалидни минути', 'Въведи стойност между 1 и 120 минути.');
+            setRouteReminderOffsetInput(String(routeReminderOffsetMinutes));
+            return;
         }
+
+        if (parsed === routeReminderOffsetMinutes) {
+            setRouteReminderOffsetInput(String(parsed));
+            return;
+        }
+
+        await handleRouteReminderOffsetChange(parsed);
     };
 
     const handleRemoveSavedRoute = () => {
@@ -383,46 +390,24 @@ export const FavoriteEditorModal: React.FC<Props> = ({
         );
     };
 
-    const applyLineToggle = (line: string, field: 'enabled' | 'notificationsEnabled', value: boolean) => {
-        setLinePreferences((previous) => previous.map((entry) => {
-            if (entry.line !== line) {
-                return entry;
-            }
-
-            if (field === 'enabled') {
-                return {
-                    ...entry,
-                    enabled: value,
-                    notificationsEnabled: value ? entry.notificationsEnabled : false,
-                };
-            }
-
-            return {
-                ...entry,
-                enabled: value ? true : entry.enabled,
-                notificationsEnabled: value,
-            };
-        }));
-    };
-
     const buildDraftUpdates = () => ({
         name,
         latitude,
         longitude,
         selectedStopId,
         selectedStopName: selectedStop?.name ?? null,
-        selectedLines: enabledLines.map((entry) => ({
-            line: entry.line,
-            enabled: true,
-            notificationsEnabled: entry.notificationsEnabled,
-        })),
+        selectedLines: linePreferences,
         personalNotificationLeadMinutes,
     });
 
+    const overlayTopPadding = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 56) + 22 : 78;
+    const overlayBottomPadding = Math.min(Math.max(height * 0.03, 16), 28);
+    const cardMaxHeight = Math.min(Math.max(height * 0.72, 480), 760);
+
     return (
         <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose} statusBarTranslucent>
-            <View style={styles.overlay}>
-                <View style={styles.card}>
+            <View style={[styles.overlay, { paddingTop: overlayTopPadding, paddingBottom: overlayBottomPadding }]}>
+                <View style={[styles.card, { maxHeight: cardMaxHeight }]}>
                     <Pressable onPress={onClose} style={styles.closeButton}>
                         <Ionicons name="close" size={16} color="#334155" />
                     </Pressable>
@@ -466,18 +451,21 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                                                 trackColor={{ false: '#D1D5DB', true: '#86EFAC' }}
                                                 thumbColor={routeNotificationEnabled ? '#16A34A' : '#F9FAFB'}
                                             />
-                                            {REMINDER_OFFSET_OPTIONS.map((option) => (
-                                                <TouchableOpacity
-                                                    key={option}
-                                                    style={[styles.offsetChip, routeReminderOffsetMinutes === option && styles.offsetChipActive]}
-                                                    disabled={routeNotificationPending}
-                                                    onPress={() => void handleRouteReminderOffsetChange(option)}
-                                                >
-                                                    <Text style={[styles.offsetChipText, routeReminderOffsetMinutes === option && styles.offsetChipTextActive]}>
-                                                        {`${option}мин`}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            ))}
+                                            <View style={styles.routeMinutesInputWrap}>
+                                                <Text style={styles.routeMinutesInputLabel}>мин по-рано</Text>
+                                                <TextInput
+                                                    style={styles.routeMinutesInput}
+                                                    value={routeReminderOffsetInput}
+                                                    onChangeText={(value) => setRouteReminderOffsetInput(normalizeReminderOffsetInput(value))}
+                                                    onBlur={() => { void commitRouteReminderOffsetInput(); }}
+                                                    onSubmitEditing={() => { void commitRouteReminderOffsetInput(); }}
+                                                    editable={!routeNotificationPending}
+                                                    keyboardType="number-pad"
+                                                    returnKeyType="done"
+                                                    placeholder="5"
+                                                    placeholderTextColor="#94A3B8"
+                                                />
+                                            </View>
                                             <TouchableOpacity onPress={handleRemoveSavedRoute} disabled={routeNotificationPending} style={{ padding: 4, marginLeft: 'auto' }}>
                                                 <Ionicons name="trash-outline" size={14} color="#94A3B8" />
                                             </TouchableOpacity>
@@ -516,7 +504,6 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                                                 setLatitude(stop.latitude);
                                                 setLongitude(stop.longitude);
                                                 setSelectedStopId(stop.id);
-                                                setStopQuery(stop.name);
                                                 setLocationQuery(stop.name);
                                                 setLocationSearchResults([]);
                                                 setLocationSearchLoading(false);
@@ -533,6 +520,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                                             onPress={() => {
                                                 setLatitude(result.latitude);
                                                 setLongitude(result.longitude);
+                                                setSelectedStopId(null);
                                                 setLocationQuery(result.name);
                                                 setLocationSearchResults([]);
                                                 setLocationSearchLoading(false);
@@ -554,6 +542,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                                         onPress={() => {
                                             setLatitude(currentLocation.latitude);
                                             setLongitude(currentLocation.longitude);
+                                            setSelectedStopId(null);
                                             setLocationQuery('');
                                             setLocationSearchResults([]);
                                             setLocationSearchLoading(false);
@@ -581,110 +570,6 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                         </View>
                         ) : null}
 
-                        {!locationOnly && (<>
-                        <TouchableOpacity style={styles.compactSectionCard} onPress={() => toggleSection('stop')} activeOpacity={0.8}>
-                            <View style={styles.compactSectionHeader}>
-                                <View style={styles.compactSectionTextWrap}>
-                                    <Text style={styles.compactSectionTitle}>Спирка</Text>
-                                    <Text style={styles.compactSectionSummary}>{stopSummary}</Text>
-                                </View>
-                                <Ionicons name={activeSection === 'stop' ? 'chevron-up' : 'chevron-down'} size={16} color="#1D4ED8" />
-                            </View>
-                        </TouchableOpacity>
-                        {activeSection === 'stop' ? (
-                        <View style={styles.section}>
-                            <TextInput
-                                ref={stopInputRef}
-                                style={styles.stopInput}
-                                value={stopQuery}
-                                onChangeText={setStopQuery}
-                                placeholder="Име или код"
-                                placeholderTextColor="#9CA3AF"
-                            />
-                            <ScrollView style={styles.stopList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                                {visibleStops.map((stop) => {
-                                    const isSelected = stop.id === selectedStopId;
-                                    return (
-                                        <TouchableOpacity
-                                            key={stop.id}
-                                            style={[styles.stopRow, isSelected && styles.stopRowSelected]}
-                                            onPress={() => {
-                                                setSelectedStopId(stop.id);
-                                                setStopQuery(stop.name);
-                                            }}
-                                        >
-                                            <Text style={styles.stopName}>{stop.name}</Text>
-                                            <Text style={styles.stopMeta}>{`${stop.id} • ${summarizeStopDirections(stop, 1)}`}</Text>
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </ScrollView>
-                        </View>
-                        ) : null}
-
-                        <TouchableOpacity style={styles.compactSectionCard} onPress={() => toggleSection('lines')} activeOpacity={0.8}>
-                            <View style={styles.compactSectionHeader}>
-                                <View style={styles.compactSectionTextWrap}>
-                                    <Text style={styles.compactSectionTitle}>Линии</Text>
-                                    <Text style={styles.compactSectionSummary}>{linesSummary}</Text>
-                                </View>
-                                <Ionicons name={activeSection === 'lines' ? 'chevron-up' : 'chevron-down'} size={16} color="#1D4ED8" />
-                            </View>
-                        </TouchableOpacity>
-                        {activeSection === 'lines' ? (
-                        <View style={styles.section}>
-                            {!selectedStopLines.length && (
-                                <Text style={styles.emptyState}>Избери спирка.</Text>
-                            )}
-                            {!!selectedStopLines.length && (
-                                <>
-                                    <ScrollView style={styles.lineList} nestedScrollEnabled showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                                        {linePreferences.map((entry) => (
-                                            <View key={entry.line} style={styles.lineRow}>
-                                                <View style={styles.lineLabelWrap}>
-                                                    <Text style={styles.lineLabel}>{entry.line}</Text>
-                                                </View>
-                                                <View style={styles.toggleWrap}>
-                                                    <Text style={styles.toggleLabel}>Пътувам</Text>
-                                                    <Switch
-                                                        value={entry.enabled}
-                                                        onValueChange={(value) => applyLineToggle(entry.line, 'enabled', value)}
-                                                        trackColor={{ false: '#D1D5DB', true: '#93C5FD' }}
-                                                        thumbColor={entry.enabled ? '#1D4ED8' : '#F9FAFB'}
-                                                    />
-                                                </View>
-                                                <View style={styles.toggleWrap}>
-                                                    <Text style={styles.toggleLabel}>Уведомявай</Text>
-                                                    <Switch
-                                                        value={entry.notificationsEnabled}
-                                                        onValueChange={(value) => applyLineToggle(entry.line, 'notificationsEnabled', value)}
-                                                        disabled={!entry.enabled}
-                                                        trackColor={{ false: '#D1D5DB', true: '#86EFAC' }}
-                                                        thumbColor={entry.notificationsEnabled ? '#16A34A' : '#F9FAFB'}
-                                                    />
-                                                </View>
-                                            </View>
-                                        ))}
-                                    </ScrollView>
-                                    <View style={styles.offsetOptionsRow}>
-                                        {REMINDER_OFFSET_OPTIONS.map((option) => (
-                                            <TouchableOpacity
-                                                key={`personal-${option}`}
-                                                style={[styles.offsetChip, personalNotificationLeadMinutes === option && styles.offsetChipActive]}
-                                                onPress={() => handlePersonalNotificationLeadMinutesChange(option)}
-                                            >
-                                                <Text style={[styles.offsetChipText, personalNotificationLeadMinutes === option && styles.offsetChipTextActive]}>
-                                                    {`${option}мин`}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                </>
-                            )}
-                        </View>
-                        ) : null}
-                        </>)}
-
                         <TouchableOpacity
                             style={[styles.saveButton, (isDraft && !hasCoordinates) && styles.saveButtonDisabled]}
                             disabled={isDraft && !hasCoordinates}
@@ -700,7 +585,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                             <TouchableOpacity
                                 style={styles.clearRow}
                                 onPress={() => {
-                                    Alert.alert('Изчисти данните', 'Ще се нулират локация, спирка и линии.', [
+                                    Alert.alert('Изчисти данните', 'Ще се нулира локацията.', [
                                         { text: 'Отказ', style: 'cancel' },
                                         {
                                             text: 'Изчисти',
@@ -711,7 +596,6 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                                                 setLocationQuery('');
                                                 setLocationSearchResults([]);
                                                 setSelectedStopId(null);
-                                                setStopQuery('');
                                                 setLinePreferences([]);
                                                 setActiveSection(null);
                                             },
@@ -731,8 +615,8 @@ export const FavoriteEditorModal: React.FC<Props> = ({
 };
 
 const styles = StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.14)', justifyContent: 'flex-start', paddingTop: 78, paddingHorizontal: 12, paddingBottom: 16 },
-    card: { position: 'relative', backgroundColor: '#FFFFFF', borderRadius: 22, padding: 14, maxHeight: '92%', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 24 },
+    overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.14)', justifyContent: 'flex-start', paddingHorizontal: 12 },
+    card: { position: 'relative', backgroundColor: '#FFFFFF', borderRadius: 22, padding: 14, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 24 },
     contentScroll: { flexGrow: 0 },
     contentScrollInner: { paddingTop: 2, paddingBottom: 6 },
     header: { paddingRight: 46, marginBottom: 10 },
@@ -744,17 +628,14 @@ const styles = StyleSheet.create({
     /* Route */
     routeSummary: { color: '#0F172A', fontSize: 12, fontWeight: '600', marginBottom: 2 },
     routeMeta: { color: '#64748B', fontSize: 11, marginBottom: 6 },
-    routeActions: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+    routeActions: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' },
     routeButton: { marginBottom: 8, minHeight: 42, backgroundColor: '#7C3AED', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
     routeButtonDisabled: { backgroundColor: '#C4B5FD' },
     routeButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 
-    /* Offset chips (shared) */
-    offsetOptionsRow: { flexDirection: 'row', gap: 6, marginTop: 6 },
-    offsetChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: 'rgba(226,232,240,0.6)' },
-    offsetChipActive: { backgroundColor: '#1D4ED8' },
-    offsetChipText: { color: '#475569', fontSize: 11, fontWeight: '700' },
-    offsetChipTextActive: { color: '#FFFFFF' },
+    routeMinutesInputWrap: { minWidth: 104, marginLeft: 2 },
+    routeMinutesInputLabel: { color: '#64748B', fontSize: 10, fontWeight: '700', marginBottom: 3 },
+    routeMinutesInput: { borderRadius: 8, borderWidth: 1, borderColor: 'rgba(226,232,240,0.9)', paddingHorizontal: 10, paddingVertical: 7, color: '#0F172A', fontSize: 12, fontWeight: '700', minWidth: 72, backgroundColor: 'rgba(248,250,252,0.78)' },
 
     /* Location */
     locationSearchInput: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingHorizontal: 12, paddingVertical: 9, color: '#0F172A', fontSize: 13, marginBottom: 6 },
@@ -767,23 +648,6 @@ const styles = StyleSheet.create({
     locationButton: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: 'rgba(219,234,254,0.6)' },
     locationButtonSecondary: { backgroundColor: 'rgba(220,252,231,0.6)' },
     locationButtonText: { color: '#0F172A', fontSize: 11, fontWeight: '700' },
-
-    /* Stop */
-    stopInput: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', paddingHorizontal: 12, paddingVertical: 9, color: '#0F172A', fontSize: 13, marginBottom: 6 },
-    stopList: { maxHeight: 160, borderRadius: 10, backgroundColor: 'rgba(248,250,252,0.72)', padding: 6 },
-    stopRow: { paddingVertical: 7, paddingHorizontal: 8, borderRadius: 8, marginBottom: 2 },
-    stopRowSelected: { backgroundColor: 'rgba(239,246,255,0.82)' },
-    stopName: { color: '#0F172A', fontSize: 12, fontWeight: '600' },
-    stopMeta: { color: '#64748B', fontSize: 11 },
-
-    /* Lines */
-    lineList: { maxHeight: 190 },
-    lineRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 8, marginBottom: 4, backgroundColor: 'rgba(248,250,252,0.6)' },
-    lineLabelWrap: { width: 44 },
-    lineLabel: { color: '#0F172A', fontSize: 13, fontWeight: '700' },
-    toggleWrap: { flex: 1, alignItems: 'center' },
-    toggleLabel: { color: '#475569', fontSize: 10, fontWeight: '600', marginBottom: 2 },
-    emptyState: { color: '#64748B', fontSize: 12 },
 
     /* Accordion sections */
     compactSectionCard: { marginBottom: 8, borderRadius: 10, backgroundColor: 'rgba(248,250,252,0.6)', paddingHorizontal: 12, paddingVertical: 9 },

@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, TouchableOpacity, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Platform, Pressable, StatusBar, TouchableOpacity, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FavoritePlace, cancelFavoriteCommuteReminder, formatFavoriteCommuteWeekdays, hasFavoriteCoordinates, updateFavoriteCommuteReminderSettings } from '../../../services/places';
-import { ReminderCenterButton } from '../../notifications/components/ReminderCenterButton';
 import { Stop } from '../../../services/stopsApi';
 import { FavoriteEditorModal } from './FavoriteEditorModal';
 import type { FavoriteEditorSection } from './FavoriteEditorModal';
@@ -75,6 +74,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
     const [activeFavoriteId, setActiveFavoriteId] = useState<string | null>(null);
     const [activeRouteLineTabIds, setActiveRouteLineTabIds] = useState<Record<string, string | null>>({});
     const [routePlannerFavoriteId, setRoutePlannerFavoriteId] = useState<string | null>(null);
+    const [routePlannerVisible, setRoutePlannerVisible] = useState(false);
     const [routePlannerOpenBuilder, setRoutePlannerOpenBuilder] = useState(false);
     const [submittingFavoriteId, setSubmittingFavoriteId] = useState<string | null>(null);
     const [orderedPlaces, setOrderedPlaces] = useState<FavoritePlace[]>(places);
@@ -192,6 +192,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
 
     useEffect(() => {
         if (routePlannerFavoriteId && !orderedPlaces.some((place) => place.id === routePlannerFavoriteId)) {
+            setRoutePlannerVisible(false);
             setRoutePlannerFavoriteId(null);
             setRoutePlannerOpenBuilder(false);
         }
@@ -217,12 +218,19 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
         setCreatingNewPlace(false);
         setEditingSection(section);
         setEditingId(favoriteId);
+        setEditorPrefill(null);
+        setEditorLocationOnly(false);
+    };
+
+    const openLocationEditor = (favoriteId: string) => {
+        openFavoriteEditor(favoriteId, 'location');
     };
 
     const openRoutePlanner = (favorite: FavoritePlace, openBuilder = false) => {
         setActiveFavoriteId(favorite.id);
         setRoutePlannerOpenBuilder(openBuilder || !hasFavoriteCoordinates(favorite));
         setRoutePlannerFavoriteId(favorite.id);
+        setRoutePlannerVisible(true);
     };
 
     const confirmRemoveFavorite = (favorite: FavoritePlace) => {
@@ -248,13 +256,11 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
         )) || null;
     };
 
-    if (!visible) return null;
-
     return (
         <>
-            <Pressable style={styles.overlay} onPress={onClose}>
-                <ReminderCenterButton anchorStyle={styles.reminderCenterAnchor} />
-                <View style={styles.panel} onStartShouldSetResponder={() => true}>
+            {visible ? (
+                <Pressable style={styles.overlay} onPress={onClose}>
+                    <View style={styles.panel} onStartShouldSetResponder={() => true}>
                         <View style={styles.header}>
                             <View>
                                 <Text style={styles.title}>Моите места</Text>
@@ -348,10 +354,11 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                         <View style={[styles.tabButton, isExpanded && styles.tabButtonActive]}>
                                             <TouchableOpacity
                                                 style={styles.tabButtonMain}
+                                                hitSlop={{ top: 8, bottom: 8, left: 6, right: orderedPlaces.length > 1 ? 40 : 10 }}
                                                 onPress={() => setActiveFavoriteId((previous) => previous === fav.id ? null : fav.id)}
                                             >
                                                 <View style={styles.tabButtonTitleRow}>
-                                                    <Text style={[styles.tabButtonText, isExpanded && styles.tabButtonTextActive]} numberOfLines={1}>{fav.name}</Text>
+                                                    <Text style={[styles.tabButtonText, isExpanded && styles.tabButtonTextActive]} numberOfLines={2}>{fav.name}</Text>
                                                     {hasCommuteReminder ? (
                                                         <View style={styles.reminderBadge}>
                                                             <Ionicons name="notifications" size={11} color="#0F766E" />
@@ -392,7 +399,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                         {isExpanded && (
                                             <View style={styles.card}>
                                                 <View style={styles.cardHeader}>
-                                                    <Text style={styles.rowName} numberOfLines={1}>{fav.name}</Text>
+                                                    <Text style={styles.rowName} numberOfLines={2}>{fav.name}</Text>
                                                     <TouchableOpacity style={styles.removeBtn} onPress={() => confirmRemoveFavorite(fav)}>
                                                         <Ionicons name="close" size={14} color="#B91C1C" />
                                                     </TouchableOpacity>
@@ -400,14 +407,22 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
 
                                                 {/* Status indicators */}
                                                 <View style={styles.statusRow}>
-                                                    <View style={[styles.statusChip, hasCoords ? styles.statusChipOk : styles.statusChipWarn]}>
+                                                    <TouchableOpacity
+                                                        activeOpacity={0.82}
+                                                        style={[styles.statusChip, styles.statusChipButton, hasCoords ? styles.statusChipOk : styles.statusChipWarn]}
+                                                        onPress={() => openLocationEditor(fav.id)}
+                                                    >
                                                         <Ionicons name={hasCoords ? 'location' : 'location-outline'} size={11} color={hasCoords ? '#059669' : '#94A3B8'} />
                                                         <Text style={[styles.statusChipText, hasCoords ? styles.statusChipTextOk : styles.statusChipTextWarn]}>{hasCoords ? 'Локация' : 'Няма локация'}</Text>
-                                                    </View>
-                                                    <View style={[styles.statusChip, fav.defaultCommute?.itinerarySummary ? styles.statusChipOk : styles.statusChipWarn]}>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity
+                                                        activeOpacity={0.82}
+                                                        style={[styles.statusChip, styles.statusChipButton, fav.defaultCommute?.itinerarySummary ? styles.statusChipOk : styles.statusChipWarn]}
+                                                        onPress={() => openRoutePlanner(fav, true)}
+                                                    >
                                                         <Ionicons name={fav.defaultCommute?.itinerarySummary ? 'navigate' : 'navigate-outline'} size={11} color={fav.defaultCommute?.itinerarySummary ? '#059669' : '#94A3B8'} />
                                                         <Text style={[styles.statusChipText, fav.defaultCommute?.itinerarySummary ? styles.statusChipTextOk : styles.statusChipTextWarn]}>{fav.defaultCommute?.itinerarySummary ? 'Маршрут' : 'Без маршрут'}</Text>
-                                                    </View>
+                                                    </TouchableOpacity>
                                                     {hasCommuteReminder ? (
                                                         <View style={[styles.statusChip, styles.statusChipOk]}>
                                                             <Ionicons name="notifications" size={11} color="#059669" />
@@ -416,9 +431,11 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                     ) : null}
                                                 </View>
 
+                                             
+
                                                 {/* Route summary hero */}
                                                 {fav.defaultCommute?.itinerarySummary ? (
-                                                    <View style={styles.routeHero}>
+                                                    <TouchableOpacity style={styles.routeHero} activeOpacity={0.82} onPress={() => openRoutePlanner(fav, true)}>
                                                         {displayRouteLineTabs.length > 0 && (
                                                             <View style={styles.routeBadgesRow}>
                                                                 {displayRouteLineTabs.map((tab, tabIdx) => (
@@ -432,6 +449,13 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                                 ))}
                                                             </View>
                                                         )}
+                                                            <View style={styles.infoEditHeader}>
+                                                                <View style={styles.infoEditTitleWrap}>
+                                                                    <Ionicons name="navigate-outline" size={14} color="#1D4ED8" />
+                                                                    <Text style={styles.infoEditTitle}>Маршрут</Text>
+                                                                </View>
+                                                                <Ionicons name="create-outline" size={14} color="#94A3B8" />
+                                                            </View>
                                                         <Text style={styles.routeHeroText}>{routeSummary}</Text>
                                                         {hasCommuteReminder && (
                                                             <View style={styles.reminderInfoRow}>
@@ -439,14 +463,8 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                                 <Text style={styles.reminderInfoText}>{reminderSummary}</Text>
                                                             </View>
                                                         )}
-                                                    </View>
-                                                ) : (
-                                                    <View style={styles.noRouteHero}>
-                                                        <Ionicons name="navigate-outline" size={20} color="#CBD5E1" />
-                                                        <Text style={styles.noRouteText}>Няма запазен маршрут</Text>
-                                                        <Text style={styles.noRouteHint}>Натисни „Маршрут" за да планираш пътуване</Text>
-                                                    </View>
-                                                )}
+                                                        </TouchableOpacity>
+                                                ) : null}
 
                                                 {/* Line tabs with stops — progressive disclosure */}
                                                 {displayRouteLineTabs.length > 0 && (
@@ -487,12 +505,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                     </View>
                                                 )}
 
-                                                {/* Subtle notice */}
-                                                {missingLineSetup && (
-                                                    <View style={styles.noticeBox}>
-                                                        <Text style={styles.noticeText}>Настрой линиите от „Редакция"</Text>
-                                                    </View>
-                                                )}
+                                                
 
                                                 {/* Primary action */}
                                                 {hasSavedRouteGeometry ? (
@@ -502,21 +515,8 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                     </TouchableOpacity>
                                                 ) : null}
 
-                                                {/* Secondary actions */}
-                                                <View style={styles.secondaryRow}>
-                                                    <TouchableOpacity style={styles.secondaryAction} onPress={() => openRoutePlanner(fav)}>
-                                                        <Ionicons name="navigate-outline" size={14} color="#1D4ED8" />
-                                                        <Text style={styles.secondaryActionText}>Маршрут</Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity style={styles.secondaryAction} onPress={() => openFavoriteEditor(fav.id, null)}>
-                                                        <Ionicons name="create-outline" size={14} color="#0F766E" />
-                                                        <Text style={[styles.secondaryActionText, { color: '#0F766E' }]}>Редакция</Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity style={styles.secondaryAction} disabled={!hasCoords} onPress={() => onSelect(fav)}>
-                                                        <Ionicons name="location-outline" size={14} color={hasCoords ? '#475569' : '#CBD5E1'} />
-                                                        <Text style={[styles.secondaryActionText, { color: hasCoords ? '#475569' : '#CBD5E1' }]}>Локация</Text>
-                                                    </TouchableOpacity>
-                                                </View>
+                                          
+                                               
 
                                                 {/* Delete — subtle */}
                                                 <TouchableOpacity style={styles.deleteRow} onPress={() => confirmRemoveFavorite(fav)}>
@@ -528,11 +528,12 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                 );
                             }}
                         />
-                </View>
-            </Pressable>
+                    </View>
+                </Pressable>
+            ) : null}
 
             <FavoriteEditorModal
-                visible={!!editorFavorite}
+                visible={visible && !!editorFavorite}
                 favorite={editorFavorite}
                 isDraft={creatingNewPlace}
                 initialSection={editingSection}
@@ -667,23 +668,23 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
             />
 
             <FavoriteRoutePlannerModal
-                visible={!!routePlannerFavorite}
+                visible={visible && routePlannerVisible && !!routePlannerFavorite}
                 targetFavorite={routePlannerFavorite}
                 openBuilderByDefault={routePlannerOpenBuilder}
                 currentLocation={currentLocation}
                 searchableStops={searchableStops}
                 onShowOnMap={(route) => {
                     onShowRouteOnMap?.(route);
-                    setRoutePlannerOpenBuilder(false);
-                    setRoutePlannerFavoriteId(null);
                 }}
                 onOpenPlaceEditor={(favoriteId, prefill) => {
+                    setRoutePlannerVisible(false);
                     setRoutePlannerOpenBuilder(false);
                     setRoutePlannerFavoriteId(null);
                     setEditorPrefill(prefill ? { favoriteId, ...prefill } : null);
                     openFavoriteEditor(favoriteId, 'location');
                 }}
                 onClose={() => {
+                    setRoutePlannerVisible(false);
                     setRoutePlannerOpenBuilder(false);
                     setRoutePlannerFavoriteId(null);
                 }}
@@ -697,6 +698,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                         personalNotificationLeadMinutes: payload.personalNotificationLeadMinutes ?? routePlannerFavorite?.personalNotificationLeadMinutes ?? 5,
                         defaultCommute: payload.commutePlan,
                     });
+                    setRoutePlannerVisible(false);
                     setRoutePlannerOpenBuilder(false);
                     setRoutePlannerFavoriteId(null);
                     setActiveFavoriteId(favoriteId);
@@ -708,13 +710,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
 };
 
 const styles = StyleSheet.create({
-    overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.18)', justifyContent: 'flex-start', paddingTop: 78, paddingHorizontal: 12, zIndex: 50 },
-    reminderCenterAnchor: {
-        top: 42,
-        right: 20,
-        zIndex: 0,
-        elevation: 0,
-    },
+    overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.18)', justifyContent: 'flex-start', paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 56) + 22 : 78, paddingHorizontal: 12, zIndex: 50 },
     panel: {
         backgroundColor: 'rgba(255,255,255,0.82)', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
         padding: 14, maxHeight: '88%',
@@ -735,15 +731,15 @@ const styles = StyleSheet.create({
     closeBtnText: { color: '#334155', fontSize: 14, fontWeight: '700' },
     tabItemWrap: { marginBottom: 8 },
     tabButton: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 10, borderRadius: 14, backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
-    tabButtonMain: { flex: 1 },
-    tabButtonTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    tabButtonMain: { flex: 1, minWidth: 0, paddingVertical: 4, paddingRight: 4 },
+    tabButtonTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
     tabButtonActive: { backgroundColor: 'rgba(219,234,254,0.72)', borderColor: 'rgba(147,197,253,0.72)' },
     reorderButtons: { flexDirection: 'column', justifyContent: 'center', alignItems: 'center', marginRight: 2 },
     reorderBtn: { width: 26, height: 20, alignItems: 'center', justifyContent: 'center' },
     reorderBtnDisabled: { opacity: 0.4 },
-    tabButtonText: { color: '#334155', fontSize: 13, fontWeight: '700', flexShrink: 1 },
+    tabButtonText: { color: '#334155', fontSize: 13, fontWeight: '700', flexShrink: 1, flex: 1, minWidth: 0, lineHeight: 17 },
     tabButtonTextActive: { color: '#1D4ED8' },
-    reminderBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(204,251,241,0.72)', borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3 },
+    reminderBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(204,251,241,0.72)', borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3, flexShrink: 0 },
     reminderBadgeText: { color: '#0F766E', fontSize: 10, fontWeight: '700' },
     tabMetaText: { color: '#64748B', fontSize: 11, marginTop: 4 },
 
@@ -755,7 +751,7 @@ const styles = StyleSheet.create({
     listEmptyContent: { paddingBottom: 4, minHeight: 80 },
     empty: { color: '#64748B', fontSize: 12, lineHeight: 16, paddingVertical: 8 },
     card: { marginTop: 8, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
-    cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+    cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 },
     badge: { backgroundColor: 'rgba(219,234,254,0.72)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
     badgeText: { color: '#1D4ED8', fontSize: 10, fontWeight: '700' },
     rowName: { color: '#0F172A', fontSize: 15, fontWeight: '700', flexShrink: 1, flex: 1, marginRight: 8 },
@@ -763,17 +759,24 @@ const styles = StyleSheet.create({
     /* Status indicators */
     statusRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 10 },
     statusChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, borderWidth: 1 },
+    statusChipButton: { paddingRight: 10 },
     statusChipOk: { backgroundColor: 'rgba(236,253,245,0.72)', borderColor: 'rgba(167,243,208,0.72)' },
     statusChipWarn: { backgroundColor: 'rgba(248,250,252,0.72)', borderColor: 'rgba(226,232,240,0.72)' },
     statusChipText: { fontSize: 10, fontWeight: '600' },
     statusChipTextOk: { color: '#059669' },
     statusChipTextWarn: { color: '#94A3B8' },
 
+    infoEditCard: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, padding: 10, gap: 6, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
+    infoEditHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+    infoEditTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, minWidth: 0 },
+    infoEditTitle: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
+    infoEditValue: { color: '#475569', fontSize: 12, lineHeight: 17, fontWeight: '600' },
+
     /* Route hero */
     routeHero: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, padding: 10, gap: 6, marginBottom: 10 },
     routeBadgesRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
-    routeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-    routeBadgeText: { fontSize: 12, fontWeight: '700', color: '#1D4ED8' },
+    routeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, maxWidth: '100%' },
+    routeBadgeText: { fontSize: 12, fontWeight: '700', color: '#1D4ED8', flexShrink: 1 },
     routeHeroText: { color: '#0F172A', fontSize: 12, fontWeight: '700', lineHeight: 17 },
     reminderInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     reminderInfoText: { color: '#0F766E', fontSize: 11, fontWeight: '600' },
@@ -806,6 +809,6 @@ const styles = StyleSheet.create({
     secondaryActionText: { fontSize: 11, fontWeight: '700', color: '#1D4ED8' },
     deleteRow: { alignItems: 'center', paddingVertical: 6 },
     deleteRowText: { color: '#B91C1C', fontSize: 11, fontWeight: '600' },
-    removeBtn: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(254,226,226,0.72)' },
+    removeBtn: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(254,226,226,0.72)', flexShrink: 0 },
     removeBtnText: { color: '#B91C1C', fontSize: 14, fontWeight: '700' },
 });

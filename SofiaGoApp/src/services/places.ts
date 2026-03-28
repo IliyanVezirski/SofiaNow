@@ -223,6 +223,15 @@ const formatCommuteReminderTimeFromRouteStart = (routeStartTime: string | null |
     return `${String(reminderDate.getHours()).padStart(2, '0')}:${String(reminderDate.getMinutes()).padStart(2, '0')}`;
 };
 
+const normalizeReminderOffsetMinutes = (value: unknown, fallback = 5) => {
+    const normalized = Math.round(Number(value));
+    if (!Number.isFinite(normalized) || normalized < 1 || normalized > 120) {
+        return fallback;
+    }
+
+    return normalized;
+};
+
 const areFavoriteCommuteWeekdaysEqual = (left: FavoriteCommuteWeekday[], right: FavoriteCommuteWeekday[]) => {
     if (left.length !== right.length) {
         return false;
@@ -469,7 +478,7 @@ const normalizeFavoriteLinePreferences = (value: unknown): FavoriteLinePreferenc
     return Array.from(lineMap.values()).sort((left, right) => left.line.localeCompare(right.line, 'bg', { numeric: true }));
 };
 
-const normalizeFavoriteNotificationLeadMinutes = (value: unknown) => (Number(value) === 10 ? 10 : 5);
+const normalizeFavoriteNotificationLeadMinutes = (value: unknown) => normalizeReminderOffsetMinutes(value);
 
 const syncFavoriteLineNotifications = (lines: FavoriteLinePreference[], enabled: boolean, primaryLine?: string | null): FavoriteLinePreference[] => {
     const normalizedPrimaryLine = String(primaryLine || '').trim().toUpperCase();
@@ -681,7 +690,7 @@ export const updateFavoriteCommuteReminderSettings = async (
         reminderOffsetMinutes?: number;
     },
 ) => {
-    const normalizedOffset = updates.reminderOffsetMinutes === 10 ? 10 : 5;
+    const normalizedOffset = normalizeReminderOffsetMinutes(updates.reminderOffsetMinutes);
 
     if (!favoriteId) {
         return {
@@ -702,7 +711,7 @@ export const updateFavoriteCommuteReminderSettings = async (
     }
 
     const reminderOffsetMinutes = updates.reminderOffsetMinutes == null
-        ? (commutePlan.reminderOffsetMinutes === 10 ? 10 : 5)
+        ? normalizeReminderOffsetMinutes(commutePlan.reminderOffsetMinutes)
         : normalizedOffset;
     const reminderTime = formatCommuteReminderTimeFromRouteStart(commutePlan.routeStartTime, reminderOffsetMinutes) || commutePlan.reminderTime;
     if (!reminderTime) {

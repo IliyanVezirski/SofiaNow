@@ -194,8 +194,8 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                 >
                                                     <StopTypeBadge stop={stop} />
                                                     <View style={st.stopInfo}>
-                                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.stopName}>{stop.name}</Text>
-                                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.stopMeta}>
+                                                        <Text style={st.stopName}>{stop.name}</Text>
+                                                        <Text style={st.stopMeta}>
                                                             {`${formatDist(stop.distanceMeters)} • Линии: ${stop.lines.slice(0, 5).join(', ')}${stop.lines.length > 5 ? '...' : ''}`}
                                                         </Text>
                                                     </View>
@@ -228,7 +228,7 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                         {etasLoading ? (
                                                             <ActivityIndicator size="small" color="#1D4ED8" style={{ marginVertical: 8 }} />
                                                         ) : liveEtas.length === 0 ? (
-                                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.emptyText}>Няма живи данни за тази спирка</Text>
+                                                            <Text style={st.emptyText}>Няма живи данни за тази спирка</Text>
                                                         ) : (
                                                             liveEtas.map((eta, idx) => {
                                                                 const info = getEtaScheduleInfo(eta);
@@ -246,9 +246,9 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                                             <Ionicons name={getVehicleIconName(eta.type) as any} size={14} color="#FFFFFF" />
                                                                         </View>
                                                                         <View style={st.etaMainInfo}>
-                                                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaLine} numberOfLines={2}>{lineLabel}</Text>
+                                                                            <Text style={st.etaLine} numberOfLines={2}>{lineLabel}</Text>
                                                                             {(schedText || delayText) && (
-                                                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaStatusText}>
+                                                                                <Text style={st.etaStatusText}>
                                                                                     {schedText ? `разп. ${schedText} ` : ''}
                                                                                     {delayText ? (
                                                                                         <Text style={hasDelay ? { color: '#DC2626', fontWeight: 'bold' } : isEarly ? { color: '#2563EB', fontWeight: 'bold' } : undefined}>
@@ -260,8 +260,8 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                                         </View>
 
                                                                         <View style={st.etaTimeWrap}>
-                                                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaTime}>{eta.minutesAway} мин</Text>
-                                                                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
+                                                                            <Text style={st.etaTime}>{eta.minutesAway} мин</Text>
+                                                                            <Text style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
                                                                         </View>
 
                                                                         <ArrivalReminderControl stopName={stop.name} eta={eta} compact />
@@ -332,7 +332,7 @@ const st = StyleSheet.create({
         paddingVertical: 10, paddingHorizontal: 8,
     },
     stopRowActive: { backgroundColor: 'rgba(248,250,252,0.84)' },
-    stopInfo: { flex: 1, marginLeft: 10 },
+    stopInfo: { flex: 1, minWidth: 0, marginLeft: 10 },
     stopName: { color: '#0F172A', fontSize: 13, fontWeight: '700' },
     stopMeta: { color: '#64748B', fontSize: 11, marginTop: 3, lineHeight: 15 },
 
@@ -372,7 +372,7 @@ const st = StyleSheet.create({
     etaMainInfo: { flex: 1, minWidth: 0, paddingRight: 6 },
     etaLine: { color: '#1E293B', fontSize: 13, fontWeight: '800', lineHeight: 17, flexShrink: 1 },
     etaStatusText: { color: '#64748B', fontSize: 10, marginTop: 1 },
-    etaTimeWrap: { width: 64, alignItems: 'flex-end', marginLeft: 2, flexShrink: 0 },
+    etaTimeWrap: { minWidth: 64, alignItems: 'flex-end', marginLeft: 2, flexShrink: 0 },
     etaTime: { color: '#1D4ED8', fontSize: 13, fontWeight: '800' },
     etaClock: { color: '#94A3B8', fontSize: 11, marginTop: 1, textAlign: 'right' },
 

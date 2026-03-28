@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Linking, StyleSheet, View, Text, TouchableOpacity, LogBox } from 'react-native';
+import { Animated, Easing, Linking, Platform, StatusBar, StyleSheet, View, Text, TouchableOpacity, LogBox, useWindowDimensions } from 'react-native';
 import MapboxGL from '@maplibre/maplibre-react-native';
 
 import { RouteSelection } from '../types/routes';
@@ -48,8 +48,12 @@ import { ReminderCenterButton } from '../features/notifications/components/Remin
 import { SettingsModal } from '../features/settings/components/SettingsModal';
 import { SupportModal } from '../features/settings/components/SupportModal';
 import { useParkingZones } from '../features/parkingZones/hooks/useParkingZones';
+import { useParkingCars } from '../features/parkingZones/hooks/useParkingCars';
 import { CATEGORY_META } from '../features/parkingZones/components/ParkingLotsModal';
 import { ParkingLotInfoPanel } from '../features/parkingZones/components/ParkingLotInfoPanel';
+import { ParkingPaymentScreen } from '../features/parkingZones/components/ParkingPaymentScreen';
+import { ParkingCarsScreen } from '../features/parkingZones/components/ParkingCarsScreen';
+import { ScheduledSmsBadge } from '../features/parkingZones/components/ScheduledSmsBadge';
 import { useLiveParkingAvailability } from '../features/parkingZones/hooks/useLiveParkingAvailability';
 import type { ParkingLot } from '../features/parkingZones/types/parkingLots';
 import type { ParkingZoneId } from '../features/parkingZones/types';
@@ -175,7 +179,7 @@ interface MapScreenProps {
     filterPanelVisible?: boolean;
     onCloseFilterPanel?: () => void;
     onBuildRouteFromCoordinate?: (dstLat: number, dstLon: number, curLat?: number, curLon?: number) => void;
-    onShowTripRoute?: (route: TripRouteGeoJSON) => void;
+    onShowTripRoute?: (route: TripRouteGeoJSON, source?: 'planner' | 'favorites') => void;
     searchRequestToken?: number;
     favoritesRequestToken?: number;
     dismissTransientPanelsToken?: number;
@@ -222,10 +226,22 @@ export default function MapScreen({
     onMapExperienceModeChange,
     onParkingZoneChange,
 }: MapScreenProps) {
+    const { height } = useWindowDimensions();
     const stopAnnotationRefs = useRef<Record<string, { refresh: () => void } | null>>({});
     const previousSelectedStopAnnotationIdRef = useRef<string | null>(null);
     const hasAppliedInitialLocationCameraRef = useRef(false);
     const handledParkingZoneFocusTokenRef = useRef(0);
+    const suppressUserRecenterRegionSyncUntilRef = useRef(0);
+    const tripRouteViewportSnapshotRef = useRef<{
+        bounds: { north: number; south: number; east: number; west: number } | null;
+        center: [number, number];
+        cameraLockedToInitialView: boolean;
+        hasInitialCameraTarget: boolean;
+        userLocationVisible: boolean;
+        isUserFollowLocked: boolean;
+    } | null>(null);
+    const previousHasTripRouteRef = useRef(false);
+    const restoreRouteBoundsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // ── Core map hooks ──
     const { location, refresh: refreshLocation } = useUserLocation();
@@ -342,6 +358,7 @@ export default function MapScreen({
     const [isUserFollowLocked, setIsUserFollowLocked] = useState(false);
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [supportVisible, setSupportVisible] = useState(false);
+    const [activeParkingOverlay, setActiveParkingOverlay] = useState<'payment' | 'cars' | null>(null);
     const [settingsExpanded, setSettingsExpanded] = useState(false);
     const [mapExperienceMode, setMapExperienceMode] = useState<MapExperienceMode>(preferredMapExperienceMode ?? 'transit');
     const settingsSlideAnim = useRef(new Animated.Value(0)).current;
@@ -356,6 +373,52 @@ export default function MapScreen({
     const supportRevolutUrl = SUPPORT_REVOLUT_URL.trim();
     const [selectedParkingLotId, setSelectedParkingLotId] = useState<string | null>(null);
     const liveParking = useLiveParkingAvailability(isParkingMode);
+    const parkingCars = useParkingCars();
+
+    useEffect(() => {
+        if (hasTripRoute && !previousHasTripRouteRef.current) {
+            tripRouteViewportSnapshotRef.current = {
+                bounds: bounds.mapBounds ? { ...bounds.mapBounds } : null,
+                center: [...camera.mapCenterCoordinate] as [number, number],
+                cameraLockedToInitialView: camera.cameraLockedToInitialView,
+                hasInitialCameraTarget: camera.hasInitialCameraTarget,
+                userLocationVisible,
+                isUserFollowLocked,
+            };
+        }
+
+        previousHasTripRouteRef.current = hasTripRoute;
+    }, [
+        bounds.mapBounds,
+        camera.cameraLockedToInitialView,
+        camera.hasInitialCameraTarget,
+        camera.mapCenterCoordinate,
+        hasTripRoute,
+        isUserFollowLocked,
+        userLocationVisible,
+    ]);
+
+    useEffect(() => {
+        return () => {
+            if (restoreRouteBoundsTimerRef.current) {
+                clearTimeout(restoreRouteBoundsTimerRef.current);
+                restoreRouteBoundsTimerRef.current = null;
+            }
+        };
+    }, []);
+    const topFloatingOffset = Platform.OS === 'android' ? Math.max((StatusBar.currentHeight ?? 24) + 10, 42) : 50;
+    const stackedTopFloatingOffset = topFloatingOffset + 50;
+    const reportButtonBottomOffset = showReportButton && isTransitMode ? Math.min(Math.max(height * 0.04, 24), 40) : 24;
+    const floatingControlBottomOffset = showReportButton && isTransitMode
+        ? Math.max(reportButtonBottomOffset + 82, 122)
+        : Math.min(Math.max(height * 0.14, 108), 132);
+    const droppedPinPanelBottomOffset = isTransitMode && showReportButton
+        ? reportButtonBottomOffset + 110
+        : Math.min(Math.max(height * 0.12, 84), 124);
+    const parkingOverlayStretchDown = Math.min(Math.max(height * 0.1, 72), 104);
+    const parkingOverlayBottomOffset = Math.max(Math.min(Math.max(height * 0.38, 200), 300) - parkingOverlayStretchDown, 96);
+    const parkingPaymentPanelHeight = Math.min(Math.max(height * 0.62, 420), 620) + parkingOverlayStretchDown;
+    const parkingCarsPanelHeight = Math.min(Math.max(height * 0.56, 380), 540) + parkingOverlayStretchDown;
 
     const clearSettingsAutoHideTimer = useCallback(() => {
         if (!settingsAutoHideTimer.current) {
@@ -499,6 +562,24 @@ export default function MapScreen({
     );
     const reporting = useReporting();
 
+    const openParkingPaymentPanel = useCallback(() => {
+        selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+        setSelectedParkingLotId(null);
+        setActiveParkingOverlay('payment');
+    }, [selectedStop.suppressMapPressUntilRef]);
+
+    const openParkingCarsPanel = useCallback(() => {
+        selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+        setSelectedParkingLotId(null);
+        setActiveParkingOverlay('cars');
+    }, [selectedStop.suppressMapPressUntilRef]);
+
+    const openParkingLotPanel = useCallback((lotId: string) => {
+        selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+        setActiveParkingOverlay(null);
+        setSelectedParkingLotId(lotId);
+    }, [selectedStop.suppressMapPressUntilRef]);
+
     const handleMapExperienceModeChange = useCallback((nextMode: MapExperienceMode) => {
         setMapExperienceMode(nextMode);
         onMapExperienceModeChange?.(nextMode);
@@ -526,17 +607,35 @@ export default function MapScreen({
         return DEFAULT_CENTER_COORDINATE;
     }, [location]);
 
+    const hasReliableInitialLocation = useMemo(() => {
+        if (!location) {
+            return false;
+        }
+
+        const locationAgeMs = Math.max(0, Date.now() - location.timestamp);
+        const locationAccuracy = location.coords.accuracy ?? Number.POSITIVE_INFINITY;
+
+        return locationAgeMs <= 1000 * 60 * 15 || locationAccuracy <= 1500;
+    }, [location]);
+
     // ── Initialize camera from location ──
     useEffect(() => {
-        if (!location || highlightedRoute || hasAppliedInitialLocationCameraRef.current || camera.hasInitialCameraTarget) {
+        if (
+            !location ||
+            !hasReliableInitialLocation ||
+            highlightedRoute ||
+            hasAppliedInitialLocationCameraRef.current ||
+            camera.hasInitialCameraTarget
+        ) {
             return;
         }
 
         hasAppliedInitialLocationCameraRef.current = true;
+        suppressUserRecenterRegionSyncUntilRef.current = Date.now() + 1800;
         camera.lockCamera(location.coords.latitude, location.coords.longitude);
         bounds.setMapBounds(createFallbackBounds(location.coords.latitude, location.coords.longitude));
         setUserLocationVisible(true);
-    }, [bounds, camera, highlightedRoute, location]);
+    }, [bounds, camera, hasReliableInitialLocation, highlightedRoute, location]);
 
     // ── Refresh ETAs alongside vehicles ──
     useEffect(() => {
@@ -715,6 +814,7 @@ export default function MapScreen({
         if (Date.now() < selectedStop.suppressMapPressUntilRef.current) return;
         selectedVehicleIdRef.current = null;
         setSelectedVehicleId(null);
+        setActiveParkingOverlay(null);
         setSelectedParkingLotId(null);
         selectedStop.closeSelectedStop();
         setDroppedPin(null);
@@ -731,12 +831,16 @@ export default function MapScreen({
         setDroppedPin({ latitude, longitude });
         selectedVehicleIdRef.current = null;
         setSelectedVehicleId(null);
+        setActiveParkingOverlay(null);
         setSelectedParkingLotId(null);
         selectedStop.closeSelectedStop();
     }, []);
 
     const recenterToUserLocation = useCallback(async () => {
         if (location) {
+            suppressUserRecenterRegionSyncUntilRef.current = Date.now() + 1400;
+            camera.setTripCameraBounds(null);
+            camera.setRouteCameraBounds(null);
             camera.focusOnCoordinate(location.coords.latitude, location.coords.longitude);
             bounds.setMapBounds(createFallbackBounds(location.coords.latitude, location.coords.longitude));
             setUserLocationVisible(true);
@@ -747,6 +851,14 @@ export default function MapScreen({
     }, [bounds, camera, location, refreshLocation]);
 
     const handleRegionDidChange = useCallback((event: any) => {
+        if (Date.now() < suppressUserRecenterRegionSyncUntilRef.current) {
+            if (location) {
+                bounds.scheduleBoundsUpdate(createFallbackBounds(location.coords.latitude, location.coords.longitude));
+                setUserLocationVisible(true);
+            }
+            return;
+        }
+
         if (isUserFollowLocked && location) {
             camera.lockCamera(location.coords.latitude, location.coords.longitude);
             bounds.scheduleBoundsUpdate(createFallbackBounds(location.coords.latitude, location.coords.longitude));
@@ -803,10 +915,48 @@ export default function MapScreen({
         location,
     ]);
 
+    const handleClearShownTripRoute = useCallback(() => {
+        const previousViewport = tripRouteViewportSnapshotRef.current;
+
+        camera.setTripCameraBounds(null);
+
+        if (restoreRouteBoundsTimerRef.current) {
+            clearTimeout(restoreRouteBoundsTimerRef.current);
+            restoreRouteBoundsTimerRef.current = null;
+        }
+
+        if (previousViewport) {
+            suppressUserRecenterRegionSyncUntilRef.current = Date.now() + 900;
+            camera.setHasInitialCameraTarget(previousViewport.hasInitialCameraTarget);
+            camera.setCameraLockedToInitialView(previousViewport.cameraLockedToInitialView);
+            camera.setMapCenterCoordinate(previousViewport.center);
+            setUserLocationVisible(previousViewport.userLocationVisible);
+            setIsUserFollowLocked(previousViewport.isUserFollowLocked);
+
+            if (previousViewport.bounds) {
+                bounds.setMapBounds(previousViewport.bounds);
+                camera.setRouteCameraBounds({
+                    ne: [previousViewport.bounds.east, previousViewport.bounds.north],
+                    sw: [previousViewport.bounds.west, previousViewport.bounds.south],
+                });
+                restoreRouteBoundsTimerRef.current = setTimeout(() => {
+                    camera.setRouteCameraBounds(null);
+                    restoreRouteBoundsTimerRef.current = null;
+                }, 650);
+            } else if (!previousViewport.cameraLockedToInitialView) {
+                camera.unlockCamera();
+            }
+        }
+
+        tripRouteViewportSnapshotRef.current = null;
+        onClearTripRoute?.();
+    }, [bounds, camera, onClearTripRoute]);
+
     // ── Search callbacks ──
     const onSelectSearchResult = useCallback((result: CentralSearchResult & { kind: 'place' }) => {
         camera.focusOnCoordinate(result.latitude, result.longitude);
         setDroppedPin({ latitude: result.latitude, longitude: result.longitude });
+        setActiveParkingOverlay(null);
         setSelectedParkingLotId(null);
         selectedVehicleIdRef.current = null;
         setSelectedVehicleId(null);
@@ -955,7 +1105,7 @@ export default function MapScreen({
                             onPress={(e) => {
                                 const feature = e.features?.[0];
                                 const lotId = feature?.properties?.lotId as string | undefined;
-                                if (lotId) setSelectedParkingLotId(lotId);
+                                if (lotId) openParkingLotPanel(lotId);
                             }}
                         >
                             <MapboxGL.CircleLayer
@@ -984,7 +1134,7 @@ export default function MapScreen({
                     {/* Stops */}
                     {isTransitMode && !routing.routeGeometry && !vehicleRoute.hasVehicleRoute && !hasTripRoute && stopsHook.renderedStops.map((stop) => (
                         <MapboxGL.PointAnnotation
-                            key={`stop-${stop.id}-${selectedStop.selectedStopAnnotationId === `stop-${stop.id}` ? 'selected' : 'idle'}`}
+                            key={`stop-${stop.id}`}
                             id={`stop-${stop.id}`}
                             ref={(ref) => { stopAnnotationRefs.current[`stop-${stop.id}`] = ref; }}
                             coordinate={[stop.longitude, stop.latitude]}
@@ -1058,7 +1208,7 @@ export default function MapScreen({
                                         <View style={[styles.routeStopDot, { borderColor: getDirectionAccentColor(dirIdx) }, isSelected && styles.routeStopDotSelected]} />
                                         {isSelected && (
                                             <View style={styles.routeStopLabel}>
-                                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.routeStopName} numberOfLines={1}>{stop.name}</Text>
+                                                <Text style={styles.routeStopName} numberOfLines={2}>{stop.name}</Text>
                                             </View>
                                         )}
                                     </View>
@@ -1164,8 +1314,8 @@ export default function MapScreen({
                                                 <View style={[styles.vehicleRouteStopDot, isSelected && styles.vehicleRouteStopDotSelected]} />
                                                 {isSelected && (
                                                     <View style={styles.vehicleRouteStopLabel}>
-                                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleRouteStopName} numberOfLines={1}>{stop.stopName}</Text>
-                                                        {stop.arrivalTimestamp ? <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.vehicleRouteStopTime}>{formatUnixTime(stop.arrivalTimestamp)}</Text> : null}
+                                                        <Text style={styles.vehicleRouteStopName} numberOfLines={2}>{stop.stopName}</Text>
+                                                        {stop.arrivalTimestamp ? <Text style={styles.vehicleRouteStopTime}>{formatUnixTime(stop.arrivalTimestamp)}</Text> : null}
                                                     </View>
                                                 )}
                                             </View>
@@ -1278,7 +1428,7 @@ export default function MapScreen({
                     {/* Trip planner stops */}
                     {isTransitMode && tripPlannerRoute && tripPlannerRoute.transitStops.map((stop, idx) => (
                         <MapboxGL.PointAnnotation
-                            key={`trip-stop-${idx}-${stop.stopCode ?? stop.lat}-${selectedStop.selectedStopAnnotationId === `trip-stop-${idx}` ? 'selected' : 'idle'}`} id={`trip-stop-${idx}`}
+                            key={`trip-stop-${idx}-${stop.stopCode ?? stop.lat}`} id={`trip-stop-${idx}`}
                             ref={(ref) => { stopAnnotationRefs.current[`trip-stop-${idx}`] = ref; }}
                             coordinate={[stop.lon, stop.lat]}
                             selected={selectedStop.selectedStopAnnotationId === `trip-stop-${idx}`}
@@ -1317,7 +1467,7 @@ export default function MapScreen({
 
                 <MapModeSwitcher activeMode={mapExperienceMode} onSelectMode={handleMapExperienceModeChange} />
 
-                <View style={styles.settingsPillWrap}>
+                <View style={[styles.settingsPillWrap, { bottom: floatingControlBottomOffset  }]}>
                     <View
                         pointerEvents={settingsExpanded ? 'none' : 'auto'}
                         style={styles.settingsCollapsedTouchAreaWrap}
@@ -1392,8 +1542,16 @@ export default function MapScreen({
                     </Animated.View>
                 </View>
 
-                <View style={styles.floatingRowWrap}>
-                    <ReminderCenterButton inline opaque={!!selectedStop.selectedStop || search.searchModalVisible || favorites.favoritesVisible || !!filterPanelVisible} />
+                <View style={[styles.floatingRowWrap, { bottom: floatingControlBottomOffset }]}>
+                    {isTransitMode && !favorites.favoritesVisible ? (
+                        <ReminderCenterButton inline transparent opaque={!!selectedStop.selectedStop || search.searchModalVisible || favorites.favoritesVisible || !!filterPanelVisible} />
+                    ) : null}
+                    {isParkingMode ? (
+                        <ScheduledSmsBadge
+                            transparent
+                            onPress={openParkingPaymentPanel}
+                        />
+                    ) : null}
                     {isActive && location && (!userLocationVisible || isUserFollowLocked) && (
                         <TouchableOpacity
                             style={[styles.recenterFloatingButton, isUserFollowLocked && styles.recenterFloatingButtonLocked]}
@@ -1427,23 +1585,23 @@ export default function MapScreen({
 
                 {/* Clear route buttons */}
                 {isTransitMode && vehicleRoute.hasVehicleRoute && (
-                    <TouchableOpacity style={styles.clearRouteButton} onPress={vehicleRoute.clearVehicleRoute}>
+                    <TouchableOpacity style={[styles.clearRouteButton, { top: topFloatingOffset }]} onPress={vehicleRoute.clearVehicleRoute}>
                         <Ionicons name="close" size={18} color="#334155" />
                     </TouchableOpacity>
                 )}
                 {isTransitMode && tripPlannerRoute && onClearTripRoute && (
-                    <TouchableOpacity style={[styles.clearRouteButton, { top: vehicleRoute.hasVehicleRoute ? 100 : 50 }]} onPress={onClearTripRoute}>
+                    <TouchableOpacity style={[styles.clearRouteButton, { top: vehicleRoute.hasVehicleRoute ? stackedTopFloatingOffset : topFloatingOffset }]} onPress={handleClearShownTripRoute}>
                         <Ionicons name="close" size={18} color="#334155" />
                     </TouchableOpacity>
                 )}
                 {isTransitMode && !!highlightedRoute && !!onClearHighlightedRoute && !tripPlannerRoute && (
-                    <TouchableOpacity style={[styles.clearRouteButton, { top: vehicleRoute.hasVehicleRoute ? 100 : 50 }]} onPress={onClearHighlightedRoute}>
+                    <TouchableOpacity style={[styles.clearRouteButton, { top: vehicleRoute.hasVehicleRoute ? stackedTopFloatingOffset : topFloatingOffset }]} onPress={onClearHighlightedRoute}>
                         <Ionicons name="close" size={18} color="#334155" />
                     </TouchableOpacity>
                 )}
                 {isParkingMode && !!focusedParkingZoneFeatureId && !!onClearFocusedParkingZone && (
                     <TouchableOpacity
-                        style={styles.clearRouteButton}
+                        style={[styles.clearRouteButton, { top: topFloatingOffset }]}
                         onPress={() => {
                             camera.setRouteCameraBounds(null);
                             camera.setTripCameraBounds(null);
@@ -1490,7 +1648,7 @@ export default function MapScreen({
                         favorites.setFavoritesVisible(false);
                     }}
                     onShowRouteOnMap={(route) => {
-                        onShowTripRoute?.(route);
+                        onShowTripRoute?.(route, 'favorites');
                         favorites.setFavoritesVisible(false);
                     }}
                     onReorder={favorites.reorderFavorites}
@@ -1560,6 +1718,7 @@ export default function MapScreen({
                 {isTransitMode && droppedPin && !selectedStop.selectedStop && !selectedVehicle && (
                     <DroppedPinPanel
                         pin={droppedPin}
+                        bottomOffset={droppedPinPanelBottomOffset}
                         onClose={() => setDroppedPin(null)}
                         onSaveFavorite={droppedPinAlreadySaved ? undefined : () => {
                             void favorites.saveFavorite(
@@ -1582,6 +1741,7 @@ export default function MapScreen({
                 {isParkingMode && droppedPin && !selectedStop.selectedStop && !selectedVehicle && !selectedParkingLot && (
                     <DroppedPinPanel
                         pin={droppedPin}
+                        bottomOffset={droppedPinPanelBottomOffset}
                         onClose={() => setDroppedPin(null)}
                         primaryActionLabel="Навигирай ме"
                         onBuildRoute={() => {
@@ -1598,11 +1758,13 @@ export default function MapScreen({
                     <ParkingLotInfoPanel
                         lot={selectedParkingLot}
                         liveData={selectedLotLiveData}
+                        inline
+                        bottomOffset={parkingOverlayBottomOffset}
                         onClose={() => setSelectedParkingLotId(null)}
                     />
                 )}
 
-                {isTransitMode && selectedStop.selectedStop && !selectedVehicle && (
+                {isTransitMode && selectedStop.selectedStop && !selectedVehicle && !schedule.scheduleStopId && (
                     <StopInfoPanel
                         stop={selectedStop.selectedStop}
                         etas={etasHook.etasByStopId[selectedStop.selectedStop.id] || []}
@@ -1624,7 +1786,7 @@ export default function MapScreen({
                 )}
 
                 {showReportButton && isTransitMode && (
-                    <View style={styles.bottomOverlay}>
+                    <View style={[styles.bottomOverlay, { bottom: reportButtonBottomOffset }]}>
                         <TouchableOpacity style={styles.reportButton} onPress={reporting.openReportModal}>
                             <Text style={styles.reportText}>{'\uD83D\uDEA8'} Сигнализирай</Text>
                         </TouchableOpacity>
@@ -1659,6 +1821,36 @@ export default function MapScreen({
                     onClose={() => setSupportVisible(false)}
                     onOpenSupport={handleOpenSupportLink}
                 />
+                {activeParkingOverlay ? (
+                    <View
+                        style={[
+                            styles.parkingSheetCard,
+                            {
+                                bottom: parkingOverlayBottomOffset,
+                                height: activeParkingOverlay === 'payment' ? parkingPaymentPanelHeight : parkingCarsPanelHeight,
+                            },
+                        ]}
+                    >
+                        {activeParkingOverlay === 'payment' ? (
+                            <ParkingPaymentScreen
+                                cars={parkingCars.cars}
+                                defaultZoneId={detectedParkingZoneId}
+                                onClose={() => setActiveParkingOverlay(null)}
+                                onOpenManageCars={openParkingCarsPanel}
+                            />
+                        ) : (
+                            <ParkingCarsScreen
+                                cars={parkingCars.cars}
+                                loading={parkingCars.loading}
+                                onAddCar={parkingCars.addCar}
+                                onRemoveCar={parkingCars.removeCar}
+                                onUpdateCar={parkingCars.updateCar}
+                                onSetDefaultCar={parkingCars.setDefaultCar}
+                                onClose={() => setActiveParkingOverlay(null)}
+                            />
+                        )}
+                    </View>
+                ) : null}
             </View>
         </View>
     );
@@ -1678,13 +1870,13 @@ const styles = StyleSheet.create({
     stopLabelText: { color: '#0F172A', fontSize: 10, fontWeight: '700', textAlign: 'center' },
     routeStopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFFFFF', borderWidth: 2, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 2, elevation: 2 },
     routeStopDotSelected: { width: 14, height: 14, borderRadius: 7, borderWidth: 2.5, transform: [{ scale: 1.15 }] },
-    routeStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginTop: 3, maxWidth: 120, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 3 },
-    routeStopName: { fontSize: 9, fontWeight: '600', color: '#0F172A', textAlign: 'center' },
+    routeStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, marginTop: 3, maxWidth: 156, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 3 },
+    routeStopName: { fontSize: 10, fontWeight: '600', color: '#0F172A', textAlign: 'center', lineHeight: 12 },
     vehicleRouteStopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#059669', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 2, elevation: 2 },
     vehicleRouteStopDotSelected: { width: 14, height: 14, borderRadius: 7, borderWidth: 2.5, transform: [{ scale: 1.15 }] },
-    vehicleRouteStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginTop: 3, maxWidth: 120, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 3 },
-    vehicleRouteStopName: { fontSize: 9, fontWeight: '600', color: '#0F172A', textAlign: 'center' },
-    vehicleRouteStopTime: { fontSize: 9, fontWeight: '700', color: '#059669', textAlign: 'center' },
+    vehicleRouteStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, marginTop: 3, maxWidth: 156, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 3 },
+    vehicleRouteStopName: { fontSize: 10, fontWeight: '600', color: '#0F172A', textAlign: 'center', lineHeight: 12 },
+    vehicleRouteStopTime: { fontSize: 10, fontWeight: '700', color: '#059669', textAlign: 'center', lineHeight: 12 },
     routeDirectionArrow: { fontSize: 16, fontWeight: '900', textShadowColor: 'rgba(255,255,255,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
     tripDirectionArrow: { fontSize: 16, fontWeight: '900', textShadowColor: 'rgba(255,255,255,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
     tripModeMarker: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.25, shadowRadius: 3, elevation: 5 },
@@ -1694,11 +1886,10 @@ const styles = StyleSheet.create({
     tripEndpointMarker: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#059669', alignItems: 'center', justifyContent: 'center', borderWidth: 2.5, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 4, elevation: 6 },
     tripEndpointMarkerEnd: { backgroundColor: '#DC2626' },
     tripEndpointText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
-    clearRouteButton: { position: 'absolute', top: 50, left: 16, backgroundColor: 'rgba(255,255,255,0.92)', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 4, zIndex: 30 },
+    clearRouteButton: { position: 'absolute', left: 16, backgroundColor: 'rgba(255,255,255,0.92)', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 4, zIndex: 30 },
     settingsPillWrap: {
         position: 'absolute',
         left: 0,
-        bottom: 106,
         width: 94,
         height: 48,
         zIndex: 2,
@@ -1740,12 +1931,27 @@ const styles = StyleSheet.create({
     floatingRowWrap: {
         position: 'absolute',
         right: 16,
-        bottom: 110,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
         zIndex: 0,
         elevation: 0,
+    },
+    parkingSheetCard: {
+        position: 'absolute',
+        left: 16,
+        right: 16,
+        backgroundColor: 'rgba(255,255,255,0.82)',
+        borderRadius: 24,
+        zIndex: 25,
+        elevation: 25,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.12,
+        shadowRadius: 28,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
+        overflow: 'hidden',
     },
     settingsSupportSlot: {
         width: 34,
@@ -1824,7 +2030,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '600',
     },
-    bottomOverlay: { position: 'absolute', bottom: 40, width: '100%', alignItems: 'center', zIndex: 5, elevation: 5 },
+    bottomOverlay: { position: 'absolute', width: '100%', alignItems: 'center', zIndex: 5, elevation: 5 },
     reportButton: { backgroundColor: '#E63946', paddingHorizontal: 25, paddingVertical: 15, borderRadius: 30, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 6 },
     reportText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
 });

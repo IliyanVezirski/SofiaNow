@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, TouchableOpacity, Modal, StyleSheet } from 'react-native';
+import { ActivityIndicator, View, Text, Pressable, ScrollView, TouchableOpacity, Modal, StyleSheet, useWindowDimensions } from 'react-native';
 import { StopEta, StaticScheduleEntry, DayType } from '../../../types/vehicles';
 import { getEtaScheduleInfo } from '../../../services/cgmApi/schedules';
 import { getVehicleAccentColor, getVehicleIconName, formatUnixTime } from '../../../services/transitUtils';
@@ -20,32 +20,52 @@ interface Props {
 export const StopScheduleModal: React.FC<Props> = ({
     stopId, stopName, realtime, staticSchedule, dayType, loading, onClose, onChangeDayType,
 }) => {
+    const { height } = useWindowDimensions();
+
     if (!stopId) return null;
 
+    const panelBottomOffset = Math.min(Math.max(height * 0.16, 96), 188);
+    const panelMaxHeight = Math.max(height - panelBottomOffset - 8, 360);
+    const listMaxHeight = Math.max(panelMaxHeight - 92, 220);
+
     return (
-        <Modal animationType="slide" transparent={false} visible={!!stopId} onRequestClose={onClose}>
-            <View style={styles.fullScreen}>
-                <View style={styles.header}>
-                    <View style={styles.titleWrap}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                            <Ionicons name="calendar-outline" size={16} color="#0F172A" />
-                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.title}>{stopName}</Text>
-                        </View>
-                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.meta}>{`Спирка ${stopId}`}</Text>
-                    </View>
-                    <Pressable style={styles.closeBtn} onPress={onClose}>
-                        <Ionicons name="close" size={20} color="#334155" />
-                    </Pressable>
-                </View>
-                {loading && <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.eta}>Зареждане...</Text>}
-                <ScrollView style={styles.list} showsVerticalScrollIndicator nestedScrollEnabled>
-                    {realtime.length > 0 && (
-                        <>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                                <Ionicons name="radio-button-on" size={12} color="#DC2626" />
-                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.sectionTitle}>В реално време</Text>
+        <Modal animationType="fade" transparent visible={!!stopId} onRequestClose={onClose} statusBarTranslucent>
+            <View style={styles.modalRoot}>
+                <Pressable style={styles.backdrop} onPress={onClose} />
+                <View style={[styles.panel, { marginBottom: panelBottomOffset, maxHeight: panelMaxHeight }]}>
+                    <View style={styles.header}>
+                        <View style={styles.headerRow}>
+                            <View style={styles.headerTextWrap}>
+                                <Text style={styles.title}>Разписание</Text>
+                                <Text style={styles.subtitle} numberOfLines={2}>{`${stopName} • Спирка ${stopId}`}</Text>
                             </View>
-                            {realtime.map((eta) => {
+                            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+                                <Ionicons name="close" size={18} color="#334155" />
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
+                    <ScrollView
+                        style={[styles.routeArea, { maxHeight: listMaxHeight }]}
+                        contentContainerStyle={styles.routeAreaContent}
+                        showsVerticalScrollIndicator={false}
+                        nestedScrollEnabled
+                        bounces={false}
+                    >
+                        {loading && !realtime.length && !staticSchedule.length && (
+                            <View style={styles.inlineLoader}>
+                                <ActivityIndicator size="small" color="#1D4ED8" />
+                                <Text style={styles.inlineLoaderText}>Зареждане...</Text>
+                            </View>
+                        )}
+
+                        {realtime.length > 0 && (
+                            <View style={styles.routeCard}>
+                                <View style={styles.sectionHeaderRow}>
+                                    <Ionicons name="radio-button-on" size={12} color="#DC2626" />
+                                    <Text style={styles.sectionTitle}>В реално време</Text>
+                                </View>
+                                {realtime.map((eta) => {
                                         const info = getEtaScheduleInfo(eta);
                                         const hasDelay = info.delayMinutes != null && info.delayMinutes > 0;
                                         const isEarly = info.delayMinutes != null && info.delayMinutes < 0;
@@ -59,7 +79,7 @@ export const StopScheduleModal: React.FC<Props> = ({
                                                     <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(eta.type) }]}>
                                                         <Ionicons name={getVehicleIconName(eta.type) as any} size={15} color="#FFFFFF" />
                                                     </View>
-                                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.eta}>
+                                                    <Text style={styles.eta}>
                                                         {`${eta.line} \u2192 ${eta.destination || 'н/д'} \u2022 ${eta.minutesAway} мин \u2022 ${formatUnixTime(eta.arrivalTimestamp)}`}
                                                         {schedText ? ` (разп. ${schedText})` : ''}
                                                         {delayText ? ' ' : ''}
@@ -73,60 +93,146 @@ export const StopScheduleModal: React.FC<Props> = ({
                                             </View>
                                         );
                                     })}
-                        </>
-                    )}
-                    {staticSchedule.length > 0 && (
-                        <>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8, marginTop: realtime.length > 0 ? 12 : 0 }}>
-                                <Ionicons name="list-outline" size={14} color="#0F172A" />
-                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.sectionTitle}>Статично разписание</Text>
                             </View>
-                            <View style={styles.dayTypeRow}>
-                                <TouchableOpacity style={[styles.dayTypeChip, dayType === 'w' && styles.dayTypeChipActive]} onPress={() => onChangeDayType('w')}>
-                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={[styles.dayTypeChipText, dayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={[styles.dayTypeChip, dayType === 'h' && styles.dayTypeChipActive]} onPress={() => onChangeDayType('h')}>
-                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={[styles.dayTypeChipText, dayType === 'h' && styles.dayTypeChipTextActive]}>Почивен ден</Text>
-                                </TouchableOpacity>
-                            </View>
-                            {staticSchedule.map((entry) => (
-                                <View key={`st-${entry.line}-${entry.destination}`} style={styles.row}>
-                                    <View style={styles.etaHeaderRow}>
-                                        <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(entry.type) }]}>
-                                            <Ionicons name={getVehicleIconName(entry.type) as any} size={15} color="#FFFFFF" />
-                                        </View>
-                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.eta}>{`${entry.line} \u2192 ${entry.destination}`}</Text>
-                                    </View>
-                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.meta}>{entry.times.map(formatMinutesSinceMidnight).join(', ')}</Text>
+                        )}
+
+                        {staticSchedule.length > 0 && (
+                            <View style={styles.routeCard}>
+                                <View style={styles.sectionHeaderRow}>
+                                    <Ionicons name="list-outline" size={14} color="#0F172A" />
+                                    <Text style={styles.sectionTitle}>Разписание</Text>
                                 </View>
-                            ))}
-                        </>
-                    )}
-                    {!loading && !realtime.length && !staticSchedule.length && (
-                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.eta}>Няма налично разписание за тази спирка</Text>
-                    )}
-                </ScrollView>
+                                <View style={styles.dayTypeRow}>
+                                    <TouchableOpacity style={[styles.dayTypeChip, dayType === 'w' && styles.dayTypeChipActive]} onPress={() => onChangeDayType('w')}>
+                                        <Text style={[styles.dayTypeChipText, dayType === 'w' && styles.dayTypeChipTextActive]}>Делник</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={[styles.dayTypeChip, dayType === 'h' && styles.dayTypeChipActive]} onPress={() => onChangeDayType('h')}>
+                                        <Text style={[styles.dayTypeChipText, dayType === 'h' && styles.dayTypeChipTextActive]}>Почивен ден</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                {staticSchedule.map((entry) => (
+                                    <View key={`st-${entry.line}-${entry.destination}`} style={styles.row}>
+                                        <View style={styles.etaHeaderRow}>
+                                            <View style={[styles.vehicleBadge, { backgroundColor: getVehicleAccentColor(entry.type) }]}>
+                                                <Ionicons name={getVehicleIconName(entry.type) as any} size={15} color="#FFFFFF" />
+                                            </View>
+                                            <Text style={styles.eta}>{`${entry.line} \u2192 ${entry.destination}`}</Text>
+                                        </View>
+                                        <Text style={styles.meta}>{entry.times.map(formatMinutesSinceMidnight).join(', ')}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        )}
+
+                        {!loading && !realtime.length && !staticSchedule.length && (
+                            <Text style={styles.emptyText}>Няма налично разписание за тази спирка</Text>
+                        )}
+                    </ScrollView>
+                </View>
             </View>
         </Modal>
     );
 };
 
 const styles = StyleSheet.create({
-    fullScreen: { flex: 1, backgroundColor: '#F8FAFC', paddingTop: 50, paddingHorizontal: 16, paddingBottom: 16 },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(226,232,240,0.72)' },
-    titleWrap: { flex: 1 },
-    title: { color: '#0F172A', fontSize: 16, fontWeight: '700' },
-    meta: { color: '#475569', fontSize: 12, marginBottom: 2 },
-    closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center' },
-    list: { flexGrow: 1, gap: 6 },
-    eta: { flex: 1, color: '#0F172A', fontSize: 13, marginBottom: 8 },
-    sectionTitle: { color: '#0F172A', fontSize: 13, fontWeight: '700' },
+    modalRoot: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(15,23,42,0.18)',
+    },
+    panel: {
+        marginHorizontal: 16,
+        backgroundColor: '#F8FAFC',
+        borderRadius: 22,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.9)',
+        overflow: 'hidden',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.12,
+        shadowRadius: 28,
+        zIndex: 30,
+        elevation: 30,
+    },
+    header: {
+        paddingHorizontal: 14,
+        paddingTop: 6,
+        paddingBottom: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(226,232,240,0.9)',
+    },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+    },
+    headerTextWrap: {
+        flex: 1,
+        paddingRight: 12,
+    },
+    title: {
+        color: '#0F172A',
+        fontSize: 18,
+        fontWeight: '700',
+    },
+    subtitle: {
+        marginTop: 2,
+        color: '#475569',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    closeButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(248,250,252,0.72)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
+    },
+    routeArea: {
+        flexGrow: 0,
+        backgroundColor: '#F8FAFC',
+    },
+    routeAreaContent: {
+        paddingHorizontal: 12,
+        paddingTop: 10,
+        paddingBottom: 16,
+    },
+    routeCard: {
+        backgroundColor: 'rgba(255,255,255,0.96)',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
+        padding: 10,
+        marginBottom: 8,
+    },
+    inlineLoader: {
+        marginTop: 36,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+    },
+    inlineLoaderText: {
+        color: '#334155',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    eta: { flex: 1, minWidth: 0, color: '#0F172A', fontSize: 13, marginBottom: 8, lineHeight: 19 },
+    sectionTitle: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
+    sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
     row: { backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
-    etaHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    etaHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
     vehicleBadge: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-    dayTypeRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+    dayTypeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
     dayTypeChip: { backgroundColor: 'rgba(226,232,240,0.72)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)' },
     dayTypeChipActive: { backgroundColor: '#1D4ED8', borderColor: '#1D4ED8' },
     dayTypeChipText: { color: '#475569', fontSize: 12, fontWeight: '700' },
     dayTypeChipTextActive: { color: '#FFFFFF' },
+    meta: { color: '#475569', fontSize: 12, marginBottom: 2 },
+    emptyText: { color: '#64748B', fontSize: 14, fontWeight: '600', marginTop: 48, textAlign: 'center' },
 });

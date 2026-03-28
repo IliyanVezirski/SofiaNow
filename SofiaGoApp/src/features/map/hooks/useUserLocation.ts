@@ -16,8 +16,17 @@ export const useUserLocation = () => {
                     : (await Location.requestForegroundPermissionsAsync()).status;
 
                 if (status === 'granted') {
-                    const lastKnown = await Location.getLastKnownPositionAsync({ maxAge: 1000 * 60 * 10 });
+                    const lastKnown = await Location.getLastKnownPositionAsync({ requiredAccuracy: 3000, maxAge: 1000 * 60 * 60 * 6 });
                     if (lastKnown && isMounted) setLocation(lastKnown);
+
+                    try {
+                        const quickCurrent = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+                        if (quickCurrent && isMounted) {
+                            setLocation(quickCurrent);
+                        }
+                    } catch (err) {
+                        console.warn('Quick location unavailable:', err);
+                    }
 
                     locationSubscription = await Location.watchPositionAsync(
                         {
@@ -47,7 +56,7 @@ export const useUserLocation = () => {
         try {
             const { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') return;
-            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
             setLocation(loc);
         } catch (err) {
             console.warn('Failed to refresh location:', err);

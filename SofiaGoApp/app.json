@@ -24,19 +24,13 @@
         "icon": "./assets/android-icon-monochrome.png",
         "color": "#0F766E"
       },
-      "package": "com.iliyanvezirski.SofiaGoApp"
+      "package": "com.iliyanvezirski.SofiaGoApp",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/app-icon-new.png"
     },
     "plugins": [
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
-          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
-        }
-      ],
       "expo-localization",
       [
         "expo-notifications",
@@ -46,7 +40,6 @@
           "defaultChannel": "transit-arrivals-v2"
         }
       ],
-      "expo-dev-client",
       "@maplibre/maplibre-react-native",
       "expo-asset",
       "expo-font",

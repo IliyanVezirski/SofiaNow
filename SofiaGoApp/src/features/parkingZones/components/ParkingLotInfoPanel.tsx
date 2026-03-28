@@ -1,5 +1,5 @@
 import React from 'react';
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ParkingLot, ParkingLotCategory } from '../types/parkingLots';
 import type { LiveParkingLot } from '../../../services/parkingApi';
@@ -20,126 +20,137 @@ interface Props {
     lot: ParkingLot;
     liveData?: LiveParkingLot | null;
     onClose: () => void;
+    inline?: boolean;
+    bottomOffset?: number;
 }
 
-export const ParkingLotInfoPanel: React.FC<Props> = ({ lot, liveData, onClose }) => {
+export const ParkingLotInfoPanel: React.FC<Props> = ({ lot, liveData, onClose, inline = false, bottomOffset }) => {
     const meta = CATEGORY_META[lot.category];
     const hasLive = liveData != null && liveData.spaces != null;
+    const { height } = useWindowDimensions();
+    const panelBottomOffset = Math.min(Math.max(height * 0.16, 96), 188);
+    const panelMaxHeight = Math.min(Math.max(height * 0.42, 280), 420);
+    const scrollMaxHeight = Math.min(Math.max(panelMaxHeight - 128, 140), 260);
 
     const openDirections = () => {
         void openExternalDrivingNavigation(lot.latitude, lot.longitude);
     };
 
+    const panelContent = (
+        <View style={[
+            inline ? styles.inlinePanel : styles.panel,
+            inline ? { bottom: bottomOffset ?? panelBottomOffset, maxHeight: panelMaxHeight } : { marginBottom: panelBottomOffset, maxHeight: panelMaxHeight },
+        ]}>
+            <View style={styles.header}>
+                <View style={[styles.categoryBadge, { backgroundColor: meta.color }]}>
+                    <Ionicons name={meta.icon as any} size={15} color="#FFF" />
+                </View>
+                <Text style={styles.title} numberOfLines={2}>{lot.name}</Text>
+                <Pressable style={styles.closeBtn} onPress={onClose}>
+                    <Ionicons name="close" size={18} color="#334155" />
+                </Pressable>
+            </View>
+
+            <ScrollView style={[styles.scroll, { maxHeight: scrollMaxHeight }]} nestedScrollEnabled>
+                <Text style={styles.info}>{meta.label}</Text>
+
+                {hasLive && (
+                    <View style={styles.liveCard}>
+                        <View style={styles.liveRow}>
+                            <View style={styles.liveDot} />
+                            <Text style={styles.liveLabel}>Свободни места</Text>
+                        </View>
+                        <Text style={styles.liveCount}>{liveData!.spaces}</Text>
+                    </View>
+                )}
+
+                {(lot.capacity != null || lot.fee || lot.parkRide || lot.maxheight != null || lot.surface) && (
+                    <View style={styles.detailCard}>
+                        {lot.capacity != null && (
+                            <View style={styles.detailRow}>
+                                <Ionicons name="car-outline" size={13} color="#475569" />
+                                <Text style={styles.detailText}>Капацитет: {lot.capacity}</Text>
+                            </View>
+                        )}
+                        {lot.fee && (
+                            <View style={styles.detailRow}>
+                                <Ionicons name="card-outline" size={13} color="#475569" />
+                                <Text style={styles.detailText}>Платен</Text>
+                            </View>
+                        )}
+                        {lot.parkRide && (
+                            <View style={styles.detailRow}>
+                                <Ionicons name="train-outline" size={13} color="#0D9488" />
+                                <Text style={[styles.detailText, { color: '#0D9488' }]}>Park & Ride</Text>
+                            </View>
+                        )}
+                        {lot.maxheight != null && (
+                            <View style={styles.detailRow}>
+                                <Ionicons name="resize-outline" size={13} color="#475569" />
+                                <Text style={styles.detailText}>Макс. височ.: {lot.maxheight} м</Text>
+                            </View>
+                        )}
+                        {lot.surface && (
+                            <View style={styles.detailRow}>
+                                <Ionicons name="layers-outline" size={13} color="#475569" />
+                                <Text style={styles.detailText}>{lot.surface}</Text>
+                            </View>
+                        )}
+                    </View>
+                )}
+
+                {(lot.operator || lot.openingHours) && (
+                    <View style={styles.detailCard}>
+                        {lot.operator && (
+                            <View style={styles.detailRow}>
+                                <Ionicons name="business-outline" size={13} color="#64748B" />
+                                <Text style={styles.detailText}>{lot.operator}</Text>
+                            </View>
+                        )}
+                        {lot.openingHours && (
+                            <View style={styles.detailRow}>
+                                <Ionicons name="time-outline" size={13} color="#64748B" />
+                                <Text style={styles.detailText}>{lot.openingHours}</Text>
+                            </View>
+                        )}
+                    </View>
+                )}
+            </ScrollView>
+
+            <View style={styles.footerActions}>
+                <TouchableOpacity style={styles.navBtn} onPress={openDirections}>
+                    <Ionicons name="navigate-outline" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
+                    <Text style={styles.navBtnText}>Навигирай</Text>
+                </TouchableOpacity>
+                {lot.phone && (
+                    <TouchableOpacity
+                        style={styles.secondaryBtn}
+                        onPress={() => Linking.openURL(`tel:${lot.phone}`).catch(() => {})}
+                    >
+                        <Ionicons name="call-outline" size={14} color="#1D4ED8" />
+                    </TouchableOpacity>
+                )}
+                {lot.website && (
+                    <TouchableOpacity
+                        style={styles.secondaryBtn}
+                        onPress={() => Linking.openURL(lot.website!).catch(() => {})}
+                    >
+                        <Ionicons name="globe-outline" size={14} color="#1D4ED8" />
+                    </TouchableOpacity>
+                )}
+            </View>
+        </View>
+    );
+
+    if (inline) {
+        return panelContent;
+    }
+
     return (
         <Modal transparent animationType="fade" visible onRequestClose={onClose} statusBarTranslucent>
             <View style={styles.modalRoot}>
                 <Pressable style={styles.backdrop} onPress={onClose} />
-                <View style={styles.panel}>
-                    {/* Header */}
-                    <View style={styles.header}>
-                        <View style={[styles.categoryBadge, { backgroundColor: meta.color }]}>
-                            <Ionicons name={meta.icon as any} size={15} color="#FFF" />
-                        </View>
-                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.title} numberOfLines={1}>{lot.name}</Text>
-                        <Pressable style={styles.closeBtn} onPress={onClose}>
-                            <Ionicons name="close" size={18} color="#334155" />
-                        </Pressable>
-                    </View>
-
-                    <ScrollView style={styles.scroll} nestedScrollEnabled>
-                        {/* Category subtitle */}
-                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.info}>{meta.label}</Text>
-
-                        {/* Live availability */}
-                        {hasLive && (
-                            <View style={styles.liveCard}>
-                                <View style={styles.liveRow}>
-                                    <View style={styles.liveDot} />
-                                    <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.liveLabel}>Свободни места</Text>
-                                </View>
-                                <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.liveCount}>{liveData!.spaces}</Text>
-                            </View>
-                        )}
-
-                        {/* Details chips */}
-                        {(lot.capacity != null || lot.fee || lot.parkRide || lot.maxheight != null || lot.surface) && (
-                            <View style={styles.detailCard}>
-                                {lot.capacity != null && (
-                                    <View style={styles.detailRow}>
-                                        <Ionicons name="car-outline" size={13} color="#475569" />
-                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.detailText}>Капацитет: {lot.capacity}</Text>
-                                    </View>
-                                )}
-                                {lot.fee && (
-                                    <View style={styles.detailRow}>
-                                        <Ionicons name="card-outline" size={13} color="#475569" />
-                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.detailText}>Платен</Text>
-                                    </View>
-                                )}
-                                {lot.parkRide && (
-                                    <View style={styles.detailRow}>
-                                        <Ionicons name="train-outline" size={13} color="#0D9488" />
-                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={[styles.detailText, { color: '#0D9488' }]}>Park & Ride</Text>
-                                    </View>
-                                )}
-                                {lot.maxheight != null && (
-                                    <View style={styles.detailRow}>
-                                        <Ionicons name="resize-outline" size={13} color="#475569" />
-                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.detailText}>Макс. височ.: {lot.maxheight} м</Text>
-                                    </View>
-                                )}
-                                {lot.surface && (
-                                    <View style={styles.detailRow}>
-                                        <Ionicons name="layers-outline" size={13} color="#475569" />
-                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.detailText}>{lot.surface}</Text>
-                                    </View>
-                                )}
-                            </View>
-                        )}
-
-                        {/* Meta: operator, hours */}
-                        {(lot.operator || lot.openingHours) && (
-                            <View style={styles.detailCard}>
-                                {lot.operator && (
-                                    <View style={styles.detailRow}>
-                                        <Ionicons name="business-outline" size={13} color="#64748B" />
-                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.detailText}>{lot.operator}</Text>
-                                    </View>
-                                )}
-                                {lot.openingHours && (
-                                    <View style={styles.detailRow}>
-                                        <Ionicons name="time-outline" size={13} color="#64748B" />
-                                        <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.detailText}>{lot.openingHours}</Text>
-                                    </View>
-                                )}
-                            </View>
-                        )}
-                    </ScrollView>
-
-                    {/* Footer actions – same style as stop panel */}
-                    <View style={styles.footerActions}>
-                        <TouchableOpacity style={styles.navBtn} onPress={openDirections}>
-                            <Ionicons name="navigate-outline" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
-                            <Text allowFontScaling={false} maxFontSizeMultiplier={1} style={styles.navBtnText}>Навигирай</Text>
-                        </TouchableOpacity>
-                        {lot.phone && (
-                            <TouchableOpacity
-                                style={styles.secondaryBtn}
-                                onPress={() => Linking.openURL(`tel:${lot.phone}`).catch(() => {})}
-                            >
-                                <Ionicons name="call-outline" size={14} color="#1D4ED8" />
-                            </TouchableOpacity>
-                        )}
-                        {lot.website && (
-                            <TouchableOpacity
-                                style={styles.secondaryBtn}
-                                onPress={() => Linking.openURL(lot.website!).catch(() => {})}
-                            >
-                                <Ionicons name="globe-outline" size={14} color="#1D4ED8" />
-                            </TouchableOpacity>
-                        )}
-                    </View>
-                </View>
+                {panelContent}
             </View>
         </Modal>
     );
@@ -155,9 +166,23 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(15,23,42,0.18)',
     },
     panel: {
-        marginBottom: 188,
         marginHorizontal: 16,
-        maxHeight: 280,
+        backgroundColor: 'rgba(255,255,255,0.82)',
+        borderRadius: 24,
+        padding: 14,
+        zIndex: 25,
+        elevation: 25,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.12,
+        shadowRadius: 28,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
+    },
+    inlinePanel: {
+        position: 'absolute',
+        left: 16,
+        right: 16,
         backgroundColor: 'rgba(255,255,255,0.82)',
         borderRadius: 24,
         padding: 14,
@@ -199,9 +224,10 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(226,232,240,0.72)',
         alignItems: 'center',
         justifyContent: 'center',
+        flexShrink: 0,
     },
     scroll: {
-        maxHeight: 150,
+        flexGrow: 0,
     },
     info: {
         fontSize: 12,
@@ -254,10 +280,12 @@ const styles = StyleSheet.create({
     },
     detailRow: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         gap: 6,
     },
     detailText: {
+        flex: 1,
+        minWidth: 0,
         fontSize: 12,
         color: '#475569',
         fontWeight: '600',
@@ -267,6 +295,7 @@ const styles = StyleSheet.create({
         marginTop: 8,
         flexDirection: 'row',
         alignItems: 'center',
+        flexWrap: 'wrap',
         gap: 10,
     },
     navBtn: {

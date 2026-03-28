@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Vehicle } from '../../../types/vehicles';
+import { haversineDistanceMeters } from '../../../services/transitUtils';
 import { VehicleType } from '../../../services/transitUtils';
 import {
     normalizeHeadingDegrees,
@@ -9,7 +10,26 @@ import {
     OVERLAP_GROUP_DECIMALS,
     OVERLAP_OFFSET_DEGREES,
     MAX_RENDERED_VEHICLES,
+    VEHICLE_REFRESH_MS,
 } from '../../map/constants';
+
+const VEHICLE_ANIMATION_DURATION_MS = Math.max(900, VEHICLE_REFRESH_MS - 180);
+const VEHICLE_TELEPORT_DISTANCE_METERS = 450;
+
+type VehicleAnimationState = {
+    vehicle: Vehicle;
+    fromLatitude: number;
+    fromLongitude: number;
+    toLatitude: number;
+    toLongitude: number;
+    fromHeading: number;
+    toHeading: number;
+    startedAtMs: number;
+    durationMs: number;
+};
+
+const interpolateHeading = (from: number, to: number, progress: number) =>
+    normalizeHeadingDegrees(from + shortestHeadingDelta(from, to) * progress);
 
 export const useVehicleAnimation = (
     vehicles: Vehicle[],
@@ -22,11 +42,28 @@ export const useVehicleAnimation = (
     const [animatedVehicles, setAnimatedVehicles] = useState<Vehicle[]>([]);
     const lastHeadingByVehicleRef = useRef<Record<string, number>>({});
     const animatedVehiclesRef = useRef<Vehicle[]>([]);
+    const animationFrameRef = useRef<number | null>(null);
+    const animationStatesRef = useRef<Record<string, VehicleAnimationState>>({});
 
     useEffect(() => { animatedVehiclesRef.current = animatedVehicles; }, [animatedVehicles]);
 
+    useEffect(() => () => {
+        if (animationFrameRef.current != null) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+        }
+    }, []);
+
     useEffect(() => {
-        if (!vehicles.length) { setAnimatedVehicles([]); return; }
+        if (!vehicles.length) {
+            if (animationFrameRef.current != null) {
+                cancelAnimationFrame(animationFrameRef.current);
+                animationFrameRef.current = null;
+            }
+            animationStatesRef.current = {};
+            setAnimatedVehicles([]);
+            return;
+        }
 
         const stabilized = vehicles.map((vehicle) => {
             const previousHeading = lastHeadingByVehicleRef.current[vehicle.id];
@@ -48,7 +85,87 @@ export const useVehicleAnimation = (
             lastHeadingByVehicleRef.current[vehicle.id] = stabilizedHeading;
             return { ...vehicle, headingDegrees: stabilizedHeading };
         });
-        setAnimatedVehicles(stabilized);
+
+        const currentAnimatedById = new Map(animatedVehiclesRef.current.map((vehicle) => [vehicle.id, vehicle]));
+        const now = Date.now();
+
+        animationStatesRef.current = stabilized.reduce<Record<string, VehicleAnimationState>>((accumulator, vehicle) => {
+            const currentAnimated = currentAnimatedById.get(vehicle.id);
+            const currentHeading = Number.isFinite(currentAnimated?.headingDegrees)
+                ? Number(currentAnimated?.headingDegrees)
+                : Number(vehicle.headingDegrees ?? 0);
+            const nextHeading = Number.isFinite(vehicle.headingDegrees)
+                ? Number(vehicle.headingDegrees)
+                : currentHeading;
+            const movedDistanceMeters = currentAnimated
+                ? haversineDistanceMeters(
+                    currentAnimated.latitude,
+                    currentAnimated.longitude,
+                    vehicle.latitude,
+                    vehicle.longitude,
+                )
+                : 0;
+            const shouldSnapToTarget = !currentAnimated || movedDistanceMeters >= VEHICLE_TELEPORT_DISTANCE_METERS;
+
+            accumulator[vehicle.id] = {
+                vehicle,
+                fromLatitude: shouldSnapToTarget ? vehicle.latitude : currentAnimated.latitude,
+                fromLongitude: shouldSnapToTarget ? vehicle.longitude : currentAnimated.longitude,
+                toLatitude: vehicle.latitude,
+                toLongitude: vehicle.longitude,
+                fromHeading: shouldSnapToTarget ? nextHeading : currentHeading,
+                toHeading: nextHeading,
+                startedAtMs: now,
+                durationMs: shouldSnapToTarget ? 0 : VEHICLE_ANIMATION_DURATION_MS,
+            };
+
+            return accumulator;
+        }, {});
+
+        if (animationFrameRef.current != null) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+        }
+
+        const renderAnimationFrame = () => {
+            const currentTime = Date.now();
+            const states = Object.values(animationStatesRef.current);
+
+            if (!states.length) {
+                setAnimatedVehicles([]);
+                animationFrameRef.current = null;
+                return;
+            }
+
+            let hasActiveAnimations = false;
+            const nextAnimatedVehicles = states.map((state) => {
+                const progress = state.durationMs <= 0
+                    ? 1
+                    : Math.min(1, Math.max(0, (currentTime - state.startedAtMs) / state.durationMs));
+
+                if (progress < 1) {
+                    hasActiveAnimations = true;
+                }
+
+                return {
+                    ...state.vehicle,
+                    latitude: state.fromLatitude + (state.toLatitude - state.fromLatitude) * progress,
+                    longitude: state.fromLongitude + (state.toLongitude - state.fromLongitude) * progress,
+                    headingDegrees: interpolateHeading(state.fromHeading, state.toHeading, progress),
+                };
+            });
+
+            setAnimatedVehicles(nextAnimatedVehicles);
+
+            if (hasActiveAnimations) {
+                animationFrameRef.current = requestAnimationFrame(renderAnimationFrame);
+                return;
+            }
+
+            animationFrameRef.current = null;
+        };
+
+        renderAnimationFrame();
     }, [vehicles]);
 
     const vehiclesByType = useMemo(() => {

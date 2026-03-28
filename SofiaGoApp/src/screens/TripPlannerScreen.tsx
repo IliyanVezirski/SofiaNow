@@ -143,6 +143,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
   const [suggestions, setSuggestions] = useState<TripLocation[]>([]);
   const [activeField, setActiveField] = useState<'from' | 'to' | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestionRequestIdRef = useRef(0);
   const manualFromEditedRef = useRef(false);
 
   const [planType, setPlanType] = useState<PlanType>('0');
@@ -240,6 +241,16 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
     setTimeInput(getCurrentPlannerTimeInput());
   }, [isActive, itineraries]);
 
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      suggestionRequestIdRef.current += 1;
+    };
+  }, []);
+
   /* autocomplete */
   const onChangeText = useCallback((field: 'from' | 'to', text: string) => {
     if (field === 'from') {
@@ -250,19 +261,40 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
     else { setToText(text); setToLoc(null); }
     setActiveField(field);
 
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (text.length < 2) { setSuggestions([]); return; }
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+
+    const requestId = ++suggestionRequestIdRef.current;
+
+    if (text.length < 2) {
+      setSuggestions([]);
+      return;
+    }
 
     debounceRef.current = setTimeout(async () => {
       try {
         // Use CGM API for location search
         const locs = await searchLocations(text);
-        setSuggestions(locs);
-      } catch { setSuggestions([]); }
+        if (suggestionRequestIdRef.current === requestId) {
+          setSuggestions(locs);
+        }
+      } catch {
+        if (suggestionRequestIdRef.current === requestId) {
+          setSuggestions([]);
+        }
+      }
     }, 350);
   }, []);
 
   const pickSuggestion = (loc: TripLocation) => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    suggestionRequestIdRef.current += 1;
+
     if (activeField === 'from') {
       manualFromEditedRef.current = true;
       setFromText(loc.name);
@@ -752,9 +784,9 @@ const s = StyleSheet.create({
     borderColor: 'rgba(191,219,254,0.72)',
   },
   quickDateChipText: { fontSize: 10, fontWeight: '700', color: '#1D4ED8' },
-  datetimeInputRow: { flexDirection: 'row', gap: 6 },
+  datetimeInputRow: { flexDirection: 'row', alignItems: 'stretch', gap: 6 },
   datetimeInputCol: { flex: 1 },
-  datetimeInputColSmall: { width: 100 },
+  datetimeInputColSmall: { flexBasis: 104, flexGrow: 0, flexShrink: 1 },
   datetimeLabel: { fontSize: 10, fontWeight: '600', color: '#475569', marginBottom: 3 },
   datetimeInput: {
     backgroundColor: 'rgba(248,250,252,0.72)',
@@ -766,7 +798,7 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(226,232,240,0.72)',
   },
-  arriveByRow: { flexDirection: 'row', gap: 5 },
+  arriveByRow: { flexDirection: 'row', gap: 5, flexWrap: 'wrap' },
   arriveByChip: {
     flex: 1,
     flexDirection: 'row',
@@ -848,7 +880,7 @@ const s = StyleSheet.create({
   },
   legRow: { flexDirection: 'row', marginBottom: 12 },
   legRowWalk: { backgroundColor: 'rgba(248,250,252,0.82)', borderRadius: 10, padding: 8, marginHorizontal: -4 },
-  legTimeCol: { width: 42, justifyContent: 'space-between' },
+  legTimeCol: { minWidth: 42, justifyContent: 'space-between' },
   legTime: { fontSize: 11, color: '#64748B', fontWeight: '600' },
   legTimeEnd: { fontSize: 11, color: '#64748B', fontWeight: '600' },
   legTimeline: { width: 14, alignItems: 'center', marginHorizontal: 2 },
@@ -873,7 +905,7 @@ const s = StyleSheet.create({
     paddingLeft: 10,
   },
   intermediateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 6 },
-  intermediateTime: { fontSize: 11, color: '#64748B', width: 36, fontWeight: '600' },
+  intermediateTime: { fontSize: 11, color: '#64748B', minWidth: 36, fontWeight: '600' },
   intermediateDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#94A3B8' },
   intermediateName: { fontSize: 11, color: '#475569', flex: 1 },
   emptyLegsText: { color: '#64748B', fontSize: 12, lineHeight: 18 },

@@ -7,11 +7,13 @@ import { getEtaScheduleInfo } from '../cgmApi/schedules';
 
 let notificationsInitialized = false;
 const STORAGE_KEY = 'transit-arrival-reminders';
+const HISTORY_STORAGE_KEY = 'transit-arrival-reminder-history-v1';
+const MAX_REMINDER_HISTORY_ITEMS = 80;
 const reminderListeners = new Set<() => void>();
 const TRANSIT_NOTIFICATION_CHANNEL_ID = 'transit-arrivals-v2';
 const DEFAULT_NOTIFICATION_SOUND = Platform.OS === 'ios' ? 'default' : undefined;
 
-export const DEFAULT_REMINDER_MINUTES = 2;
+export const DEFAULT_REMINDER_MINUTES = 5;
 export const REMINDER_MINUTE_OPTIONS = [1, 2, 5, 10] as const;
 export const DEFAULT_DELAY_FOLLOW_UP_THRESHOLD_MINUTES = 6;
 export const DEFAULT_DELAY_FOLLOW_UP_LEAD_MINUTES = 1;
@@ -22,6 +24,19 @@ export interface TransitArrivalReminderRequest {
     minutesBefore?: number;
     delayFollowUpEnabled?: boolean;
 }
+
+const normalizeReminderMinutes = (value: number | undefined) => {
+    const normalized = Number.isFinite(value) ? Math.round(Number(value)) : DEFAULT_REMINDER_MINUTES;
+    if (normalized < 1) {
+        return 1;
+    }
+
+    if (normalized > 120) {
+        return 120;
+    }
+
+    return normalized;
+};
 
 export interface TransitArrivalReminderResult {
     ok: boolean;
@@ -39,6 +54,7 @@ export interface TransitArrivalReminderRefreshResult {
 
 export interface StoredTransitArrivalReminder {
     reminderKey: string;
+    historyId?: string;
     notificationId: string;
     followUpNotificationId?: string | null;
     minuteRepeatNotificationIds?: string[];
@@ -58,6 +74,31 @@ export interface StoredTransitArrivalReminder {
     delayFollowUpEnabled?: boolean;
     followUpDelayThresholdMinutes?: number | null;
 }
+
+export type TransitArrivalReminderHistoryState = 'active' | 'cancelled' | 'expired';
+
+export interface StoredTransitArrivalReminderHistoryEntry {
+    historyId: string;
+    stopName: string;
+    stopId: string;
+    routeId: string;
+    tripId: string;
+    line: string;
+    destination?: string;
+    arrivalTimestamp: number;
+    remindAtTimestamp: number;
+    minutesBefore: number;
+    scheduledArrivalTimestamp?: number | null;
+    latestDelayMinutes?: number | null;
+    lastRefreshUnix?: number | null;
+    delayFollowUpEnabled?: boolean;
+    followUpDelayThresholdMinutes?: number | null;
+    createdAtUnix: number;
+    updatedAtUnix: number;
+    lastState: TransitArrivalReminderHistoryState;
+}
+
+const createReminderHistoryId = () => `reminder-history-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const normalizeNotificationIds = (notificationIds?: string[] | null) =>
     Array.from(new Set((notificationIds || []).map((item) => String(item || '').trim()).filter(Boolean)));
@@ -342,58 +383,16 @@ const scheduleReminderNotification = async ({
 
 const scheduleDelayFollowUpNotification = async ({
     reminder,
-    eta,
+    eta: _eta,
 }: {
     reminder: StoredTransitArrivalReminder;
     eta: StopEta | null;
 }) => {
-    if (!reminder.delayFollowUpEnabled) {
-        if (reminder.followUpNotificationId) {
-            await Notifications.cancelScheduledNotificationAsync(reminder.followUpNotificationId);
-        }
-        return { notificationId: null, delayMinutes: null, followUpTripId: null };
+    if (reminder.followUpNotificationId) {
+        await Notifications.cancelScheduledNotificationAsync(reminder.followUpNotificationId);
     }
 
-    if (!eta) {
-        if (reminder.followUpNotificationId) {
-            await Notifications.cancelScheduledNotificationAsync(reminder.followUpNotificationId);
-        }
-        return { notificationId: null, delayMinutes: null, followUpTripId: null };
-    }
-
-    const scheduleInfo = getEtaScheduleInfo({
-        stopId: eta.stopId,
-        routeId: eta.routeId,
-        arrivalTimestamp: eta.arrivalTimestamp,
-    });
-    const threshold = reminder.followUpDelayThresholdMinutes ?? DEFAULT_DELAY_FOLLOW_UP_THRESHOLD_MINUTES;
-
-    if (scheduleInfo.delayMinutes == null || scheduleInfo.delayMinutes < threshold) {
-        if (reminder.followUpNotificationId) {
-            await Notifications.cancelScheduledNotificationAsync(reminder.followUpNotificationId);
-        }
-        return { notificationId: null, delayMinutes: scheduleInfo.delayMinutes, followUpTripId: null };
-    }
-
-    const existingNotificationId = reminder.followUpNotificationId || null;
-    const scheduled = await scheduleReminderNotification({
-        stopName: reminder.stopName,
-        eta,
-        minutesBefore: DEFAULT_DELAY_FOLLOW_UP_LEAD_MINUTES,
-        existingNotificationId,
-        title: `Линия ${eta.line} още закъснява`,
-        isFollowUp: true,
-    });
-
-    if (!scheduled.ok) {
-        return { notificationId: null, delayMinutes: scheduleInfo.delayMinutes, followUpTripId: reminder.followUpTripId || eta.tripId };
-    }
-
-    return {
-        notificationId: scheduled.notificationId,
-        delayMinutes: scheduled.delayMinutes,
-        followUpTripId: reminder.followUpTripId || eta.tripId,
-    };
+    return { notificationId: null, delayMinutes: null, followUpTripId: null };
 };
 
 const pickFollowUpEta = (reminder: StoredTransitArrivalReminder, etas: StopEta[], fallbackEta: StopEta | null) => {
@@ -453,9 +452,92 @@ const readStoredReminders = async (): Promise<StoredTransitArrivalReminder[]> =>
     }
 };
 
+const readStoredReminderHistory = async (): Promise<StoredTransitArrivalReminderHistoryEntry[]> => {
+    const raw = await AsyncStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+
+    try {
+        const parsed = JSON.parse(raw) as StoredTransitArrivalReminderHistoryEntry[];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
 const writeStoredReminders = async (reminders: StoredTransitArrivalReminder[]) => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(reminders));
     reminderListeners.forEach((listener) => listener());
+};
+
+const writeStoredReminderHistory = async (entries: StoredTransitArrivalReminderHistoryEntry[]) => {
+    const nextEntries = [...entries]
+        .sort((left, right) => right.updatedAtUnix - left.updatedAtUnix)
+        .slice(0, MAX_REMINDER_HISTORY_ITEMS);
+
+    await AsyncStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(nextEntries));
+    reminderListeners.forEach((listener) => listener());
+};
+
+const syncReminderHistoryEntry = async (
+    reminder: StoredTransitArrivalReminder,
+    state: TransitArrivalReminderHistoryState,
+) => {
+    const historyId = reminder.historyId || createReminderHistoryId();
+    const history = await readStoredReminderHistory();
+    const existingEntry = history.find((entry) => entry.historyId === historyId) ?? null;
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const nextEntry: StoredTransitArrivalReminderHistoryEntry = {
+        historyId,
+        stopName: reminder.stopName,
+        stopId: reminder.stopId,
+        routeId: reminder.routeId,
+        tripId: reminder.tripId,
+        line: reminder.line,
+        destination: reminder.destination,
+        arrivalTimestamp: reminder.arrivalTimestamp,
+        remindAtTimestamp: reminder.remindAtTimestamp,
+        minutesBefore: reminder.minutesBefore,
+        scheduledArrivalTimestamp: reminder.scheduledArrivalTimestamp,
+        latestDelayMinutes: reminder.latestDelayMinutes,
+        lastRefreshUnix: reminder.lastRefreshUnix,
+        delayFollowUpEnabled: false,
+        followUpDelayThresholdMinutes: null,
+        createdAtUnix: existingEntry?.createdAtUnix || nowUnix,
+        updatedAtUnix: nowUnix,
+        lastState: state,
+    };
+
+    await writeStoredReminderHistory([
+        nextEntry,
+        ...history.filter((entry) => entry.historyId !== historyId),
+    ]);
+
+    return historyId;
+};
+
+const ensureReminderHistoryCoverage = async (reminders: StoredTransitArrivalReminder[]) => {
+    let changed = false;
+    const createdReminders: StoredTransitArrivalReminder[] = [];
+    const nextReminders = reminders.map((reminder) => {
+        if (reminder.historyId) {
+            return reminder;
+        }
+
+        changed = true;
+        const nextReminder = {
+            ...reminder,
+            historyId: createReminderHistoryId(),
+        } satisfies StoredTransitArrivalReminder;
+        createdReminders.push(nextReminder);
+        return nextReminder;
+    });
+
+    if (changed) {
+        await writeStoredReminders(nextReminders);
+        await Promise.all(createdReminders.map((reminder) => syncReminderHistoryEntry(reminder, 'active')));
+    }
+
+    return nextReminders;
 };
 
 export const subscribeToTransitArrivalReminderChanges = (listener: () => void) => {
@@ -467,7 +549,7 @@ export const subscribeToTransitArrivalReminderChanges = (listener: () => void) =
 
 const pruneExpiredReminders = async () => {
     const nowUnix = Math.floor(Date.now() / 1000);
-    const reminders = await readStoredReminders();
+    const reminders = await ensureReminderHistoryCoverage(await readStoredReminders());
     const activeReminders = reminders.filter((item) => item.arrivalTimestamp > nowUnix);
     if (activeReminders.length !== reminders.length) {
         await Promise.all(reminders.filter((item) => item.arrivalTimestamp <= nowUnix).map(async (item) => {
@@ -475,6 +557,7 @@ const pruneExpiredReminders = async () => {
                 await Notifications.cancelScheduledNotificationAsync(item.followUpNotificationId);
             }
             await cancelNotificationIds(item.minuteRepeatNotificationIds);
+            await syncReminderHistoryEntry(item, 'expired');
         }));
         await writeStoredReminders(activeReminders);
     }
@@ -500,8 +583,39 @@ export const listTransitArrivalReminders = async () => {
     return reminders.sort((left, right) => left.remindAtTimestamp - right.remindAtTimestamp);
 };
 
+export const listTransitArrivalReminderHistory = async () => {
+    const history = await readStoredReminderHistory();
+    return history.sort((left, right) => right.updatedAtUnix - left.updatedAtUnix);
+};
+
+export const deleteTransitArrivalReminderHistoryEntry = async (historyId: string) => {
+    const normalizedHistoryId = String(historyId || '').trim();
+    if (!normalizedHistoryId) {
+        return {
+            ok: false,
+            message: 'Липсва запис от историята.',
+        };
+    }
+
+    const history = await readStoredReminderHistory();
+    const exists = history.some((entry) => entry.historyId === normalizedHistoryId);
+    if (!exists) {
+        return {
+            ok: false,
+            message: 'Записът вече липсва от историята.',
+        };
+    }
+
+    await writeStoredReminderHistory(history.filter((entry) => entry.historyId !== normalizedHistoryId));
+
+    return {
+        ok: true,
+        message: 'Записът е премахнат от историята.',
+    };
+};
+
 export const cancelTransitArrivalReminder = async (eta: StopEta) => {
-    const reminders = await readStoredReminders();
+    const reminders = await ensureReminderHistoryCoverage(await readStoredReminders());
     const scheduledArrivalTimestamp = getScheduledArrivalTimestamp(eta);
     const reminderKey = buildReminderKey({
         tripId: eta.tripId,
@@ -525,6 +639,7 @@ export const cancelTransitArrivalReminder = async (eta: StopEta) => {
         await Notifications.cancelScheduledNotificationAsync(existing.followUpNotificationId);
     }
     await cancelNotificationIds(existing.minuteRepeatNotificationIds);
+    await syncReminderHistoryEntry(existing, 'cancelled');
     await writeStoredReminders(reminders.filter((item) => item.reminderKey !== reminderKey));
 
     return {
@@ -534,7 +649,7 @@ export const cancelTransitArrivalReminder = async (eta: StopEta) => {
 };
 
 export const cancelStoredTransitArrivalReminder = async (reminderKey: string) => {
-    const reminders = await readStoredReminders();
+    const reminders = await ensureReminderHistoryCoverage(await readStoredReminders());
     const existing = reminders.find((item) => item.reminderKey === reminderKey) ?? null;
 
     if (!existing) {
@@ -549,6 +664,7 @@ export const cancelStoredTransitArrivalReminder = async (reminderKey: string) =>
         await Notifications.cancelScheduledNotificationAsync(existing.followUpNotificationId);
     }
     await cancelNotificationIds(existing.minuteRepeatNotificationIds);
+    await syncReminderHistoryEntry(existing, 'cancelled');
     await writeStoredReminders(reminders.filter((item) => item.reminderKey !== reminderKey));
 
     return {
@@ -609,6 +725,7 @@ export const scheduleTransitArrivalReminder = async ({
     minutesBefore = DEFAULT_REMINDER_MINUTES,
     delayFollowUpEnabled = false,
 }: TransitArrivalReminderRequest): Promise<TransitArrivalReminderResult> => {
+    const normalizedMinutesBefore = normalizeReminderMinutes(minutesBefore);
     const granted = await ensureTransitNotificationPermissions();
     if (!granted) {
         return {
@@ -622,7 +739,7 @@ export const scheduleTransitArrivalReminder = async ({
     const scheduled = await scheduleReminderNotification({
         stopName,
         eta,
-        minutesBefore,
+        minutesBefore: normalizedMinutesBefore,
         existingNotificationId: existingReminder?.notificationId || null,
         targetArrivalTimestamp: scheduledArrivalTimestamp ?? eta.arrivalTimestamp,
     });
@@ -642,9 +759,10 @@ export const scheduleTransitArrivalReminder = async ({
         destination: eta.destination,
         scheduledArrivalTimestamp,
     });
-    const reminders = await readStoredReminders();
+    const reminders = await ensureReminderHistoryCoverage(await readStoredReminders());
     const nextReminder: StoredTransitArrivalReminder = {
         reminderKey,
+        historyId: existingReminder?.historyId || createReminderHistoryId(),
         notificationId: scheduled.notificationId,
         followUpNotificationId: existingReminder?.followUpNotificationId || null,
         minuteRepeatNotificationIds: existingReminder?.minuteRepeatNotificationIds || [],
@@ -657,12 +775,12 @@ export const scheduleTransitArrivalReminder = async ({
         destination: eta.destination,
         arrivalTimestamp: eta.arrivalTimestamp,
         remindAtTimestamp: scheduled.remindAtTimestamp,
-        minutesBefore,
+        minutesBefore: normalizedMinutesBefore,
         scheduledArrivalTimestamp,
         latestDelayMinutes: scheduled.delayMinutes,
         lastRefreshUnix: Math.floor(Date.now() / 1000),
-        delayFollowUpEnabled,
-        followUpDelayThresholdMinutes: DEFAULT_DELAY_FOLLOW_UP_THRESHOLD_MINUTES,
+        delayFollowUpEnabled: false,
+        followUpDelayThresholdMinutes: null,
     };
 
     const followUp = await scheduleDelayFollowUpNotification({
@@ -679,12 +797,64 @@ export const scheduleTransitArrivalReminder = async ({
         ...reminders.filter((item) => item.reminderKey !== reminderKey && !matchesReminderToScheduledEta(item, eta) && !matchesReminderToEta(item, eta)),
         nextReminder,
     ]);
+    await syncReminderHistoryEntry(nextReminder, 'active');
 
     return {
         ok: true,
         notificationId: scheduled.notificationId,
-        message: `Ще получите известие ${minutesBefore} мин преди линия ${eta.line}.`,
+        message: `Ще получите известие ${normalizedMinutesBefore} мин преди линия ${eta.line}.`,
     };
+};
+
+export const rescheduleTransitArrivalReminderFromHistory = async (historyId: string): Promise<TransitArrivalReminderResult> => {
+    const history = await listTransitArrivalReminderHistory();
+    const entry = history.find((item) => item.historyId === historyId) ?? null;
+
+    if (!entry) {
+        return {
+            ok: false,
+            message: 'Записът в историята не е намерен.',
+        };
+    }
+
+    const etasByStopId = await fetchStopEtas([entry.stopId]);
+    const stopEtas = etasByStopId[entry.stopId] ?? [];
+    const matchingEta = pickMatchingEta(
+        {
+            reminderKey: entry.historyId,
+            historyId: entry.historyId,
+            notificationId: '',
+            stopName: entry.stopName,
+            stopId: entry.stopId,
+            routeId: entry.routeId,
+            tripId: entry.tripId,
+            line: entry.line,
+            destination: entry.destination,
+            arrivalTimestamp: entry.arrivalTimestamp,
+            remindAtTimestamp: entry.remindAtTimestamp,
+            minutesBefore: entry.minutesBefore,
+            scheduledArrivalTimestamp: entry.scheduledArrivalTimestamp,
+            latestDelayMinutes: entry.latestDelayMinutes,
+            lastRefreshUnix: entry.lastRefreshUnix,
+            delayFollowUpEnabled: entry.delayFollowUpEnabled,
+            followUpDelayThresholdMinutes: entry.followUpDelayThresholdMinutes,
+        },
+        stopEtas,
+    );
+
+    if (!matchingEta) {
+        return {
+            ok: false,
+            message: `В момента няма следващ курс за линия ${entry.line} на ${entry.stopName}.`,
+        };
+    }
+
+    return scheduleTransitArrivalReminder({
+        stopName: entry.stopName,
+        eta: matchingEta,
+        minutesBefore: entry.minutesBefore,
+        delayFollowUpEnabled: false,
+    });
 };
 
 export const refreshTransitArrivalReminders = async (): Promise<TransitArrivalReminderRefreshResult> => {
@@ -735,6 +905,7 @@ export const refreshTransitArrivalReminders = async (): Promise<TransitArrivalRe
                     await Notifications.cancelScheduledNotificationAsync(reminder.followUpNotificationId);
                 }
                 await cancelNotificationIds(reminder.minuteRepeatNotificationIds);
+                await syncReminderHistoryEntry(reminder, 'expired');
                 removedCount += 1;
                 continue;
             }
@@ -802,6 +973,7 @@ export const refreshTransitArrivalReminders = async (): Promise<TransitArrivalRe
     }
 
     await writeStoredReminders(nextReminders);
+    await Promise.all(nextReminders.map((reminder) => syncReminderHistoryEntry(reminder, 'active')));
 
     return {
         ok: true,

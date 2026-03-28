@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, Platform, Pressable, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface Props {
@@ -12,48 +12,52 @@ export const SupportModal: React.FC<Props> = ({
     visible,
     onClose,
     onOpenSupport,
-}) => (
-    <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose} statusBarTranslucent>
-        <View style={styles.overlay}>
-            <Pressable style={styles.backdrop} onPress={onClose} />
-            <View style={styles.card}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>Подкрепа</Text>
-                    <Pressable onPress={onClose} style={styles.closeButton}>
-                        <Ionicons name="close" size={16} color="#334155" />
-                    </Pressable>
-                </View>
+}) => {
+    const { height } = useWindowDimensions();
+    const overlayTopPadding = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 56) + 22 : 78;
+    const overlayBottomPadding = Math.min(Math.max(height * 0.08, 32), 80);
+    const cardMaxHeight = Math.min(Math.max(height * 0.38, 240), 360);
 
-                <View style={styles.section}>
-                    <View style={styles.supportCard}>
-                        <View style={styles.supportTitleRow}>
-                            <Ionicons name="heart-outline" size={14} color="#1D4ED8" />
-                            <Text style={styles.supportTitle}>Подкрепи Sofia Go</Text>
-                        </View>
-                        <Text style={styles.supportSubtitle}>Твоята подкрепа помага да подобрим приложението и транспортните функции.</Text>
+    return (
+        <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose} statusBarTranslucent>
+            <View style={[styles.overlay, { paddingTop: overlayTopPadding, paddingBottom: overlayBottomPadding }]}>
+                <Pressable style={styles.backdrop} onPress={onClose} />
+                <View style={[styles.card, { maxHeight: cardMaxHeight }]}>
+                    <View style={styles.header}>
+                        <Text style={styles.title}>Подкрепа</Text>
+                        <Pressable onPress={onClose} style={styles.closeButton}>
+                            <Ionicons name="close" size={16} color="#334155" />
+                        </Pressable>
                     </View>
 
-                    <TouchableOpacity
-                        activeOpacity={0.88}
-                        onPress={onOpenSupport}
-                        style={styles.primaryButton}
-                    >
-                        
-                        <Text style={styles.primaryButtonText}>Подкрепи</Text>
-                    </TouchableOpacity>
+                    <View style={styles.section}>
+                        <View style={styles.supportCard}>
+                            <View style={styles.supportTitleRow}>
+                                <Ionicons name="heart-outline" size={14} color="#1D4ED8" />
+                                <Text style={styles.supportTitle}>Подкрепи Sofia Go</Text>
+                            </View>
+                            <Text style={styles.supportSubtitle}>Твоята подкрепа помага да подобрим приложението и транспортните функции.</Text>
+                        </View>
+
+                        <TouchableOpacity
+                            activeOpacity={0.88}
+                            onPress={onOpenSupport}
+                            style={styles.primaryButton}
+                        >
+                            <Text style={styles.primaryButtonText}>Подкрепи</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </View>
-        </View>
-    </Modal>
-);
+        </Modal>
+    );
+};
 
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
         justifyContent: 'flex-start',
-        paddingTop: 78,
         paddingHorizontal: 12,
-        paddingBottom: 80,
     },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
@@ -79,11 +83,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         marginBottom: 14,
+        gap: 10,
     },
     title: {
         fontSize: 16,
         fontWeight: '700',
         color: '#0F172A',
+        flex: 1,
+        minWidth: 0,
     },
     closeButton: {
         width: 32,
@@ -94,6 +101,7 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(226,232,240,0.72)',
         alignItems: 'center',
         justifyContent: 'center',
+        flexShrink: 0,
     },
     section: {
         gap: 12,

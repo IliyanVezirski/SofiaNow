@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { VehicleType, VEHICLE_TYPE_ORDER, getVehicleIconName, getVehicleTypeLabel } from '../../../services/transitUtils';
 import { Stop, summarizeStopDirections } from '../../../services/stopsApi';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,10 +28,24 @@ export const FilterPanel: React.FC<Props> = ({
     onToggleVehicleType, onToggleLine, onClearVehicleTypes, onClearLines,
     onClose, onOpenStopDetails,
 }) => {
+    const { width, height } = useWindowDimensions();
+
     if (!visible) return null;
 
     return (
-        <ScrollView style={styles.panel} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+        <ScrollView
+            style={[
+                styles.panel,
+                {
+                    width: Math.min(width - 24, 320),
+                    right: 12,
+                    maxHeight: Math.min(height * 0.72, 560),
+                },
+            ]}
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+        >
             <View style={styles.headerRow}>
                 <Text style={styles.filterTitle}>1. Филтър по вид</Text>
                 {onClose && (
@@ -54,7 +68,7 @@ export const FilterPanel: React.FC<Props> = ({
                 ))}
             </View>
             <Text style={[styles.filterTitle, { marginTop: 10 }]}>2. Филтър по линия</Text>
-            <ScrollView style={styles.linesScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+            <ScrollView style={[styles.linesScroll, { maxHeight: Math.min(height * 0.22, 180) }]} showsVerticalScrollIndicator={false} nestedScrollEnabled>
                 <View style={styles.chipRow}>
                     <TouchableOpacity style={[styles.chip, !selectedLines.length && styles.chipActive]} onPress={onClearLines}>
                         <Text style={[styles.chipText, !selectedLines.length && styles.chipTextActive]}>Всички</Text>
@@ -72,7 +86,7 @@ export const FilterPanel: React.FC<Props> = ({
             </ScrollView>
             <Text style={styles.hint}>{`Показани превозни средства: ${filteredVehiclesCount}/${totalVehiclesCount}`}</Text>
             <Text style={styles.hint}>{`Видими спирки: ${filteredStops.length}/${totalStopsCount}`}</Text>
-            <ScrollView style={styles.stopsList} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+            <ScrollView style={[styles.stopsList, { maxHeight: Math.min(height * 0.3, 240) }]} showsVerticalScrollIndicator={false} nestedScrollEnabled>
                 {filteredStops.map((stop) => (
                     <TouchableOpacity key={stop.id} style={styles.stopBtn} onPress={() => onOpenStopDetails(stop)}>
                         <Text style={styles.stopBtnText} numberOfLines={1}>{stop.name}</Text>
@@ -86,7 +100,7 @@ export const FilterPanel: React.FC<Props> = ({
 
 const styles = StyleSheet.create({
     panel: {
-        position: 'absolute', top: 62, right: 76, width: 248, maxHeight: '72%',
+        position: 'absolute', top: 62,
         backgroundColor: 'rgba(255,255,255,0.82)', borderRadius: 18, padding: 12, zIndex: 20, elevation: 20,
         borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
         shadowColor: '#0F172A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 20,
@@ -107,9 +121,9 @@ const styles = StyleSheet.create({
     chipDimmed: { opacity: 0.45 },
     chipText: { color: '#1E293B', fontSize: 12, fontWeight: '700' },
     chipTextActive: { color: '#FFFFFF' },
-    linesScroll: { marginTop: 2, maxHeight: 140 },
+    linesScroll: { marginTop: 2 },
     hint: { marginTop: 8, color: '#475569', fontSize: 12, fontWeight: '600' },
-    stopsList: { marginTop: 10, maxHeight: 200 },
+    stopsList: { marginTop: 10 },
     stopBtn: {
         backgroundColor: 'rgba(248,250,252,0.72)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 6,
         borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
