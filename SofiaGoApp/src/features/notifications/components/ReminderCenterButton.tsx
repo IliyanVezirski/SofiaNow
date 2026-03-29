@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
     cancelStoredTransitArrivalReminder,
@@ -10,6 +10,7 @@ import {
     StoredTransitArrivalReminder,
     StoredTransitArrivalReminderHistoryEntry,
     subscribeToTransitArrivalReminderChanges,
+    updateStoredTransitArrivalReminder,
 } from '../../../services/notifications/transitArrivalNotifications';
 import {
     cancelFavoriteCommuteReminder,
@@ -17,6 +18,7 @@ import {
     listFavoriteCommuteReminders,
     StoredFavoriteCommuteReminder,
     subscribeToFavoritePlaceChanges,
+    updateFavoriteCommuteReminderSettings,
 } from '../../../services/places';
 
 interface Props {
@@ -31,6 +33,21 @@ const formatTime = (timestamp: number) => {
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 };
 
+const normalizeReminderMinutesInput = (value: string) => String(value || '').replace(/\D/g, '').slice(0, 3);
+
+const parseReminderMinutes = (value: string) => {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    if (!Number.isFinite(parsed)) {
+        return null;
+    }
+
+    if (parsed < 1 || parsed > 120) {
+        return null;
+    }
+
+    return parsed;
+};
+
 export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = false, opaque = false, transparent = false }) => {
     const [visible, setVisible] = useState(false);
     const [arrivalReminders, setArrivalReminders] = useState<StoredTransitArrivalReminder[]>([]);
@@ -40,6 +57,12 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
     const [submittingCommuteId, setSubmittingCommuteId] = useState<string | null>(null);
     const [submittingHistoryId, setSubmittingHistoryId] = useState<string | null>(null);
     const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+    const [editingReminder, setEditingReminder] = useState<StoredTransitArrivalReminder | null>(null);
+    const [editingMinutesInput, setEditingMinutesInput] = useState('');
+    const [editingSubmitting, setEditingSubmitting] = useState(false);
+    const [editingCommuteReminder, setEditingCommuteReminder] = useState<StoredFavoriteCommuteReminder | null>(null);
+    const [editingCommuteMinutesInput, setEditingCommuteMinutesInput] = useState('');
+    const [editingCommuteSubmitting, setEditingCommuteSubmitting] = useState(false);
     const [nowUnix, setNowUnix] = useState(() => Math.floor(Date.now() / 1000));
     const { height } = useWindowDimensions();
 
@@ -112,11 +135,57 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
         setSubmittingKey(reminder.reminderKey);
         try {
             const result = await cancelStoredTransitArrivalReminder(reminder.reminderKey);
+            if (editingReminder?.reminderKey === reminder.reminderKey) {
+                setEditingReminder(null);
+                setEditingMinutesInput('');
+            }
             Alert.alert(result.ok ? 'Напомнянето е премахнато' : 'Неуспешно', result.message);
         } catch {
             Alert.alert('Грешка', 'Неуспешно премахване на напомнянето.');
         } finally {
             setSubmittingKey(null);
+        }
+    };
+
+    const openEditReminder = (reminder: StoredTransitArrivalReminder) => {
+        setEditingReminder(reminder);
+        setEditingMinutesInput(String(reminder.minutesBefore));
+    };
+
+    const closeEditReminder = () => {
+        if (editingSubmitting) {
+            return;
+        }
+
+        Keyboard.dismiss();
+        setEditingReminder(null);
+        setEditingMinutesInput('');
+    };
+
+    const onSaveEditedReminder = async () => {
+        if (!editingReminder || editingSubmitting) {
+            return;
+        }
+
+        const minutesBefore = parseReminderMinutes(editingMinutesInput);
+        if (minutesBefore == null) {
+            Alert.alert('Невалидни минути', 'Въведи число между 1 и 120 минути.');
+            return;
+        }
+
+        Keyboard.dismiss();
+        setEditingSubmitting(true);
+        try {
+            const result = await updateStoredTransitArrivalReminder(editingReminder.reminderKey, minutesBefore);
+            if (result.ok) {
+                setEditingReminder(null);
+                setEditingMinutesInput('');
+            }
+            Alert.alert(result.ok ? 'Напомнянето е обновено' : 'Неуспешна редакция', result.message);
+        } catch {
+            Alert.alert('Грешка', 'Неуспешна редакция на напомнянето.');
+        } finally {
+            setEditingSubmitting(false);
         }
     };
 
@@ -140,11 +209,57 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
         setSubmittingCommuteId(reminder.favoriteId);
         try {
             const result = await cancelFavoriteCommuteReminder(reminder.favoriteId);
+            if (editingCommuteReminder?.favoriteId === reminder.favoriteId) {
+                setEditingCommuteReminder(null);
+                setEditingCommuteMinutesInput('');
+            }
             Alert.alert(result.ok ? 'Маршрутното известие е премахнато' : 'Неуспешно', result.message);
         } catch {
             Alert.alert('Грешка', 'Неуспешно премахване на маршрутното известие.');
         } finally {
             setSubmittingCommuteId(null);
+        }
+    };
+
+    const openEditCommuteReminder = (reminder: StoredFavoriteCommuteReminder) => {
+        setEditingCommuteReminder(reminder);
+        setEditingCommuteMinutesInput(String(reminder.reminderOffsetMinutes ?? 5));
+    };
+
+    const closeEditCommuteReminder = () => {
+        if (editingCommuteSubmitting) {
+            return;
+        }
+
+        Keyboard.dismiss();
+        setEditingCommuteReminder(null);
+        setEditingCommuteMinutesInput('');
+    };
+
+    const onSaveEditedCommuteReminder = async () => {
+        if (!editingCommuteReminder || editingCommuteSubmitting) {
+            return;
+        }
+
+        const minutesBefore = parseReminderMinutes(editingCommuteMinutesInput);
+        if (minutesBefore == null) {
+            Alert.alert('Невалидни минути', 'Въведи число между 1 и 120 минути.');
+            return;
+        }
+
+        Keyboard.dismiss();
+        setEditingCommuteSubmitting(true);
+        try {
+            const result = await updateFavoriteCommuteReminderSettings(editingCommuteReminder.favoriteId, { reminderOffsetMinutes: minutesBefore });
+            if (result.ok) {
+                setEditingCommuteReminder(null);
+                setEditingCommuteMinutesInput('');
+            }
+            Alert.alert(result.ok ? 'Маршрутното известие е обновено' : 'Неуспешна редакция', result.message);
+        } catch {
+            Alert.alert('Грешка', 'Неуспешна редакция на маршрутното известие.');
+        } finally {
+            setEditingCommuteSubmitting(false);
         }
     };
 
@@ -205,43 +320,61 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
                         <ScrollView style={[styles.list, { maxHeight: Math.min(height * 0.36, 360) }]} showsVerticalScrollIndicator={false}>
                             {hasReminders ? <Text style={styles.sectionTitle}>Активни</Text> : null}
                             {arrivalReminders.map((reminder) => (
-                                <View key={reminder.reminderKey} style={styles.card}>
+                                <Pressable key={reminder.reminderKey} style={styles.card} onPress={() => openEditReminder(reminder)}>
                                     <View style={styles.cardRow}>
                                         <View style={styles.cardInfo}>
                                             <Text style={styles.cardLine}>{reminder.line}</Text>
                                             <Text style={styles.cardStop} numberOfLines={2}>{reminder.stopName}</Text>
                                         </View>
-                                        <TouchableOpacity
-                                            style={styles.deleteBtn}
-                                            onPress={() => void onRemoveArrival(reminder)}
-                                            disabled={submittingKey === reminder.reminderKey}
-                                        >
-                                            <Ionicons name="close" size={14} color="#94A3B8" />
-                                        </TouchableOpacity>
+                                        <View style={styles.historyActionsWrap}>
+                                            <TouchableOpacity
+                                                style={styles.editBtn}
+                                                onPress={() => openEditReminder(reminder)}
+                                                disabled={submittingKey === reminder.reminderKey}
+                                            >
+                                                <Ionicons name="create-outline" size={14} color="#1D4ED8" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.deleteBtn}
+                                                onPress={() => void onRemoveArrival(reminder)}
+                                                disabled={submittingKey === reminder.reminderKey}
+                                            >
+                                                <Ionicons name="close" size={14} color="#94A3B8" />
+                                            </TouchableOpacity>
+                                        </View>
                                     </View>
                                     <Text style={styles.meta}>{`${formatTime(reminder.remindAtTimestamp)} • ${reminder.minutesBefore} мин преди`}</Text>
                                     <Text style={styles.arrivalEta}>{`${formatArrivalEta(reminder.arrivalTimestamp)} • пристига ${formatTime(reminder.arrivalTimestamp)}`}</Text>
-                                </View>
+                                </Pressable>
                             ))}
 
                             {commuteReminders.map((reminder) => (
-                                <View key={`commute-${reminder.favoriteId}`} style={styles.card}>
+                                <Pressable key={`commute-${reminder.favoriteId}`} style={styles.card} onPress={() => openEditCommuteReminder(reminder)}>
                                     <View style={styles.cardRow}>
                                         <View style={styles.cardInfo}>
                                             <Text style={styles.cardLine}>{reminder.favoriteName}</Text>
                                             <Text style={styles.cardStop} numberOfLines={2}>{reminder.routeLabel}</Text>
                                         </View>
-                                        <TouchableOpacity
-                                            style={styles.deleteBtn}
-                                            onPress={() => void onRemoveCommute(reminder)}
-                                            disabled={submittingCommuteId === reminder.favoriteId}
-                                        >
-                                            <Ionicons name="close" size={14} color="#94A3B8" />
-                                        </TouchableOpacity>
+                                        <View style={styles.historyActionsWrap}>
+                                            <TouchableOpacity
+                                                style={styles.editBtn}
+                                                onPress={() => openEditCommuteReminder(reminder)}
+                                                disabled={submittingCommuteId === reminder.favoriteId}
+                                            >
+                                                <Ionicons name="create-outline" size={14} color="#1D4ED8" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.deleteBtn}
+                                                onPress={() => void onRemoveCommute(reminder)}
+                                                disabled={submittingCommuteId === reminder.favoriteId}
+                                            >
+                                                <Ionicons name="close" size={14} color="#94A3B8" />
+                                            </TouchableOpacity>
+                                        </View>
                                     </View>
                                     <Text style={styles.meta}>{`${reminder.reminderTime} • ${(reminder.reminderOffsetMinutes ?? 5)} мин преди`}</Text>
                                     <Text style={styles.arrivalEta}>{`${formatFavoriteCommuteWeekdays(reminder.notificationWeekdays)}${reminder.routeStartTime ? ` • тръгване ${reminder.routeStartTime}` : ''}`}</Text>
-                                </View>
+                                </Pressable>
                             ))}
 
                             {historyReminders.length ? <Text style={styles.sectionTitle}>История</Text> : null}
@@ -297,6 +430,93 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
                         </ScrollView>
                     </View>
                 </View>
+            </Modal>
+
+            <Modal transparent animationType="fade" visible={!!editingReminder} statusBarTranslucent onRequestClose={closeEditReminder}>
+                <KeyboardAvoidingView
+                    style={styles.editModalRoot}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 18 : 0}
+                >
+                    <Pressable style={styles.backdrop} onPress={closeEditReminder} />
+                    <View style={styles.editCard}>
+                        <View style={styles.header}>
+                            <View style={styles.editHeaderCopy}>
+                                <Text style={styles.title}>Редакция на напомняне</Text>
+                                {editingReminder ? (
+                                    <>
+                                        <View style={styles.editLineBadge}>
+                                            <Text style={styles.editLineBadgeText}>{editingReminder.line}</Text>
+                                        </View>
+                                        <Text style={styles.editStopName}>{editingReminder.stopName}</Text>
+                                    </>
+                                ) : null}
+                            </View>
+                            <TouchableOpacity style={styles.closeBtn} onPress={closeEditReminder}>
+                                <Ionicons name="close" size={18} color="#64748B" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.editLabel}>Минути преди пристигане</Text>
+                        <TextInput
+                            style={styles.editInput}
+                            value={editingMinutesInput}
+                            onChangeText={(value) => setEditingMinutesInput(normalizeReminderMinutesInput(value))}
+                            keyboardType="number-pad"
+                            maxLength={3}
+                            placeholder="5"
+                            placeholderTextColor="#94A3B8"
+                        />
+
+                        <TouchableOpacity style={styles.saveBtn} onPress={() => void onSaveEditedReminder()} disabled={editingSubmitting}>
+                            <Text style={styles.saveBtnText}>{editingSubmitting ? 'Запазване...' : 'Запази'}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
+
+            <Modal transparent animationType="fade" visible={!!editingCommuteReminder} statusBarTranslucent onRequestClose={closeEditCommuteReminder}>
+                <KeyboardAvoidingView
+                    style={styles.editModalRoot}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 18 : 0}
+                >
+                    <Pressable style={styles.backdrop} onPress={closeEditCommuteReminder} />
+                    <View style={styles.editCard}>
+                        <View style={styles.header}>
+                            <View style={styles.editHeaderCopy}>
+                                <Text style={styles.title}>Редакция на маршрутно известие</Text>
+                                {editingCommuteReminder ? (
+                                    <>
+                                        <View style={styles.editLineBadge}>
+                                            <Text style={styles.editLineBadgeText}>{editingCommuteReminder.favoriteName}</Text>
+                                        </View>
+                                        <Text style={styles.editStopName}>{editingCommuteReminder.routeLabel}</Text>
+                                        {editingCommuteReminder.routeStartTime ? <Text style={styles.editRouteMeta}>{`Тръгване ${editingCommuteReminder.routeStartTime}`}</Text> : null}
+                                    </>
+                                ) : null}
+                            </View>
+                            <TouchableOpacity style={styles.closeBtn} onPress={closeEditCommuteReminder}>
+                                <Ionicons name="close" size={18} color="#64748B" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.editLabel}>Минути преди тръгване</Text>
+                        <TextInput
+                            style={styles.editInput}
+                            value={editingCommuteMinutesInput}
+                            onChangeText={(value) => setEditingCommuteMinutesInput(normalizeReminderMinutesInput(value))}
+                            keyboardType="number-pad"
+                            maxLength={3}
+                            placeholder="5"
+                            placeholderTextColor="#94A3B8"
+                        />
+
+                        <TouchableOpacity style={styles.saveBtn} onPress={() => void onSaveEditedCommuteReminder()} disabled={editingCommuteSubmitting}>
+                            <Text style={styles.saveBtnText}>{editingCommuteSubmitting ? 'Запазване...' : 'Запази'}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </KeyboardAvoidingView>
             </Modal>
         </>
     );
@@ -450,6 +670,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    editBtn: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(239,246,255,0.88)',
+    },
     historyActionsWrap: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -518,5 +746,83 @@ const styles = StyleSheet.create({
         color: '#94A3B8',
         textAlign: 'center',
         paddingVertical: 16,
+    },
+    editModalRoot: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    editCard: {
+        marginHorizontal: 16,
+        marginBottom: 120,
+        backgroundColor: 'rgba(255,255,255,0.96)',
+        borderRadius: 18,
+        padding: 18,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.82)',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.08,
+        shadowRadius: 20,
+        elevation: 18,
+    },
+    editHeaderCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    editLineBadge: {
+        alignSelf: 'flex-start',
+        marginTop: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 999,
+        backgroundColor: 'rgba(219,234,254,0.88)',
+    },
+    editLineBadgeText: {
+        color: '#1D4ED8',
+        fontSize: 11,
+        fontWeight: '800',
+    },
+    editStopName: {
+        marginTop: 8,
+        color: '#0F172A',
+        fontSize: 14,
+        fontWeight: '600',
+        lineHeight: 20,
+    },
+    editRouteMeta: {
+        marginTop: 4,
+        color: '#64748B',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    editLabel: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#475569',
+        marginBottom: 6,
+    },
+    editInput: {
+        height: 44,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(203,213,225,0.9)',
+        backgroundColor: 'rgba(248,250,252,0.88)',
+        paddingHorizontal: 12,
+        color: '#0F172A',
+        fontSize: 15,
+        fontWeight: '600',
+        marginBottom: 12,
+    },
+    saveBtn: {
+        height: 42,
+        borderRadius: 12,
+        backgroundColor: '#1D4ED8',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    saveBtnText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
     },
 });

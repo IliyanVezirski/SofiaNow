@@ -14,9 +14,20 @@ interface Props {
     etas: StopEta[];
     onClose: () => void;
     onOpenSchedule: (stopId: string, stopName: string) => void;
+    onPlaceAction?: () => void;
+    placeSaved?: boolean;
+    placeSubmitting?: boolean;
 }
 
-export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSchedule }) => {
+export const StopInfoPanel: React.FC<Props> = ({
+    stop,
+    etas,
+    onClose,
+    onOpenSchedule,
+    onPlaceAction,
+    placeSaved = false,
+    placeSubmitting = false,
+}) => {
     const visibleEtas = etas;
     const { height } = useWindowDimensions();
     const panelBottomOffset = Math.min(Math.max(height * 0.16, 96), 188);
@@ -31,6 +42,19 @@ export const StopInfoPanel: React.FC<Props> = ({ stop, etas, onClose, onOpenSche
                     <View style={styles.header}>
                         <Ionicons name="flag-outline" size={16} color="#0F172A" style={{ marginRight: 4 }} />
                         <Text style={styles.title}>{stop.name}</Text>
+                        {onPlaceAction ? (
+                            <TouchableOpacity
+                                style={[styles.placeIconBtn, placeSaved && styles.placeIconBtnSaved]}
+                                onPress={onPlaceAction}
+                                disabled={placeSubmitting}
+                            >
+                                <Ionicons
+                                    name={placeSaved ? 'bookmark' : 'bookmark-outline'}
+                                    size={15}
+                                    color={placeSaved ? '#A16207' : '#64748B'}
+                                />
+                            </TouchableOpacity>
+                        ) : null}
                         <Pressable style={styles.closeBtn} onPress={onClose}>
                             <Ionicons name="close" size={18} color="#334155" />
                         </Pressable>
@@ -110,6 +134,21 @@ const styles = StyleSheet.create({
     },
     header: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 4 },
     title: { flex: 1, minWidth: 0, fontSize: 16, fontWeight: '700', color: '#0F172A' },
+    placeIconBtn: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(248,250,252,0.72)',
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
+        flexShrink: 0,
+    },
+    placeIconBtnSaved: {
+        backgroundColor: 'rgba(254,249,195,0.75)',
+        borderColor: 'rgba(217,119,6,0.18)',
+    },
     closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(248,250,252,0.72)', borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
     scroll: { flexGrow: 0 },
     info: { fontSize: 12, color: '#475569', marginBottom: 8, lineHeight: 18 },

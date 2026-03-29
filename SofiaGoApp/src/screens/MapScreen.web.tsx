@@ -1314,7 +1314,7 @@ export default function MapScreen({
 
                             <TextInput
                                 style={styles.locationSearchInput}
-                                placeholder="Търси адрес или място..."
+                                placeholder="Търси адрес или място"
                                 placeholderTextColor="#6B7280"
                                 value={locationSearchQuery}
                                 onChangeText={setLocationSearchQuery}

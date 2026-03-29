@@ -413,7 +413,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                         onPress={() => openLocationEditor(fav.id)}
                                                     >
                                                         <Ionicons name={hasCoords ? 'location' : 'location-outline'} size={11} color={hasCoords ? '#059669' : '#94A3B8'} />
-                                                        <Text style={[styles.statusChipText, hasCoords ? styles.statusChipTextOk : styles.statusChipTextWarn]}>{hasCoords ? 'Локация' : 'Няма локация'}</Text>
+                                                        <Text style={[styles.statusChipText, hasCoords ? styles.statusChipTextOk : styles.statusChipTextWarn]}>{hasCoords ? 'Локация' : 'Добави локация'}</Text>
                                                     </TouchableOpacity>
                                                     <TouchableOpacity
                                                         activeOpacity={0.82}
@@ -421,7 +421,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                         onPress={() => openRoutePlanner(fav, true)}
                                                     >
                                                         <Ionicons name={fav.defaultCommute?.itinerarySummary ? 'navigate' : 'navigate-outline'} size={11} color={fav.defaultCommute?.itinerarySummary ? '#059669' : '#94A3B8'} />
-                                                        <Text style={[styles.statusChipText, fav.defaultCommute?.itinerarySummary ? styles.statusChipTextOk : styles.statusChipTextWarn]}>{fav.defaultCommute?.itinerarySummary ? 'Маршрут' : 'Без маршрут'}</Text>
+                                                        <Text style={[styles.statusChipText, fav.defaultCommute?.itinerarySummary ? styles.statusChipTextOk : styles.statusChipTextWarn]}>{fav.defaultCommute?.itinerarySummary ? 'Маршрут' : 'Добави маршрут'}</Text>
                                                     </TouchableOpacity>
                                                     {hasCommuteReminder ? (
                                                         <View style={[styles.statusChip, styles.statusChipOk]}>

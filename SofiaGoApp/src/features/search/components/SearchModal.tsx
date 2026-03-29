@@ -44,7 +44,7 @@ export const SearchModal: React.FC<Props> = ({
                         <Ionicons name="close" size={18} color="#334155" />
                     </Pressable>
                 </View>
-                <TextInput style={styles.input} placeholder={placeholder ?? 'Търси адрес, линия или спирка...'} placeholderTextColor="#94A3B8" value={query} onChangeText={onChangeQuery} />
+                <TextInput style={styles.input} placeholder={placeholder ?? 'Търси адрес, линия или спирка'} placeholderTextColor="#94A3B8" value={query} onChangeText={onChangeQuery} />
                 {(loading || results.length > 0) && (
                     <ScrollView style={[styles.results, { maxHeight: Math.min(height * 0.42, 360) }]} showsVerticalScrollIndicator nestedScrollEnabled keyboardShouldPersistTaps="handled">
                         {loading && <Text style={styles.status}>Търсене...</Text>}

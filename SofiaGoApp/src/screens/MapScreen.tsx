@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Linking, Platform, StatusBar, StyleSheet, View, Text, TouchableOpacity, LogBox, useWindowDimensions } from 'react-native';
+import { Alert, Animated, Easing, Linking, Platform, StatusBar, StyleSheet, View, Text, TouchableOpacity, LogBox, useWindowDimensions } from 'react-native';
 import MapboxGL from '@maplibre/maplibre-react-native';
 import GoogleMapView, { Circle as GoogleCircle, Marker, Polygon, Polyline, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 
@@ -793,6 +793,15 @@ export default function MapScreen({
         );
         return match?.id ?? null;
     }, [droppedPin, favorites.favoritePlaces]);
+    const selectedStopMatchingFavorite = useMemo(() => {
+        const stop = selectedStop.selectedStop;
+        if (!stop) {
+            return null;
+        }
+
+        return favorites.favoritePlaces.find((favorite) => favorite.selectedStopId === stop.id) ?? null;
+    }, [favorites.favoritePlaces, selectedStop.selectedStop]);
+    const [selectedStopPlaceSubmitting, setSelectedStopPlaceSubmitting] = useState(false);
     const routing = useRouteGeometry(
         highlightedRoute,
         (lon, lat) => camera.lockCamera(lat, lon),
@@ -821,6 +830,47 @@ export default function MapScreen({
         setActiveParkingOverlay(null);
         setSelectedParkingLotId(lotId);
     }, [selectedStop.suppressMapPressUntilRef]);
+
+    const handleSelectedStopPlaceAction = useCallback(() => {
+        const stop = selectedStop.selectedStop;
+        if (!stop || selectedStopPlaceSubmitting) {
+            return;
+        }
+
+        const selectedLines = Array.from(new Set(
+            stop.lines
+                .map((line) => String(line || '').trim().toUpperCase())
+                .filter(Boolean),
+        )).map((line) => ({
+            line,
+            enabled: true,
+            notificationsEnabled: false,
+        }));
+
+        void (async () => {
+            setSelectedStopPlaceSubmitting(true);
+
+            try {
+                if (selectedStopMatchingFavorite) {
+                    await favorites.removeFavorite(selectedStopMatchingFavorite.id);
+                    return;
+                }
+
+                await favorites.createFavorite({
+                    name: stop.name,
+                    latitude: stop.latitude,
+                    longitude: stop.longitude,
+                    selectedStopId: stop.id,
+                    selectedStopName: stop.name,
+                    selectedLines,
+                });
+            } catch {
+                Alert.alert('Грешка', 'Неуспешно добавяне на спирката в Моите места.');
+            } finally {
+                setSelectedStopPlaceSubmitting(false);
+            }
+        })();
+    }, [favorites, selectedStop, selectedStopMatchingFavorite, selectedStopPlaceSubmitting]);
 
     const handleMapExperienceModeChange = useCallback((nextMode: MapExperienceMode) => {
         setMapExperienceMode(nextMode);
@@ -2553,6 +2603,9 @@ export default function MapScreen({
                         etas={etasHook.etasByStopId[selectedStop.selectedStop.id] || []}
                         onClose={selectedStop.closeSelectedStop}
                         onOpenSchedule={schedule.openStopSchedule}
+                        onPlaceAction={handleSelectedStopPlaceAction}
+                        placeSaved={!!selectedStopMatchingFavorite}
+                        placeSubmitting={selectedStopPlaceSubmitting}
                     />
                 )}
 

@@ -206,6 +206,17 @@ const pickMatchingFirstStopEta = ({
     return Math.abs(best.arrivalTimestamp - targetArrivalUnix) <= (90 * 60) ? best : null;
 };
 
+const formatCountdownText = (reminderOffsetMinutes: number | null | undefined) => {
+    if (!Number.isFinite(reminderOffsetMinutes) || Number(reminderOffsetMinutes) <= 0) {
+        return '';
+    }
+
+    const minutes = Math.round(Number(reminderOffsetMinutes));
+    return minutes === 1
+        ? 'Остава 1 мин до тръгване за да си навреме на спирката. '
+        : `Остават ${minutes} мин до тръгване за да си навреме на спирката. `;
+};
+
 const buildGenericCommuteRouteBody = ({
     routeStartUnix,
     routeSummary,
@@ -214,6 +225,7 @@ const buildGenericCommuteRouteBody = ({
     firstTransitStopOffsetMinutes,
     walkDurationSeconds,
     walkDistanceMeters,
+    reminderOffsetMinutes,
 }: {
     routeStartUnix: number;
     routeSummary: string;
@@ -222,6 +234,7 @@ const buildGenericCommuteRouteBody = ({
     firstTransitStopOffsetMinutes?: number | null;
     walkDurationSeconds?: number | null;
     walkDistanceMeters?: number | null;
+    reminderOffsetMinutes?: number | null;
 }) => {
     const walkParts = [formatDurationMinutes(walkDurationSeconds), formatDistance(walkDistanceMeters)].filter(Boolean);
     const plannedFirstStop = buildPlannedFirstStopText({
@@ -233,7 +246,8 @@ const buildGenericCommuteRouteBody = ({
     const plannedFirstStopText = plannedFirstStop
         ? `Линия ${plannedFirstStop.normalizedLine} ще бъде на спирка ${plannedFirstStop.stopLabel} по разписание в ${plannedFirstStop.scheduledClock}.`
         : '';
-    return `Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkParts.length ? ` Пеша: ${walkParts.join(' • ')}.` : ''}${plannedFirstStopText} ${routeSummary}`.trim();
+    const countdown = formatCountdownText(reminderOffsetMinutes);
+    return `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkParts.length ? ` Пеша: ${walkParts.join(' • ')}.` : ''}${plannedFirstStopText} ${routeSummary}`.trim();
 };
 
 const buildCommuteRouteBody = async ({
@@ -245,6 +259,7 @@ const buildCommuteRouteBody = async ({
     firstTransitStopOffsetMinutes,
     walkDurationSeconds,
     walkDistanceMeters,
+    reminderOffsetMinutes,
 }: {
     routeSummary: string;
     routeStartUnix: number;
@@ -254,6 +269,7 @@ const buildCommuteRouteBody = async ({
     firstTransitStopOffsetMinutes?: number | null;
     walkDurationSeconds?: number | null;
     walkDistanceMeters?: number | null;
+    reminderOffsetMinutes?: number | null;
 }) => {
     const normalizedLine = String(firstTransitLine || '').trim().toUpperCase();
     const walkParts = [formatDurationMinutes(walkDurationSeconds), formatDistance(walkDistanceMeters)].filter(Boolean);
@@ -273,6 +289,7 @@ const buildCommuteRouteBody = async ({
             firstTransitStopOffsetMinutes,
             walkDurationSeconds,
             walkDistanceMeters,
+            reminderOffsetMinutes,
         });
     }
 
@@ -287,6 +304,7 @@ const buildCommuteRouteBody = async ({
             firstTransitStopOffsetMinutes,
             walkDurationSeconds,
             walkDistanceMeters,
+            reminderOffsetMinutes,
         });
     }
 
@@ -297,13 +315,15 @@ const buildCommuteRouteBody = async ({
         targetArrivalUnix: firstStopUnix,
     });
 
+    const countdown = formatCountdownText(reminderOffsetMinutes);
+
     if (!matchingEta) {
         const stopLabel = firstTransitStopName || 'първата спирка';
         if (plannedFirstStop) {
-            return `Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${plannedFirstStop.normalizedLine} на ${plannedFirstStop.stopLabel} е по разписание в ${plannedFirstStop.scheduledClock}.`;
+            return `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${plannedFirstStop.normalizedLine} на ${plannedFirstStop.stopLabel} е по разписание в ${plannedFirstStop.scheduledClock}.`;
         }
 
-        return `Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${normalizedLine} на ${stopLabel} няма актуални данни.`;
+        return `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${normalizedLine} на ${stopLabel} няма актуални данни.`;
     }
 
     const scheduleInfo = getEtaScheduleInfo({
@@ -319,8 +339,8 @@ const buildCommuteRouteBody = async ({
         : `${normalizedLine} на ${stopLabel} се очаква в ${formatClockFromUnix(matchingEta.arrivalTimestamp)}`;
 
     return delayText
-        ? `Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${vehicleText} и ${delayText}.`
-        : `Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${vehicleText}.`;
+        ? `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${vehicleText} и ${delayText}.`
+        : `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${vehicleText}.`;
 };
 
 export const cancelCommuteRouteNotification = async (notificationIds?: string[] | string | null) => {
@@ -413,6 +433,7 @@ export const scheduleCommuteRouteNotification = async ({
                 firstTransitStopOffsetMinutes,
                 walkDurationSeconds,
                 walkDistanceMeters,
+                reminderOffsetMinutes,
             });
 
             return Notifications.scheduleNotificationAsync({

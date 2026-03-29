@@ -12,6 +12,7 @@ import { fetchFullStopSchedule } from '../services/cgmApi/stopEtas';
 import { getEtaScheduleInfo } from '../services/cgmApi/schedules';
 import { formatMinSinceMidnight } from '../features/map/constants';
 import { ArrivalReminderControl } from '../features/notifications/components/ArrivalReminderControl';
+import { useFavorites } from '../features/favorites/hooks/useFavorites';
 
 // ── Walking‑radius config ──
 const RADIUS_BUCKETS = [
@@ -75,6 +76,7 @@ type BucketedStop = Stop & { distanceMeters: number };
 
 export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: NearbyScreenProps) {
     const { location } = useUserLocation();
+    const favorites = useFavorites();
     const [allStops, setAllStops] = useState<Stop[]>([]);
     const [loading, setLoading] = useState(true);
     const [expandedBucket, setExpandedBucket] = useState<string>('5min');
@@ -117,6 +119,10 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
     }, [location, allStops]);
 
     const totalNearby = useMemo(() => buckets.reduce((sum, b) => sum + b.stops.length, 0), [buckets]);
+    const savedStopIds = useMemo(
+        () => new Set(favorites.favoritePlaces.map((favorite) => favorite.selectedStopId).filter(Boolean)),
+        [favorites.favoritePlaces],
+    );
 
     // ── Fetch live ETAs when a stop is expanded ──
     const handleStopPress = useCallback(async (stopId: string) => {
@@ -138,6 +144,35 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
     }, [expandedStopId]);
 
     const formatDist = (m: number) => m < 1000 ? `${Math.round(m)} м` : `${(m / 1000).toFixed(1)} км`;
+    const onToggleStopFavorite = useCallback((stop: Stop) => {
+        const selectedLines = Array.from(new Set(
+            stop.lines
+                .map((line) => String(line || '').trim().toUpperCase())
+                .filter(Boolean),
+        )).map((line) => ({
+            line,
+            enabled: true,
+            notificationsEnabled: false,
+        }));
+
+        const existingFavorite = favorites.favoritePlaces.find((favorite) => favorite.selectedStopId === stop.id) ?? null;
+
+        void (async () => {
+            if (existingFavorite) {
+                await favorites.removeFavorite(existingFavorite.id);
+                return;
+            }
+
+            await favorites.createFavorite({
+                name: stop.name,
+                latitude: stop.latitude,
+                longitude: stop.longitude,
+                selectedStopId: stop.id,
+                selectedStopName: stop.name,
+                selectedLines,
+            });
+        })();
+    }, [favorites]);
 
     // ── Render ──
     if (loading || !location) {
@@ -199,6 +234,16 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                             {`${formatDist(stop.distanceMeters)} • Линии: ${stop.lines.slice(0, 5).join(', ')}${stop.lines.length > 5 ? '...' : ''}`}
                                                         </Text>
                                                     </View>
+                                                    <TouchableOpacity
+                                                        style={[st.favoriteBtn, savedStopIds.has(stop.id) && st.favoriteBtnSaved]}
+                                                        onPress={() => onToggleStopFavorite(stop)}
+                                                    >
+                                                        <Ionicons
+                                                            name={savedStopIds.has(stop.id) ? 'bookmark' : 'bookmark-outline'}
+                                                            size={15}
+                                                            color={savedStopIds.has(stop.id) ? '#A16207' : '#64748B'}
+                                                        />
+                                                    </TouchableOpacity>
                                                     <TouchableOpacity
                                                         style={st.routeBtn}
                                                         onPress={() => {
@@ -347,6 +392,21 @@ const st = StyleSheet.create({
         width: 30, height: 30, borderRadius: 15,
         backgroundColor: 'rgba(248,250,252,0.72)', alignItems: 'center', justifyContent: 'center', marginLeft: 6,
         borderWidth: 1, borderColor: 'rgba(226,232,240,0.72)',
+    },
+    favoriteBtn: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        backgroundColor: 'rgba(248,250,252,0.72)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginLeft: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
+    },
+    favoriteBtnSaved: {
+        backgroundColor: 'rgba(254,249,195,0.75)',
+        borderColor: 'rgba(217,119,6,0.18)',
     },
     mapBtn: {
         width: 30, height: 30, borderRadius: 15,
