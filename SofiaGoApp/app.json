@@ -20,6 +20,11 @@
         "foregroundImage": "./assets/app-icon-new.png",
         "backgroundColor": "#ffffff"
       },
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyA-dURfwNmQRO2NLrfgOglwEFtmiwTqD8Y"
+        }
+      },
       "notification": {
         "icon": "./assets/android-icon-monochrome.png",
         "color": "#0F766E"

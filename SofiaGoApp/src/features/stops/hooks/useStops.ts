@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Stop, fetchStopsInBounds, fetchAllStops } from '../../../services/stopsApi';
 import { MapBounds } from '../../../types/map';
 import { VehicleType, inferLineTypeFromToken } from '../../../services/transitUtils';
-import { MIN_BOUNDS_DELTA_FOR_REFRESH, MAX_RENDERED_STOPS } from '../../map/constants';
+import { MIN_BOUNDS_DELTA_FOR_REFRESH, MAX_RENDERED_STOPS, resolveTransitDataViewportSuppressed } from '../../map/constants';
 
 export const useStops = (
     mapBounds: MapBounds | null,
@@ -16,13 +16,21 @@ export const useStops = (
     const [searchableStops, setSearchableStops] = useState<Stop[]>([]);
     const visibleStopsRef = useRef<Stop[]>([]);
     const lastStopBoundsRef = useRef<MapBounds | null>(null);
+    const viewportSuppressedRef = useRef(false);
 
     useEffect(() => {
         void fetchAllStops().then(setSearchableStops);
     }, []);
 
     useEffect(() => {
-        if (!mapBounds || hasTripRoute) return;
+        const shouldSuppress = resolveTransitDataViewportSuppressed(mapBounds, viewportSuppressedRef.current);
+        viewportSuppressedRef.current = shouldSuppress;
+
+        if (!mapBounds || hasTripRoute || shouldSuppress) {
+            visibleStopsRef.current = [];
+            setStops((current) => (current.length ? [] : current));
+            return;
+        }
         let isMounted = true;
 
         const boundsChanged = !lastStopBoundsRef.current

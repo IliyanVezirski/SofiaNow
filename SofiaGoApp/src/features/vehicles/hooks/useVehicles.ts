@@ -2,14 +2,22 @@ import { useState, useEffect, useRef } from 'react';
 import { Vehicle } from '../../../types/vehicles';
 import { MapBounds } from '../../../types/map';
 import { fetchVehiclesInBounds } from '../../../services/cgmApi/vehiclePositions';
-import { VEHICLE_REFRESH_MS } from '../../map/constants';
+import { VEHICLE_REFRESH_MS, resolveTransitDataViewportSuppressed } from '../../map/constants';
 
 export const useVehicles = (mapBounds: MapBounds | null, hasTripRoute: boolean) => {
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const viewportSuppressedRef = useRef(false);
 
     useEffect(() => {
-        if (!mapBounds || hasTripRoute) return;
+        const shouldSuppress = resolveTransitDataViewportSuppressed(mapBounds, viewportSuppressedRef.current);
+        viewportSuppressedRef.current = shouldSuppress;
+
+        if (!mapBounds || hasTripRoute || shouldSuppress) {
+            setVehicles((current) => (current.length ? [] : current));
+            setLastUpdated((current) => (current ? null : current));
+            return;
+        }
         let isMounted = true;
         let fetchInFlight = false;
 

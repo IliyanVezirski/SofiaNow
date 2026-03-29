@@ -15,6 +15,10 @@ export const OVERLAP_OFFSET_DEGREES = 0.00008;
 export const MAX_RENDERED_STOPS = 30;
 export const VIEWPORT_BOUNDS_UPDATE_DEBOUNCE_MS = 300;
 export const MIN_BOUNDS_DELTA_FOR_REFRESH = 0.0008;
+export const MAX_TRANSIT_DATA_LAT_SPAN = 0.12;
+export const MAX_TRANSIT_DATA_LON_SPAN = 0.18;
+export const RESUME_TRANSIT_DATA_LAT_SPAN = 0.08;
+export const RESUME_TRANSIT_DATA_LON_SPAN = 0.12;
 
 export const MAP_STYLE = {
     version: 8,
@@ -58,6 +62,28 @@ export const hasMeaningfulBoundsChange = (previous: MapBounds | null, next: MapB
         Math.abs(previous.east - next.east),
         Math.abs(previous.west - next.west),
     ) >= MIN_BOUNDS_DELTA_FOR_REFRESH;
+};
+
+export const isTransitDataViewportTooLarge = (bounds: MapBounds | null) => {
+    if (!bounds) return false;
+
+    const latitudeSpan = Math.abs(bounds.north - bounds.south);
+    const longitudeSpan = Math.abs(bounds.east - bounds.west);
+
+    return latitudeSpan >= MAX_TRANSIT_DATA_LAT_SPAN || longitudeSpan >= MAX_TRANSIT_DATA_LON_SPAN;
+};
+
+export const resolveTransitDataViewportSuppressed = (bounds: MapBounds | null, wasSuppressed: boolean) => {
+    if (!bounds) return false;
+
+    const latitudeSpan = Math.abs(bounds.north - bounds.south);
+    const longitudeSpan = Math.abs(bounds.east - bounds.west);
+
+    if (wasSuppressed) {
+        return latitudeSpan >= RESUME_TRANSIT_DATA_LAT_SPAN || longitudeSpan >= RESUME_TRANSIT_DATA_LON_SPAN;
+    }
+
+    return latitudeSpan >= MAX_TRANSIT_DATA_LAT_SPAN || longitudeSpan >= MAX_TRANSIT_DATA_LON_SPAN;
 };
 
 export const getDirectionAccentColor = (directionIndex: number) =>

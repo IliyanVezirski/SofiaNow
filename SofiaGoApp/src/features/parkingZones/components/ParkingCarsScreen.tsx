@@ -43,7 +43,7 @@ export const ParkingCarsScreen: React.FC<Props> = ({
     const helperMessage = errorMessage
         || liveValidationError
         || (plateInput.trim().length > 0
-            ? 'Номерът изглежда валиден.'
+            ? 'Номерът е валиден.'
             : 'Въведи номера така, както ще се прати по SMS: на латиница, без интервали и тирета.');
     const editingValidation = useMemo(() => validateParkingCarPlate(editingPlateInput), [editingPlateInput]);
     const liveEditingValidationError = editingPlateInput.trim().length > 0 && !editingValidation.isValid ? editingValidation.error : null;
@@ -154,9 +154,7 @@ export const ParkingCarsScreen: React.FC<Props> = ({
                         </TouchableOpacity>
                     </View>
                 </View>
-                <View style={styles.headerSubtitleWrap}>
-                    <Text style={styles.subtitle}>Добави номера точно както ще се използва за SMS паркиране в синя и зелена зона.</Text>
-                </View>
+
             </View>
 
             <FlatList
@@ -172,7 +170,7 @@ export const ParkingCarsScreen: React.FC<Props> = ({
                 ) : (
                     <View style={styles.emptyWrap}>
                         <Text style={styles.emptyText}>Още нямаш добавени коли.</Text>
-                        <Text style={styles.emptyHint}>Добави кола с име и валиден номер на латиница, без интервали и тирета.</Text>
+                    
                     </View>
                 )}
                 renderItem={({ item }) => {

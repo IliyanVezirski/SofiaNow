@@ -224,6 +224,25 @@ const summarize = (features) => {
     return `total=${summary.total}, blue=${summary.blue}, green=${summary.green}`;
 };
 
+const YURUKOV_ZONE_ID_OVERRIDES = {
+    8: 'blue',
+    11: 'blue',
+    27: 'green',
+};
+
+const mergeFeatures = (nmanolovFeatures, yurukovFeatures) => {
+    const nmanolovById = new Map(nmanolovFeatures.map((feature) => [feature.id, feature]));
+    const merged = [...nmanolovFeatures];
+
+    for (const yurukovFeature of yurukovFeatures) {
+        if (!nmanolovById.has(yurukovFeature.id)) {
+            merged.push(yurukovFeature);
+        }
+    }
+
+    return merged.sort(compareBySubzone);
+};
+
 const main = async () => {
     const options = parseArgs();
     const nmanolovRaw = await fetchJson(SOURCES.nmanolov);
@@ -234,7 +253,18 @@ const main = async () => {
     if (options.source === 'merge' || options.source === 'yurukov') {
         const yurukovRaw = await fetchJson(SOURCES.yurukov);
         const zoneIdBySubzone = buildZoneIdBySubzone(nmanolovFeatures);
-        outputFeatures = normalizeYurukovFeatures(yurukovRaw, zoneIdBySubzone);
+
+        for (const [subzoneNumber, zoneId] of Object.entries(YURUKOV_ZONE_ID_OVERRIDES)) {
+            zoneIdBySubzone.set(Number(subzoneNumber), zoneId);
+        }
+
+        const yurukovFeatures = normalizeYurukovFeatures(yurukovRaw, zoneIdBySubzone);
+
+        if (options.source === 'yurukov') {
+            outputFeatures = yurukovFeatures;
+        } else {
+            outputFeatures = mergeFeatures(nmanolovFeatures, yurukovFeatures);
+        }
     }
 
     if (options.dryRun) {

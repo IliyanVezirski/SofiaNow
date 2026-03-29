@@ -252,6 +252,24 @@ export const ParkingPaymentScreen: React.FC<Props> = ({
             Alert.alert(successTitle, `${baseMessage}${cancellationWarning}`);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Не успяхме да планираме изпращането.';
+
+            if (message.includes('точни аларми')) {
+                Alert.alert(
+                    'Разреши точни аларми',
+                    message,
+                    [
+                        { text: 'По-късно', style: 'cancel' },
+                        {
+                            text: 'Настройки',
+                            onPress: () => {
+                                void openParkingSmsExactAlarmSettings();
+                            },
+                        },
+                    ],
+                );
+                return;
+            }
+
             Alert.alert('Неуспешно планиране', message);
         } finally {
             setScheduling(false);

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Linking, NativeModules, PermissionsAndroid, Platform } from 'react-native';
+import { Linking, NativeEventEmitter, NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
 export type ParkingSmsZoneId = 'blue' | 'green';
 
@@ -16,11 +16,17 @@ type ParkingSmsAutomationModule = {
     sendParkingSms: (destination: string, body: string) => Promise<void>;
     scheduleParkingSms: (destination: string, body: string, triggerAtMillis: number) => Promise<{ id?: string; exactAlarmGranted?: boolean }>;
     cancelScheduledParkingSms?: (id: string) => Promise<void>;
+    consumeCompletedScheduledParkingSmsIds?: () => Promise<string[]>;
+    addListener: (eventName: string) => void;
+    removeListeners: (count: number) => void;
     canScheduleExactAlarms?: () => Promise<boolean>;
     openExactAlarmSettings?: () => Promise<void>;
 };
 
 const parkingSmsAutomationModule = (NativeModules.ParkingSmsAutomation as ParkingSmsAutomationModule | undefined);
+const parkingSmsAutomationEventEmitter = Platform.OS === 'android' && parkingSmsAutomationModule
+    ? new NativeEventEmitter(parkingSmsAutomationModule)
+    : null;
 const PARKING_SMS_SCHEDULES_STORAGE_KEY = '@sofiago:parking:sms:schedules:v1';
 
 export interface ScheduledParkingSmsEntry {
@@ -115,11 +121,79 @@ const normalizeStoredScheduledParkingSmsEntry = (value: unknown): ScheduledParki
 };
 
 const scheduledParkingSmsListeners = new Set<() => void>();
+let parkingSmsCompletionSubscription: { remove: () => void } | null = null;
 
 export const subscribeToScheduledParkingSmsChanges = (listener: () => void) => {
     scheduledParkingSmsListeners.add(listener);
     return () => { scheduledParkingSmsListeners.delete(listener); };
 };
+
+const extractScheduledParkingSmsId = (value: unknown) => {
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    const scheduleId = (value as { id?: unknown }).id;
+    return typeof scheduleId === 'string' ? scheduleId.trim() : '';
+};
+
+const normalizeScheduledParkingSmsIds = (value: unknown) => {
+    if (!Array.isArray(value)) {
+        return [] as string[];
+    }
+
+    return value
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter((item): item is string => item.length > 0);
+};
+
+const consumeCompletedScheduledParkingSmsIds = async () => {
+    if (Platform.OS !== 'android' || !parkingSmsAutomationModule?.consumeCompletedScheduledParkingSmsIds) {
+        return [] as string[];
+    }
+
+    try {
+        const completedIds = await parkingSmsAutomationModule.consumeCompletedScheduledParkingSmsIds();
+        return normalizeScheduledParkingSmsIds(completedIds);
+    } catch (error) {
+        console.warn('Failed to consume completed parking SMS ids:', error);
+        return [] as string[];
+    }
+};
+
+const reconcileCompletedScheduledParkingSmsEntries = async (entries: ScheduledParkingSmsEntry[]) => {
+    const completedIds = await consumeCompletedScheduledParkingSmsIds();
+    if (!completedIds.length) {
+        return entries;
+    }
+
+    const completedIdSet = new Set(completedIds);
+    const nextEntries = entries.filter((entry) => !completedIdSet.has(entry.id));
+    if (nextEntries.length === entries.length) {
+        return entries;
+    }
+
+    return persistScheduledParkingSmsEntries(nextEntries);
+};
+
+const ensureParkingSmsCompletionSubscription = () => {
+    if (parkingSmsCompletionSubscription || !parkingSmsAutomationEventEmitter) {
+        return;
+    }
+
+    parkingSmsCompletionSubscription = parkingSmsAutomationEventEmitter.addListener('parkingSmsScheduledSent', (payload: unknown) => {
+        const scheduleId = extractScheduledParkingSmsId(payload);
+        if (!scheduleId) {
+            return;
+        }
+
+        void removeScheduledParkingSmsEntry(scheduleId).catch((error) => {
+            console.warn('Failed to remove completed scheduled parking SMS entry:', error);
+        });
+    });
+};
+
+ensureParkingSmsCompletionSubscription();
 
 const persistScheduledParkingSmsEntries = async (entries: ScheduledParkingSmsEntry[]) => {
     const futureEntries = sortScheduledParkingSmsEntries(entries.filter((entry) => entry.triggerAtMillis > Date.now()));
@@ -154,6 +228,23 @@ const ensureParkingSmsPermission = async () => {
     });
 
     return result === PermissionsAndroid.RESULTS.GRANTED;
+};
+
+const ensureExactAlarmPermission = async () => {
+    if (Platform.OS !== 'android') {
+        return true;
+    }
+
+    if (!parkingSmsAutomationModule?.canScheduleExactAlarms) {
+        return true;
+    }
+
+    try {
+        return await parkingSmsAutomationModule.canScheduleExactAlarms();
+    } catch (error) {
+        console.warn('Failed to check exact alarm permission:', error);
+        return false;
+    }
 };
 
 export const supportsAutomaticParkingSms = Platform.OS === 'android' && !!parkingSmsAutomationModule;
@@ -198,6 +289,11 @@ export const scheduleParkingSmsAutomatically = async (zoneId: ParkingSmsZoneId, 
         throw new Error('Няма разрешение за автоматично изпращане на SMS.');
     }
 
+    const exactAlarmGranted = await ensureExactAlarmPermission();
+    if (!exactAlarmGranted) {
+        throw new Error('Няма разрешение за точни аларми. Разреши ги от настройките, за да планираш SMS.');
+    }
+
     const option = getParkingSmsOption(zoneId);
     const result = await automationModule.scheduleParkingSms(option.shortCode, normalizeParkingSmsBody(plate), triggerAtMillis);
 
@@ -219,7 +315,7 @@ export const loadScheduledParkingSmsEntries = async () => {
     try {
         const raw = await AsyncStorage.getItem(PARKING_SMS_SCHEDULES_STORAGE_KEY);
         if (!raw) {
-            return [] as ScheduledParkingSmsEntry[];
+            return reconcileCompletedScheduledParkingSmsEntries([]);
         }
 
         const parsed = JSON.parse(raw) as unknown;
@@ -233,11 +329,11 @@ export const loadScheduledParkingSmsEntries = async () => {
             .filter((entry): entry is ScheduledParkingSmsEntry => !!entry);
 
         const nextEntries = sortScheduledParkingSmsEntries(normalizedEntries.filter((entry) => entry.triggerAtMillis > Date.now()));
-        if (nextEntries.length !== normalizedEntries.length) {
-            return persistScheduledParkingSmsEntries(nextEntries);
-        }
+        const persistedEntries = nextEntries.length !== normalizedEntries.length
+            ? await persistScheduledParkingSmsEntries(nextEntries)
+            : nextEntries;
 
-        return nextEntries;
+        return reconcileCompletedScheduledParkingSmsEntries(persistedEntries);
     } catch (error) {
         console.warn('Failed to load scheduled parking SMS entries:', error);
         return [] as ScheduledParkingSmsEntry[];

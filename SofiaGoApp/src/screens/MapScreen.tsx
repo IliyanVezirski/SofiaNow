@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Linking, Platform, StatusBar, StyleSheet, View, Text, TouchableOpacity, LogBox, useWindowDimensions } from 'react-native';
 import MapboxGL from '@maplibre/maplibre-react-native';
+import GoogleMapView, { Circle as GoogleCircle, Marker, Polygon, Polyline, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 
 import { RouteSelection } from '../types/routes';
 import { Vehicle } from '../types/vehicles';
@@ -59,9 +60,11 @@ import type { ParkingLot } from '../features/parkingZones/types/parkingLots';
 import type { ParkingZoneId } from '../features/parkingZones/types';
 import { MapExperienceMode, MapModeSwitcher } from '../features/map/components/MapModeSwitcher';
 
-import { INITIAL_ZOOM_LEVEL, MAP_STYLE, MAX_RENDERED_STOPS, DEFAULT_CENTER_COORDINATE, createFallbackBounds, getDirectionAccentColor, getDirectionArrowSamples } from '../features/map/constants';
+import { INITIAL_ZOOM_LEVEL, MAP_STYLE, MAX_RENDERED_STOPS, MAX_RENDERED_VEHICLES, DEFAULT_BOUNDS_DELTA, DEFAULT_CENTER_COORDINATE, createFallbackBounds, getDirectionAccentColor, getDirectionArrowSamples, resolveTransitDataViewportSuppressed } from '../features/map/constants';
 
 const SUPPORT_REVOLUT_URL = 'https://revolut.me/iliyantyb2';
+const GOOGLE_FIT_EDGE_PADDING = { top: 60, right: 60, bottom: 80, left: 60 };
+const USER_LOCATION_REGION_DELTA = DEFAULT_BOUNDS_DELTA / 5;
 
 const createCirclePolygon = (centerLon: number, centerLat: number, radiusMeters: number, label: string) => {
     const coords: [number, number][] = [];
@@ -87,6 +90,91 @@ const createCirclePolygon = (centerLon: number, centerLat: number, radiusMeters:
     return {
         polygon: { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: coords }, properties: { customType: 'circle_line' } },
         labelPoints
+    };
+};
+
+const toMapCoordinate = ([longitude, latitude]: [number, number]) => ({ latitude, longitude });
+
+const getRegionFromBounds = (
+    bounds: { ne: [number, number]; sw: [number, number] } | null | undefined,
+    fallback: [number, number] = DEFAULT_CENTER_COORDINATE,
+): Region => {
+    if (!bounds) {
+        return {
+            latitude: fallback[1],
+            longitude: fallback[0],
+            latitudeDelta: DEFAULT_BOUNDS_DELTA,
+            longitudeDelta: DEFAULT_BOUNDS_DELTA,
+        };
+    }
+
+    const latitudeDelta = Math.max(Math.abs(bounds.ne[1] - bounds.sw[1]), DEFAULT_BOUNDS_DELTA / 3);
+    const longitudeDelta = Math.max(Math.abs(bounds.ne[0] - bounds.sw[0]), DEFAULT_BOUNDS_DELTA / 3);
+
+    return {
+        latitude: (bounds.ne[1] + bounds.sw[1]) / 2,
+        longitude: (bounds.ne[0] + bounds.sw[0]) / 2,
+        latitudeDelta,
+        longitudeDelta,
+    };
+};
+
+const getRegionFromCoordinate = (
+    latitude: number,
+    longitude: number,
+    currentBounds: { north: number; south: number; east: number; west: number } | null,
+    preferredDelta?: number,
+): Region => ({
+    latitude,
+    longitude,
+    latitudeDelta: preferredDelta ?? (currentBounds ? Math.max(Math.abs(currentBounds.north - currentBounds.south), DEFAULT_BOUNDS_DELTA / 3) : DEFAULT_BOUNDS_DELTA),
+    longitudeDelta: preferredDelta ?? (currentBounds ? Math.max(Math.abs(currentBounds.east - currentBounds.west), DEFAULT_BOUNDS_DELTA / 3) : DEFAULT_BOUNDS_DELTA),
+});
+
+const createFocusedBounds = (latitude: number, longitude: number) => ({
+    north: latitude + USER_LOCATION_REGION_DELTA,
+    south: latitude - USER_LOCATION_REGION_DELTA,
+    east: longitude + USER_LOCATION_REGION_DELTA,
+    west: longitude - USER_LOCATION_REGION_DELTA,
+});
+
+const getBoundsFromRegion = (region: Region) => ({
+    north: region.latitude + region.latitudeDelta / 2,
+    south: region.latitude - region.latitudeDelta / 2,
+    east: region.longitude + region.longitudeDelta / 2,
+    west: region.longitude - region.longitudeDelta / 2,
+});
+
+const getPolygonRings = (geometry: { type: 'Polygon' | 'MultiPolygon'; coordinates: any }) => {
+    if (geometry.type === 'Polygon') {
+        return Array.isArray(geometry.coordinates?.[0]) ? [geometry.coordinates[0] as [number, number][]] : [];
+    }
+
+    if (!Array.isArray(geometry.coordinates)) {
+        return [] as [number, number][][];
+    }
+
+    return geometry.coordinates
+        .map((polygon: any) => (Array.isArray(polygon?.[0]) ? polygon[0] as [number, number][] : null))
+        .filter((ring: [number, number][] | null): ring is [number, number][] => !!ring && ring.length >= 3);
+};
+
+const getGeometryCenter = (geometry: { type: 'Polygon' | 'MultiPolygon'; coordinates: any }) => {
+    const rings = getPolygonRings(geometry);
+    const coordinates = rings.flat();
+
+    if (!coordinates.length) {
+        return null;
+    }
+
+    const totals = coordinates.reduce((accumulator, [longitude, latitude]) => ({
+        longitude: accumulator.longitude + longitude,
+        latitude: accumulator.latitude + latitude,
+    }), { longitude: 0, latitude: 0 });
+
+    return {
+        longitude: totals.longitude / coordinates.length,
+        latitude: totals.latitude / coordinates.length,
     };
 };
 
@@ -227,6 +315,7 @@ export default function MapScreen({
     onParkingZoneChange,
 }: MapScreenProps) {
     const { height } = useWindowDimensions();
+    const googleMapRef = useRef<GoogleMapView | null>(null);
     const stopAnnotationRefs = useRef<Record<string, { refresh: () => void } | null>>({});
     const previousSelectedStopAnnotationIdRef = useRef<string | null>(null);
     const hasAppliedInitialLocationCameraRef = useRef(false);
@@ -318,6 +407,22 @@ export default function MapScreen({
         };
     }, [location]);
 
+    const googleWalkingRadiusLabels = useMemo(() => {
+        if (!location) return [] as Array<{ key: string; label: string; coordinate: { latitude: number; longitude: number } }>;
+
+        const lon = location.coords.longitude;
+        const lat = location.coords.latitude;
+        const walk5 = createCirclePolygon(lon, lat, 208, '5 мин');
+        const walk10 = createCirclePolygon(lon, lat, 416, '10 мин');
+        const walk15 = createCirclePolygon(lon, lat, 625, '15 мин');
+
+        return [
+            { key: 'walk-label-5', label: '5 мин', coordinate: toMapCoordinate(walk5.labelPoints[0].geometry.coordinates as [number, number]) },
+            { key: 'walk-label-10', label: '10 мин', coordinate: toMapCoordinate(walk10.labelPoints[2].geometry.coordinates as [number, number]) },
+            { key: 'walk-label-15', label: '15 мин', coordinate: toMapCoordinate(walk15.labelPoints[3].geometry.coordinates as [number, number]) },
+        ];
+    }, [location?.coords.latitude, location?.coords.longitude]);
+
     // ── Filters ──
     const filters = useFilters(highlightedRoute, onFilterCountChange);
 
@@ -360,6 +465,10 @@ export default function MapScreen({
     const [supportVisible, setSupportVisible] = useState(false);
     const [activeParkingOverlay, setActiveParkingOverlay] = useState<'payment' | 'cars' | null>(null);
     const [settingsExpanded, setSettingsExpanded] = useState(false);
+    const [googleShowTraffic, setGoogleShowTraffic] = useState(preferredMapExperienceMode === 'parking');
+    const [mapLayerPillExpanded, setMapLayerPillExpanded] = useState(false);
+    const mapLayerPillAnim = useRef(new Animated.Value(0)).current;
+    const mapLayerPillAutoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [mapExperienceMode, setMapExperienceMode] = useState<MapExperienceMode>(preferredMapExperienceMode ?? 'transit');
     const settingsSlideAnim = useRef(new Animated.Value(0)).current;
     const settingsAutoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -374,6 +483,7 @@ export default function MapScreen({
     const [selectedParkingLotId, setSelectedParkingLotId] = useState<string | null>(null);
     const liveParking = useLiveParkingAvailability(isParkingMode);
     const parkingCars = useParkingCars();
+    const [googleMapReady, setGoogleMapReady] = useState(false);
 
     useEffect(() => {
         if (hasTripRoute && !previousHasTripRouteRef.current) {
@@ -451,6 +561,51 @@ export default function MapScreen({
         }, 2000);
     }, [clearSettingsAutoHideTimer, settingsSlideAnim]);
 
+    const clearMapLayerAutoHideTimer = useCallback(() => {
+        if (!mapLayerPillAutoHideTimer.current) {
+            return;
+        }
+
+        clearTimeout(mapLayerPillAutoHideTimer.current);
+        mapLayerPillAutoHideTimer.current = null;
+    }, []);
+
+    const collapseMapLayerPill = useCallback(() => {
+        clearMapLayerAutoHideTimer();
+        setMapLayerPillExpanded(false);
+        Animated.timing(mapLayerPillAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start();
+    }, [clearMapLayerAutoHideTimer, mapLayerPillAnim]);
+
+    const expandMapLayerPill = useCallback(() => {
+        clearMapLayerAutoHideTimer();
+        setMapLayerPillExpanded(true);
+        Animated.timing(mapLayerPillAnim, {
+            toValue: 1,
+            duration: 290,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+        }).start();
+        mapLayerPillAutoHideTimer.current = setTimeout(() => {
+            setMapLayerPillExpanded(false);
+            Animated.timing(mapLayerPillAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start();
+            mapLayerPillAutoHideTimer.current = null;
+        }, 2000);
+    }, [clearMapLayerAutoHideTimer, mapLayerPillAnim]);
+
+    const handleMapLayerToggle = useCallback(() => {
+        if (mapLayerPillExpanded) {
+            collapseMapLayerPill();
+            return;
+        }
+
+        expandMapLayerPill();
+    }, [collapseMapLayerPill, expandMapLayerPill, mapLayerPillExpanded]);
+
+    const handleGoogleTrafficPress = useCallback(() => {
+        setGoogleShowTraffic((previous) => !previous);
+        expandMapLayerPill();
+    }, [expandMapLayerPill]);
+
     const handleOpenSettings = useCallback(() => {
         collapseSettingsPill();
         setSettingsVisible(true);
@@ -491,6 +646,7 @@ export default function MapScreen({
     }, [supportRevolutUrl]);
 
     useEffect(() => () => clearSettingsAutoHideTimer(), [clearSettingsAutoHideTimer]);
+    useEffect(() => () => clearMapLayerAutoHideTimer(), [clearMapLayerAutoHideTimer]);
 
     useEffect(() => {
         onParkingZoneChange?.(detectedParkingZoneId);
@@ -529,6 +685,88 @@ export default function MapScreen({
         return animation.renderedDisplayVehicles.find((v) => v.id === selectedVehicleId) ?? null;
     }, [selectedVehicleId, animation.renderedDisplayVehicles]);
 
+    // ── Google Maps vehicle marker pool (prevents ghost markers on Android) ──
+    const googleVehicleSlotMapRef = useRef(new Map<string, number>());
+    const googleVehicleSlotReverseRef = useRef(new Map<number, string>());
+
+    const googleVehiclePool = useMemo((): Array<(typeof animation.renderedDisplayVehicles)[0] | null> => {
+        if (Platform.OS !== 'android') return [];
+
+        const slotMap = googleVehicleSlotMapRef.current;
+        const reverseMap = googleVehicleSlotReverseRef.current;
+        const vehicles = animation.renderedDisplayVehicles;
+        const activeIds = new Set(vehicles.map((v) => v.id));
+
+        for (const [id, slot] of slotMap) {
+            if (!activeIds.has(id)) {
+                slotMap.delete(id);
+                reverseMap.delete(slot);
+            }
+        }
+
+        for (const v of vehicles) {
+            if (!slotMap.has(v.id)) {
+                for (let s = 0; s < MAX_RENDERED_VEHICLES; s++) {
+                    if (!reverseMap.has(s)) {
+                        slotMap.set(v.id, s);
+                        reverseMap.set(s, v.id);
+                        break;
+                    }
+                }
+            }
+        }
+
+        const vehicleById = new Map(vehicles.map((v) => [v.id, v]));
+        const slots: Array<(typeof vehicles)[0] | null> = new Array(MAX_RENDERED_VEHICLES).fill(null);
+        for (let i = 0; i < MAX_RENDERED_VEHICLES; i++) {
+            const vehicleId = reverseMap.get(i);
+            if (vehicleId) slots[i] = vehicleById.get(vehicleId) ?? null;
+        }
+
+        return slots;
+    }, [animation.renderedDisplayVehicles]);
+
+    // ── Google Maps stop marker pool (prevents ghost stop markers on Android) ──
+    const googleStopSlotMapRef = useRef(new Map<string, number>());
+    const googleStopSlotReverseRef = useRef(new Map<number, string>());
+
+    const googleStopPool = useMemo((): Array<Stop | null> => {
+        if (Platform.OS !== 'android') return [];
+
+        const slotMap = googleStopSlotMapRef.current;
+        const reverseMap = googleStopSlotReverseRef.current;
+        const stops = stopsHook.renderedStops;
+        const activeIds = new Set(stops.map((s) => s.id));
+
+        for (const [id, slot] of slotMap) {
+            if (!activeIds.has(id)) {
+                slotMap.delete(id);
+                reverseMap.delete(slot);
+            }
+        }
+
+        for (const s of stops) {
+            if (!slotMap.has(s.id)) {
+                for (let slot = 0; slot < MAX_RENDERED_STOPS; slot++) {
+                    if (!reverseMap.has(slot)) {
+                        slotMap.set(s.id, slot);
+                        reverseMap.set(slot, s.id);
+                        break;
+                    }
+                }
+            }
+        }
+
+        const stopById = new Map(stops.map((s) => [s.id, s]));
+        const slots: Array<Stop | null> = new Array(MAX_RENDERED_STOPS).fill(null);
+        for (let i = 0; i < MAX_RENDERED_STOPS; i++) {
+            const stopId = reverseMap.get(i);
+            if (stopId) slots[i] = stopById.get(stopId) ?? null;
+        }
+
+        return slots;
+    }, [stopsHook.renderedStops]);
+
     // ── Search, Favorites, Routing, Reporting ──
     const search = useSearch(stopsHook.searchableStops, filters.staticLines);
     const favorites = useFavorites();
@@ -561,6 +799,10 @@ export default function MapScreen({
         camera.setRouteCameraBounds,
     );
     const reporting = useReporting();
+    const hasActiveRouteOverlay = !!routing.routeGeometry || hasTripRoute || vehicleRoute.hasVehicleRoute || vehicleRoute.vehicleRouteStops.length > 0;
+    const transitViewportSuppressedRef = useRef(false);
+    transitViewportSuppressedRef.current = resolveTransitDataViewportSuppressed(bounds.mapBounds, transitViewportSuppressedRef.current);
+    const shouldRenderTransitViewportData = !transitViewportSuppressedRef.current;
 
     const openParkingPaymentPanel = useCallback(() => {
         selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
@@ -599,6 +841,14 @@ export default function MapScreen({
         }
     }, [mapExperienceMode, parkingZones.enabled, parkingZones.hasData, parkingZones.setEnabled, preferredMapExperienceMode]);
 
+    useEffect(() => {
+        setGoogleShowTraffic(mapExperienceMode === 'parking');
+    }, [mapExperienceMode]);
+
+
+
+
+
     const preferredInitialCenterCoordinate = useMemo<[number, number]>(() => {
         if (location) {
             return [location.coords.longitude, location.coords.latitude];
@@ -633,7 +883,7 @@ export default function MapScreen({
         hasAppliedInitialLocationCameraRef.current = true;
         suppressUserRecenterRegionSyncUntilRef.current = Date.now() + 1800;
         camera.lockCamera(location.coords.latitude, location.coords.longitude);
-        bounds.setMapBounds(createFallbackBounds(location.coords.latitude, location.coords.longitude));
+        bounds.setMapBounds(createFocusedBounds(location.coords.latitude, location.coords.longitude));
         setUserLocationVisible(true);
     }, [bounds, camera, hasReliableInitialLocation, highlightedRoute, location]);
 
@@ -716,7 +966,7 @@ export default function MapScreen({
         }
 
         camera.lockCamera(location.coords.latitude, location.coords.longitude);
-        bounds.setMapBounds(createFallbackBounds(location.coords.latitude, location.coords.longitude));
+        bounds.setMapBounds(createFocusedBounds(location.coords.latitude, location.coords.longitude));
         setUserLocationVisible(true);
     }, [
         bounds,
@@ -785,6 +1035,60 @@ export default function MapScreen({
         };
     }, [focusedParkingZoneFeatureId, parkingZones.visibleFeatureCollection]);
 
+    const shouldShowParkingZoneLabels = (visibleParkingZonesFeatureCollection?.features.length ?? 0) <= 1;
+
+    const googleInitialRegion = useMemo(
+        () => getRegionFromCoordinate(preferredInitialCenterCoordinate[1], preferredInitialCenterCoordinate[0], bounds.mapBounds, USER_LOCATION_REGION_DELTA),
+        [bounds.mapBounds, preferredInitialCenterCoordinate],
+    );
+
+    useEffect(() => {
+        if (Platform.OS !== 'android' || !googleMapReady || !googleMapRef.current) {
+            return;
+        }
+
+        const activeBounds = camera.tripCameraBounds || camera.routeCameraBounds;
+        if (activeBounds) {
+            googleMapRef.current.fitToCoordinates(
+                [toMapCoordinate(activeBounds.ne), toMapCoordinate(activeBounds.sw)],
+                { edgePadding: GOOGLE_FIT_EDGE_PADDING, animated: true },
+            );
+            return;
+        }
+
+        if (isUserFollowLocked && location) {
+            googleMapRef.current.animateToRegion(
+                getRegionFromCoordinate(location.coords.latitude, location.coords.longitude, bounds.mapBounds, USER_LOCATION_REGION_DELTA),
+                700,
+            );
+            return;
+        }
+
+        if (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget) {
+            googleMapRef.current.animateToRegion(
+                getRegionFromCoordinate(camera.mapCenterCoordinate[1], camera.mapCenterCoordinate[0], bounds.mapBounds, USER_LOCATION_REGION_DELTA),
+                700,
+            );
+            return;
+        }
+
+        if (!camera.hasInitialCameraTarget) {
+            googleMapRef.current.animateToRegion(googleInitialRegion, 700);
+        }
+    }, [
+        bounds.mapBounds,
+        camera.cameraLockedToInitialView,
+        camera.hasInitialCameraTarget,
+        camera.mapCenterCoordinate,
+        camera.routeCameraBounds,
+        camera.tripCameraBounds,
+        googleInitialRegion,
+        googleMapReady,
+        isUserFollowLocked,
+        location?.coords.latitude,
+        location?.coords.longitude,
+    ]);
+
     // ── Focus stop from outside ──
     useEffect(() => {
         if (focusStopCoordinate) {
@@ -842,7 +1146,7 @@ export default function MapScreen({
             camera.setTripCameraBounds(null);
             camera.setRouteCameraBounds(null);
             camera.focusOnCoordinate(location.coords.latitude, location.coords.longitude);
-            bounds.setMapBounds(createFallbackBounds(location.coords.latitude, location.coords.longitude));
+            bounds.setMapBounds(createFocusedBounds(location.coords.latitude, location.coords.longitude));
             setUserLocationVisible(true);
             return;
         }
@@ -853,7 +1157,7 @@ export default function MapScreen({
     const handleRegionDidChange = useCallback((event: any) => {
         if (Date.now() < suppressUserRecenterRegionSyncUntilRef.current) {
             if (location) {
-                bounds.scheduleBoundsUpdate(createFallbackBounds(location.coords.latitude, location.coords.longitude));
+                bounds.scheduleBoundsUpdate(createFocusedBounds(location.coords.latitude, location.coords.longitude));
                 setUserLocationVisible(true);
             }
             return;
@@ -861,7 +1165,7 @@ export default function MapScreen({
 
         if (isUserFollowLocked && location) {
             camera.lockCamera(location.coords.latitude, location.coords.longitude);
-            bounds.scheduleBoundsUpdate(createFallbackBounds(location.coords.latitude, location.coords.longitude));
+            bounds.scheduleBoundsUpdate(createFocusedBounds(location.coords.latitude, location.coords.longitude));
             setUserLocationVisible(true);
             return;
         }
@@ -914,6 +1218,46 @@ export default function MapScreen({
         isUserFollowLocked,
         location,
     ]);
+
+    const handleGoogleRegionChangeComplete = useCallback((region: Region) => {
+        if (Date.now() < suppressUserRecenterRegionSyncUntilRef.current) {
+            if (location) {
+                bounds.scheduleBoundsUpdate(createFocusedBounds(location.coords.latitude, location.coords.longitude));
+                setUserLocationVisible(true);
+            }
+            return;
+        }
+
+        if (isUserFollowLocked && location) {
+            camera.lockCamera(location.coords.latitude, location.coords.longitude);
+            bounds.scheduleBoundsUpdate(createFocusedBounds(location.coords.latitude, location.coords.longitude));
+            setUserLocationVisible(true);
+            return;
+        }
+
+        if (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget) {
+            camera.unlockCamera();
+        }
+        if (camera.tripCameraBounds) {
+            camera.setTripCameraBounds(null);
+        }
+        if (camera.routeCameraBounds) {
+            camera.setRouteCameraBounds(null);
+        }
+
+        const nextBounds = getBoundsFromRegion(region);
+        if (location) {
+            const thresholdLat = (nextBounds.north - nextBounds.south) * 0.2;
+            const thresholdLon = (nextBounds.east - nextBounds.west) * 0.2;
+            setUserLocationVisible(
+                Math.abs(location.coords.latitude - region.latitude) < thresholdLat
+                && Math.abs(location.coords.longitude - region.longitude) < thresholdLon,
+            );
+        }
+
+        camera.setMapCenterCoordinate([region.longitude, region.latitude]);
+        bounds.scheduleBoundsUpdate(nextBounds);
+    }, [bounds, camera, isUserFollowLocked, location]);
 
     const handleClearShownTripRoute = useCallback(() => {
         const previousViewport = tripRouteViewportSnapshotRef.current;
@@ -1006,6 +1350,376 @@ export default function MapScreen({
     return (
         <View style={styles.page}>
             <View style={styles.container}>
+                {Platform.OS === 'android' ? (
+                    <GoogleMapView
+                        ref={googleMapRef}
+                        style={styles.map}
+                        provider={PROVIDER_GOOGLE}
+                        initialRegion={googleInitialRegion}
+                        mapType="standard"
+                        toolbarEnabled={false}
+                        showsCompass={false}
+                        showsUserLocation={!!location}
+                        showsMyLocationButton={false}
+                        showsBuildings
+                        showsIndoors
+                        showsTraffic={googleShowTraffic}
+                        onMapReady={() => setGoogleMapReady(true)}
+                        onPress={onMapPress}
+                        onLongPress={(event) => {
+                            const { latitude, longitude } = event.nativeEvent.coordinate;
+                            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                                return;
+                            }
+                            setDroppedPin({ latitude, longitude });
+                            selectedVehicleIdRef.current = null;
+                            setSelectedVehicleId(null);
+                            setActiveParkingOverlay(null);
+                            setSelectedParkingLotId(null);
+                            selectedStop.closeSelectedStop();
+                        }}
+                        onRegionChangeComplete={handleGoogleRegionChangeComplete}
+                    >
+                        {isTransitMode && !hasActiveRouteOverlay && shouldRenderTransitViewportData && location && [208, 416, 625].map((radiusMeters, index) => (
+                            <GoogleCircle
+                                key={`walk-radius-${radiusMeters}`}
+                                center={{ latitude: location.coords.latitude, longitude: location.coords.longitude }}
+                                radius={radiusMeters}
+                                strokeColor="#9CA3AF"
+                                strokeWidth={1.5}
+                                fillColor={index === 0 ? 'rgba(156,163,175,0.08)' : 'rgba(156,163,175,0.04)'}
+                            />
+                        ))}
+
+                        {isTransitMode && !hasActiveRouteOverlay && shouldRenderTransitViewportData && googleWalkingRadiusLabels.map((item) => (
+                            <Marker
+                                key={item.key}
+                                coordinate={item.coordinate}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                                zIndex={3}
+                            >
+                                <View
+                                    collapsable={false}
+                                    pointerEvents="none"
+                                    style={{ backgroundColor: 'rgba(255,255,255,0.92)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(148,163,184,0.45)' }}
+                                >
+                                    <Text style={{ color: '#4B5563', fontSize: 10, fontWeight: '700' }}>{item.label}</Text>
+                                </View>
+                            </Marker>
+                        ))}
+
+                        {isParkingMode && visibleParkingZonesFeatureCollection?.features.map((feature) => (
+                            <React.Fragment key={`parking-zone-${feature.properties.id}`}>
+                                {getPolygonRings(feature.geometry).map((ring, index) => (
+                                    <Polygon
+                                        key={`parking-zone-${feature.properties.id}-${index}`}
+                                        coordinates={ring.map(toMapCoordinate)}
+                                        strokeColor={feature.properties.lineColor}
+                                        strokeWidth={2}
+                                        fillColor={`${feature.properties.lineColor}55`}
+                                    />
+                                ))}
+                                {shouldShowParkingZoneLabels ? (() => {
+                                    const center = getGeometryCenter(feature.geometry);
+                                    if (!center) {
+                                        return null;
+                                    }
+
+                                    return (
+                                        <Marker
+                                            key={`parking-zone-label-${feature.properties.id}`}
+                                            coordinate={{ latitude: center.latitude, longitude: center.longitude }}
+                                            anchor={{ x: 0.5, y: 0.5 }}
+                                            zIndex={8}
+                                        >
+                                            <View
+                                                collapsable={false}
+                                                pointerEvents="none"
+                                                style={{ backgroundColor: 'rgba(15,23,42,0.82)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' }}
+                                            >
+                                                <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>{feature.properties.displayName}</Text>
+                                            </View>
+                                        </Marker>
+                                    );
+                                })() : null}
+                            </React.Fragment>
+                        ))}
+
+                        {isParkingMode && allParkingLots.map((lot) => {
+                            const meta = CATEGORY_META[lot.category];
+                            const isSelected = lot.id === selectedParkingLotId;
+                            const label = ({ buffer: 'БП', underground: 'ПП', 'multi-storey': 'МП', airport: '✈', surface: 'П', commercial: 'ТП', impound: 'НП', private: 'ЧП' } as Record<string, string>)[lot.category] ?? 'P';
+
+                            return (
+                                <Marker
+                                    key={`parking-lot-${lot.id}`}
+                                    coordinate={{ latitude: lot.latitude, longitude: lot.longitude }}
+                                    anchor={{ x: 0.5, y: 0.5 }}
+                                    onPress={() => openParkingLotPanel(lot.id)}
+                                >
+                                    <View style={{ alignItems: 'center', justifyContent: 'center', width: isSelected ? 32 : 28, height: isSelected ? 32 : 28, borderRadius: isSelected ? 16 : 14, backgroundColor: meta?.color ?? '#64748B', borderWidth: 2.5, borderColor: isSelected ? '#0F172A' : '#FFFFFF' }}>
+                                        <Text style={{ color: '#FFFFFF', fontSize: isSelected ? 10 : 8, fontWeight: '800' }}>{label}</Text>
+                                    </View>
+                                </Marker>
+                            );
+                        })}
+
+                        {isTransitMode && !hasActiveRouteOverlay && shouldRenderTransitViewportData && googleStopPool.map((stop, slotIndex) => (
+                            <Marker
+                                key={`spool-${slotIndex}`}
+                                identifier={`spool-${slotIndex}`}
+                                coordinate={stop
+                                    ? { latitude: stop.latitude, longitude: stop.longitude }
+                                    : { latitude: 0, longitude: 0 }}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                                opacity={stop ? 1 : 0}
+                                tracksViewChanges={true}
+                                onPress={stop ? () => {
+                                    void (async () => {
+                                        selectedStop.selectedStopIdRef.current = stop.id;
+                                        selectedStop.setSelectedStopAnnotationId(`stop-${stop.id}`);
+                                        await selectedStop.openStopDetails(stop);
+                                        await etasHook.refreshEtasForStop(stop.id);
+                                    })();
+                                } : undefined}
+                            >
+                                {stop ? (
+                                    <StopDot stop={stop} selected={selectedStop.selectedStopAnnotationId === `stop-${stop.id}`} />
+                                ) : (
+                                    <View style={{ width: 1, height: 1 }} />
+                                )}
+                            </Marker>
+                        ))}
+
+                        {isTransitMode && !hasTripRoute && routing.routeGeometry?.directions.map((direction, index) => (
+                            <React.Fragment key={`route-google-${routing.routeGeometry!.line}-${index}`}>
+                                <Polyline coordinates={direction.coordinates.map(toMapCoordinate)} strokeColor="#FFFFFF" strokeWidth={7} />
+                                <Polyline coordinates={direction.coordinates.map(toMapCoordinate)} strokeColor={getDirectionAccentColor(index)} strokeWidth={4} />
+                            </React.Fragment>
+                        ))}
+
+                        {isTransitMode && !hasTripRoute && routing.routeGeometry?.directions.map((direction, dirIdx) =>
+                            direction.stops.map((stop, stopIdx) => {
+                                const annId = `route-stop-v${routing.routeGeometryVersion}-${dirIdx}-${stop.id}-${stopIdx}`;
+                                const isSelected = selectedStop.selectedStopAnnotationId === annId;
+
+                                return (
+                                    <Marker
+                                        key={annId}
+                                        coordinate={{ latitude: stop.latitude, longitude: stop.longitude }}
+                                        anchor={{ x: 0.5, y: 0.5 }}
+                                        onPress={() => {
+                                            void (async () => {
+                                                await selectedStop.openRouteStopDetails(stop, direction.name || `Посока ${dirIdx + 1}`, annId, stopsHook.stopById, routing.routeGeometry?.line, highlightedRoute?.line);
+                                                await etasHook.refreshEtasForStop(stop.id);
+                                            })();
+                                        }}
+                                    >
+                                        <View style={{ alignItems: 'center' }}>
+                                            <View style={[styles.routeStopDot, { borderColor: getDirectionAccentColor(dirIdx) }, isSelected && styles.routeStopDotSelected]} />
+                                            {isSelected ? (
+                                                <View style={styles.routeStopLabel}>
+                                                    <Text style={styles.routeStopName} numberOfLines={2}>{stop.name}</Text>
+                                                </View>
+                                            ) : null}
+                                        </View>
+                                    </Marker>
+                                );
+                            }),
+                        )}
+
+                        {isTransitMode && !hasTripRoute && vehicleRoute.vehicleRouteStops.length > 0 && (() => {
+                            const trackedVehicle = animation.renderedDisplayVehicles.find((v) => v.id === vehicleRoute.vehicleRouteVehicleId);
+                            let liveCoords: [number, number][] = vehicleRoute.vehicleRouteCoords;
+                            if (trackedVehicle && vehicleRoute.vehicleRouteCoords.length >= 2) {
+                                const vLon = trackedVehicle.longitude;
+                                const vLat = trackedVehicle.latitude;
+                                let bestIdx = 0;
+                                let bestDist = Infinity;
+                                for (let i = 0; i < vehicleRoute.vehicleRouteCoords.length; i += 1) {
+                                    const dx = vehicleRoute.vehicleRouteCoords[i][0] - vLon;
+                                    const dy = vehicleRoute.vehicleRouteCoords[i][1] - vLat;
+                                    const d = dx * dx + dy * dy;
+                                    if (d < bestDist) {
+                                        bestDist = d;
+                                        bestIdx = i;
+                                    }
+                                }
+                                liveCoords = [[vLon, vLat], ...vehicleRoute.vehicleRouteCoords.slice(bestIdx + 1)];
+                                if (liveCoords.length < 2) {
+                                    liveCoords = [[vLon, vLat], vehicleRoute.vehicleRouteCoords[vehicleRoute.vehicleRouteCoords.length - 1]];
+                                }
+                            }
+
+                            return (
+                                <>
+                                    {liveCoords.length >= 2 ? (
+                                        <>
+                                            <Polyline coordinates={liveCoords.map(toMapCoordinate)} strokeColor="#FFFFFF" strokeWidth={7} />
+                                            <Polyline coordinates={liveCoords.map(toMapCoordinate)} strokeColor="#059669" strokeWidth={4} />
+                                        </>
+                                    ) : null}
+
+                                    {vehicleRoute.vehicleRouteStops.map((stop, idx) => {
+                                        const annId = `vr-stop-${stop.stopId}-${idx}`;
+                                        const isSelected = selectedStop.selectedStopAnnotationId === annId;
+
+                                        return (
+                                            <Marker
+                                                key={annId}
+                                                coordinate={{ latitude: stop.latitude, longitude: stop.longitude }}
+                                                anchor={{ x: 0.5, y: 0.5 }}
+                                                onPress={async () => {
+                                                    selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+                                                    selectedStop.selectedStopIdRef.current = stop.stopId;
+                                                    selectedStop.setSelectedStopAnnotationId(annId);
+                                                    selectedVehicleIdRef.current = null;
+                                                    setSelectedVehicleId(null);
+
+                                                    const resolved = await fetchStopById(stop.stopId);
+                                                    if (resolved) {
+                                                        selectedStop.setSelectedStop(resolved);
+                                                    } else {
+                                                        selectedStop.setSelectedStop({
+                                                            id: stop.stopId,
+                                                            name: stop.stopName,
+                                                            latitude: stop.latitude,
+                                                            longitude: stop.longitude,
+                                                            lines: [],
+                                                            directions: [],
+                                                        });
+                                                    }
+                                                    await etasHook.refreshEtasForStop(stop.stopId);
+                                                }}
+                                            >
+                                                <View style={{ alignItems: 'center' }}>
+                                                    <View style={[styles.vehicleRouteStopDot, isSelected && styles.vehicleRouteStopDotSelected]} />
+                                                    {isSelected ? (
+                                                        <View style={styles.vehicleRouteStopLabel}>
+                                                            <Text style={styles.vehicleRouteStopName} numberOfLines={2}>{stop.stopName}</Text>
+                                                            {stop.arrivalTimestamp ? <Text style={styles.vehicleRouteStopTime}>{formatUnixTime(stop.arrivalTimestamp)}</Text> : null}
+                                                        </View>
+                                                    ) : null}
+                                                </View>
+                                            </Marker>
+                                        );
+                                    })}
+                                </>
+                            );
+                        })()}
+
+                        {isTransitMode && !hasTripRoute && vehicleRoute.hasVehicleRoute && (() => {
+                            const trackedVehicle = animation.renderedDisplayVehicles.find((v) => v.id === vehicleRoute.vehicleRouteVehicleId);
+                            if (!trackedVehicle) return null;
+
+                            return (
+                                <Marker
+                                    key={`tracked-${trackedVehicle.renderId}`}
+                                    identifier={`tracked-${trackedVehicle.id}`}
+                                    coordinate={{ latitude: trackedVehicle.latitude, longitude: trackedVehicle.longitude }}
+                                    anchor={{ x: 0.5, y: 0.5 }}
+                                    tracksViewChanges={false}
+                                    onPress={() => {
+                                        selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+                                        selectedVehicleIdRef.current = trackedVehicle.id;
+                                        setSelectedVehicleId(trackedVehicle.id);
+                                        selectedStop.closeSelectedStop();
+                                        void fetchTripDelay(trackedVehicle.tripId).then((d) => setVehicleDelays((p) => ({ ...p, [trackedVehicle.id]: d })));
+                                    }}
+                                >
+                                    <View collapsable={false} style={styles.vehicleMarkerWrap}><VehicleMarkerContent vehicle={trackedVehicle} /></View>
+                                </Marker>
+                            );
+                        })()}
+
+                        {isTransitMode && !hasActiveRouteOverlay && shouldRenderTransitViewportData && googleVehiclePool.map((vehicle, slotIndex) => (
+                            <Marker
+                                key={`vpool-${slotIndex}`}
+                                identifier={`vpool-${slotIndex}`}
+                                coordinate={vehicle
+                                    ? { latitude: vehicle.latitude, longitude: vehicle.longitude }
+                                    : { latitude: 0, longitude: 0 }}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                                opacity={vehicle ? 1 : 0}
+                                tracksViewChanges={true}
+                                onPress={vehicle ? () => {
+                                    selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+                                    selectedVehicleIdRef.current = vehicle.id;
+                                    setSelectedVehicleId(vehicle.id);
+                                    void fetchTripDelay(vehicle.tripId).then((d) => setVehicleDelays((p) => ({ ...p, [vehicle.id]: d })));
+                                } : undefined}
+                            >
+                                {vehicle ? (
+                                    <View collapsable={false} style={styles.vehicleMarkerWrap}><VehicleMarkerContent vehicle={vehicle} /></View>
+                                ) : (
+                                    <View style={{ width: 1, height: 1 }} />
+                                )}
+                            </Marker>
+                        ))}
+
+                        {!hasActiveRouteOverlay && droppedPin ? (
+                            <Marker
+                                key="dropped-pin"
+                                coordinate={{ latitude: droppedPin.latitude, longitude: droppedPin.longitude }}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                            >
+                                <View style={styles.droppedPinDot} />
+                            </Marker>
+                        ) : null}
+
+                        {isTransitMode && tripPlannerRoute && tripPlannerRoute.features.map((feature, idx) => (
+                            <React.Fragment key={`trip-leg-google-${idx}`}>
+                                <Polyline
+                                    coordinates={feature.geometry.coordinates.map(toMapCoordinate)}
+                                    strokeColor="#FFFFFF"
+                                    strokeWidth={feature.properties.mode === 'WALK' ? 7 : 8}
+                                    lineDashPattern={undefined}
+                                />
+                                <Polyline
+                                    coordinates={feature.geometry.coordinates.map(toMapCoordinate)}
+                                    strokeColor={feature.properties.color}
+                                    strokeWidth={feature.properties.mode === 'WALK' ? 4 : 5}
+                                    lineDashPattern={feature.properties.mode === 'WALK' ? [8, 8] : undefined}
+                                />
+                            </React.Fragment>
+                        ))}
+
+                        {isTransitMode && tripPlannerRoute && tripPlannerRoute.transitStops.map((stop, idx) => (
+                            <Marker
+                                key={`trip-stop-${idx}-${stop.stopCode ?? stop.lat}`}
+                                coordinate={{ latitude: stop.lat, longitude: stop.lon }}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                                onPress={async () => {
+                                    selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+                                    const resolved = resolveTripPlannerStopToKnownStop(stop, stopsHook.searchableStops);
+                                    if (resolved) {
+                                        selectedStop.selectedStopIdRef.current = resolved.id;
+                                        selectedStop.setSelectedStopAnnotationId(`trip-stop-${idx}`);
+                                        selectedStop.setSelectedStop(resolved);
+                                        await etasHook.refreshEtasForStop(resolved.id);
+                                    } else {
+                                        selectedStop.selectedStopIdRef.current = stop.stopCode ?? `trip-${idx}`;
+                                        selectedStop.setSelectedStopAnnotationId(`trip-stop-${idx}`);
+                                        selectedStop.setSelectedStop({ id: stop.stopCode ?? `trip-${idx}`, name: stop.name, latitude: stop.lat, longitude: stop.lon, lines: [], directions: [] });
+                                    }
+                                }}
+                            >
+                                <View style={[styles.tripStopDot, selectedStop.selectedStopAnnotationId === `trip-stop-${idx}` && styles.tripStopDotSelected]} />
+                            </Marker>
+                        ))}
+
+                        {isTransitMode && tripPlannerRoute ? (
+                            <>
+                                <Marker key="trip-start" coordinate={{ latitude: tripPlannerRoute.endpoints.from.lat, longitude: tripPlannerRoute.endpoints.from.lon }} anchor={{ x: 0.5, y: 0.5 }}>
+                                    <View style={styles.tripEndpointMarker}><Text style={styles.tripEndpointText}>А</Text></View>
+                                </Marker>
+                                <Marker key="trip-end" coordinate={{ latitude: tripPlannerRoute.endpoints.to.lat, longitude: tripPlannerRoute.endpoints.to.lon }} anchor={{ x: 0.5, y: 0.5 }}>
+                                    <View style={[styles.tripEndpointMarker, styles.tripEndpointMarkerEnd]}><Text style={styles.tripEndpointText}>Б</Text></View>
+                                </Marker>
+                            </>
+                        ) : null}
+                    </GoogleMapView>
+                ) : (
                 <MapboxGL.MapView
                     style={styles.map}
                     mapStyle={MAP_STYLE}
@@ -1054,7 +1768,7 @@ export default function MapScreen({
                         </MapboxGL.ShapeSource>
                     )}
 
-                    {isTransitMode && walkingRadiiGeoJSON && (
+                    {isTransitMode && !hasActiveRouteOverlay && shouldRenderTransitViewportData && walkingRadiiGeoJSON && (
                         <MapboxGL.ShapeSource id="walking-radii" shape={walkingRadiiGeoJSON as any}>
                             <MapboxGL.LineLayer id="walking-radii-line" filter={['==', ['get', 'customType'], 'circle_line']} style={{ lineColor: '#9CA3AF', lineWidth: 1.5, lineOpacity: 0.8 }} />
                             <MapboxGL.SymbolLayer id="walking-radii-label" filter={['==', ['get', 'customType'], 'circle_label']} style={{
@@ -1132,7 +1846,7 @@ export default function MapScreen({
                     )}
 
                     {/* Stops */}
-                    {isTransitMode && !routing.routeGeometry && !vehicleRoute.hasVehicleRoute && !hasTripRoute && stopsHook.renderedStops.map((stop) => (
+                    {isTransitMode && !hasActiveRouteOverlay && shouldRenderTransitViewportData && stopsHook.renderedStops.map((stop) => (
                         <MapboxGL.PointAnnotation
                             key={`stop-${stop.id}`}
                             id={`stop-${stop.id}`}
@@ -1349,7 +2063,7 @@ export default function MapScreen({
                     })()}
 
                     {/* Vehicles */}
-                    {isTransitMode && !hasTripRoute && !vehicleRoute.hasVehicleRoute && animation.renderedDisplayVehicles.map((vehicle) => (
+                    {isTransitMode && !hasActiveRouteOverlay && shouldRenderTransitViewportData && animation.renderedDisplayVehicles.map((vehicle) => (
                         <MapboxGL.PointAnnotation
                             key={vehicle.renderId} id={vehicle.renderId}
                             coordinate={[vehicle.longitude, vehicle.latitude]}
@@ -1366,7 +2080,7 @@ export default function MapScreen({
                     ))}
 
                     {/* Dropped pin */}
-                    {!hasTripRoute && droppedPin && (
+                    {!hasActiveRouteOverlay && droppedPin && (
                         <MapboxGL.PointAnnotation key="dropped-pin" id="dropped-pin" coordinate={[droppedPin.longitude, droppedPin.latitude]}>
                             <View style={styles.droppedPinDot} />
                         </MapboxGL.PointAnnotation>
@@ -1464,8 +2178,77 @@ export default function MapScreen({
                         </>
                     )}
                 </MapboxGL.MapView>
+                )}
 
                 <MapModeSwitcher activeMode={mapExperienceMode} onSelectMode={handleMapExperienceModeChange} />
+
+                {Platform.OS === 'android' && (
+                    <View style={[styles.mapLayerPillWrap, { bottom: floatingControlBottomOffset + 58 }]}>
+                        <View
+                            pointerEvents={mapLayerPillExpanded ? 'none' : 'auto'}
+                            style={styles.mapLayerCollapsedTouchAreaWrap}
+                        >
+                            <TouchableOpacity
+                                activeOpacity={1}
+                                onPress={handleMapLayerToggle}
+                                style={styles.mapLayerCollapsedTouchArea}
+                            />
+                        </View>
+
+                        <Animated.View
+                            style={[
+                                styles.mapLayerCombinedPill,
+                                {
+                                    transform: [{ translateX: mapLayerPillAnim.interpolate({ inputRange: [0, 1], outputRange: [-52, 0] }) }],
+                                },
+                            ]}
+                        >
+                            <Animated.View
+                                pointerEvents={mapLayerPillExpanded ? 'auto' : 'none'}
+                                style={[
+                                    styles.mapLayerOptionsRow,
+                                    {
+                                        opacity: mapLayerPillAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }),
+                                    },
+                                ]}
+                            >
+                                {([
+                                    { key: 'traffic', icon: 'car-sport-outline' as const, active: googleShowTraffic, onPress: handleGoogleTrafficPress },
+                                ] as const).map((item) => (
+                                    <TouchableOpacity
+                                        key={item.key}
+                                        activeOpacity={0.82}
+                                        disabled={!mapLayerPillExpanded}
+                                        onPress={item.onPress}
+                                        style={styles.mapLayerSlotButton}
+                                    >
+                                        <View style={[styles.mapLayerOptionIconBadge, item.active && styles.mapLayerOptionIconBadgeActive]}>
+                                            <Ionicons name={item.icon} size={17} color={item.active ? '#FFFFFF' : '#0F172A'} />
+                                        </View>
+                                    </TouchableOpacity>
+                                ))}
+                            </Animated.View>
+
+                            <TouchableOpacity
+                                activeOpacity={0.82}
+                                onPress={handleMapLayerToggle}
+                                style={styles.mapLayerTriggerSlot}
+                                hitSlop={{ top: 14, bottom: 14, left: 0, right: 20 }}
+                            >
+                                <Animated.View
+                                    style={[
+                                        styles.mapLayerOptionLineWrap,
+                                        {
+                                            opacity: mapLayerPillAnim.interpolate({ inputRange: [0, 0.4], outputRange: [1, 0], extrapolate: 'clamp' }),
+                                        },
+                                    ]}
+                                >
+                                    <View style={styles.mapLayerOptionLine} />
+                                </Animated.View>
+                            </TouchableOpacity>
+                        </Animated.View>
+                    </View>
+                )}
 
                 <View style={[styles.settingsPillWrap, { bottom: floatingControlBottomOffset  }]}>
                     <View
@@ -2033,4 +2816,85 @@ const styles = StyleSheet.create({
     bottomOverlay: { position: 'absolute', width: '100%', alignItems: 'center', zIndex: 5, elevation: 5 },
     reportButton: { backgroundColor: '#E63946', paddingHorizontal: 25, paddingVertical: 15, borderRadius: 30, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 6 },
     reportText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
+    mapLayerPillWrap: {
+        position: 'absolute',
+        left: 0,
+        width: 70,
+        height: 48,
+        zIndex: 2,
+        elevation: 2,
+    },
+    mapLayerCollapsedTouchAreaWrap: {
+        position: 'absolute',
+        left: 0,
+        top: -10,
+        width: 128,
+        height: 68,
+        zIndex: 3,
+        elevation: 3,
+    },
+    mapLayerCollapsedTouchArea: {
+        width: '100%',
+        height: '100%',
+    },
+    mapLayerCombinedPill: {
+        width: 70,
+        height: 48,
+        borderTopRightRadius: 24,
+        borderBottomRightRadius: 24,
+        backgroundColor: 'rgba(255,255,255,0.88)',
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.78)',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+        elevation: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        paddingLeft: 6,
+        paddingRight: 6,
+        overflow: 'hidden',
+    },
+    mapLayerOptionsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 0,
+    },
+    mapLayerTriggerSlot: {
+        width: 24,
+        height: 48,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    mapLayerOptionLineWrap: {
+        position: 'absolute',
+        right: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    mapLayerOptionLine: {
+        width: 3.5,
+        height: 18,
+        borderRadius: 2,
+        backgroundColor: 'rgba(15,23,42,0.18)',
+    },
+    mapLayerSlotButton: {
+        width: 34,
+        height: 34,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    mapLayerOptionIconBadge: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(248,250,252,0.42)',
+    },
+    mapLayerOptionIconBadgeActive: {
+        backgroundColor: '#3B82F6',
+    },
 });

@@ -58,6 +58,10 @@ const ZONE_NAME_OVERRIDES: Partial<Record<string, string>> = {
     'podzona-33': 'Център · Брегалница',
     'podzona-34': 'Център · Димитър Петков',
     'podzona-35': 'Подуяне · Русалка',
+    'podzona-8': 'Център · Зона Б-19',
+    'podzona-11': 'Център · бул. Евлоги и Христо Георгиеви',
+    'podzona-27': 'Лозенец · Крайна',
+    'podzona-36': 'Подуяне · Слатина',
 };
 
 const extractZoneNumber = (value: string) => {
