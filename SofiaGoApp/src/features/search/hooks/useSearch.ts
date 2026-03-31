@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { PlaceSearchResult, searchCentralLocations } from '../../../services/places';
-import { Stop, AvailableLine } from '../../../services/stopsApi';
-import { getVehicleTypeLabel } from '../../../services/transitUtils';
+import { searchCentralLocations } from '../../../services/places/search';
+import type { PlaceSearchResult } from '../../../services/places/types';
+import { type Stop, type AvailableLine, getVehicleTypeLabel } from '../../../services/transit';
 
 export type CentralSearchResult =
     | { kind: 'place'; id: string; name: string; subtitle: string; latitude: number; longitude: number }

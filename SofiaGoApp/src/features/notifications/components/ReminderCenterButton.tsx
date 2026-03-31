@@ -13,19 +13,28 @@ import {
     updateStoredTransitArrivalReminder,
 } from '../../../services/notifications/transitArrivalNotifications';
 import {
-    cancelFavoriteCommuteReminder,
     formatFavoriteCommuteWeekdays,
+} from '../../../services/places/commute';
+import {
+    cancelFavoriteCommuteReminder,
     listFavoriteCommuteReminders,
-    StoredFavoriteCommuteReminder,
-    subscribeToFavoritePlaceChanges,
     updateFavoriteCommuteReminderSettings,
-} from '../../../services/places';
+} from '../../../services/places/repository';
+import { subscribeToFavoritePlaceChanges } from '../../../services/places/storage';
+import type { StoredFavoriteCommuteReminder } from '../../../services/places/types';
+import {
+    listSavedTripPlannerRoutes,
+    removeSavedTripPlannerRoute,
+    subscribeToSavedTripPlannerRouteChanges,
+    type SavedTripPlannerRoute,
+} from '../../../services/savedTripRoutes';
 
 interface Props {
     anchorStyle?: object;
     inline?: boolean;
     opaque?: boolean;
     transparent?: boolean;
+    onOpenSavedTripRoute?: (routeId: string) => void | Promise<void>;
 }
 
 const formatTime = (timestamp: number) => {
@@ -48,21 +57,26 @@ const parseReminderMinutes = (value: string) => {
     return parsed;
 };
 
-export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = false, opaque = false, transparent = false }) => {
+export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = false, opaque = false, transparent = false, onOpenSavedTripRoute }) => {
     const [visible, setVisible] = useState(false);
     const [arrivalReminders, setArrivalReminders] = useState<StoredTransitArrivalReminder[]>([]);
     const [commuteReminders, setCommuteReminders] = useState<StoredFavoriteCommuteReminder[]>([]);
+    const [savedRoutes, setSavedRoutes] = useState<SavedTripPlannerRoute[]>([]);
     const [arrivalReminderHistory, setArrivalReminderHistory] = useState<StoredTransitArrivalReminderHistoryEntry[]>([]);
     const [submittingKey, setSubmittingKey] = useState<string | null>(null);
     const [submittingCommuteId, setSubmittingCommuteId] = useState<string | null>(null);
     const [submittingHistoryId, setSubmittingHistoryId] = useState<string | null>(null);
     const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+    const [deletingSavedRouteId, setDeletingSavedRouteId] = useState<string | null>(null);
     const [editingReminder, setEditingReminder] = useState<StoredTransitArrivalReminder | null>(null);
     const [editingMinutesInput, setEditingMinutesInput] = useState('');
     const [editingSubmitting, setEditingSubmitting] = useState(false);
     const [editingCommuteReminder, setEditingCommuteReminder] = useState<StoredFavoriteCommuteReminder | null>(null);
     const [editingCommuteMinutesInput, setEditingCommuteMinutesInput] = useState('');
     const [editingCommuteSubmitting, setEditingCommuteSubmitting] = useState(false);
+    const [restoringHistoryEntry, setRestoringHistoryEntry] = useState<StoredTransitArrivalReminderHistoryEntry | null>(null);
+    const [restoringMinutesInput, setRestoringMinutesInput] = useState('');
+    const [restoringSubmitting, setRestoringSubmitting] = useState(false);
     const [nowUnix, setNowUnix] = useState(() => Math.floor(Date.now() / 1000));
     const { height } = useWindowDimensions();
 
@@ -78,15 +92,17 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
         let cancelled = false;
 
         const loadReminders = async () => {
-            const [nextArrivalReminders, nextArrivalReminderHistory, nextCommuteReminders] = await Promise.all([
+            const [nextArrivalReminders, nextArrivalReminderHistory, nextCommuteReminders, nextSavedRoutes] = await Promise.all([
                 listTransitArrivalReminders(),
                 listTransitArrivalReminderHistory(),
                 listFavoriteCommuteReminders(),
+                listSavedTripPlannerRoutes(),
             ]);
             if (!cancelled) {
                 setArrivalReminders(nextArrivalReminders);
                 setArrivalReminderHistory(nextArrivalReminderHistory);
                 setCommuteReminders(nextCommuteReminders);
+                setSavedRoutes(nextSavedRoutes);
             }
         };
 
@@ -97,15 +113,19 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
         const unsubscribeFavorites = subscribeToFavoritePlaceChanges(() => {
             void loadReminders();
         });
+        const unsubscribeSavedRoutes = subscribeToSavedTripPlannerRouteChanges(() => {
+            void loadReminders();
+        });
 
         return () => {
             cancelled = true;
             unsubscribeArrival();
             unsubscribeFavorites();
+            unsubscribeSavedRoutes();
         };
     }, []);
 
-    const totalReminders = arrivalReminders.length + commuteReminders.length;
+    const totalReminders = arrivalReminders.length + commuteReminders.length + savedRoutes.length;
     const hasReminders = totalReminders > 0;
     const activeHistoryIds = useMemo(() => new Set(arrivalReminders.map((reminder) => reminder.historyId).filter(Boolean)), [arrivalReminders]);
     const historyReminders = useMemo(
@@ -190,16 +210,44 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
     };
 
     const onRestoreFromHistory = async (entry: StoredTransitArrivalReminderHistoryEntry) => {
-        if (submittingHistoryId) return;
+        setRestoringHistoryEntry(entry);
+        setRestoringMinutesInput(String(entry.minutesBefore));
+    };
 
-        setSubmittingHistoryId(entry.historyId);
+    const closeRestoreHistory = () => {
+        if (restoringSubmitting) {
+            return;
+        }
+
+        Keyboard.dismiss();
+        setRestoringHistoryEntry(null);
+        setRestoringMinutesInput('');
+    };
+
+    const onConfirmRestoreHistory = async () => {
+        if (!restoringHistoryEntry || restoringSubmitting) {
+            return;
+        }
+
+        const minutesBefore = parseReminderMinutes(restoringMinutesInput);
+        if (minutesBefore == null) {
+            Alert.alert('Невалидни минути', 'Въведи число между 1 и 120 минути.');
+            return;
+        }
+
+        Keyboard.dismiss();
+        setRestoringSubmitting(true);
         try {
-            const result = await rescheduleTransitArrivalReminderFromHistory(entry.historyId);
+            const result = await rescheduleTransitArrivalReminderFromHistory(restoringHistoryEntry.historyId, minutesBefore);
+            if (result.ok) {
+                setRestoringHistoryEntry(null);
+                setRestoringMinutesInput('');
+            }
             Alert.alert(result.ok ? 'Напомнянето е възстановено' : 'Неуспешно възстановяване', result.message);
         } catch {
             Alert.alert('Грешка', 'Неуспешно възстановяване на напомнянето от историята.');
         } finally {
-            setSubmittingHistoryId(null);
+            setRestoringSubmitting(false);
         }
     };
 
@@ -274,6 +322,32 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
             Alert.alert('Грешка', 'Неуспешно изтриване от историята.');
         } finally {
             setDeletingHistoryId(null);
+        }
+    };
+
+    const onOpenSavedRoute = async (route: SavedTripPlannerRoute) => {
+        if (!onOpenSavedTripRoute) {
+            return;
+        }
+
+        Keyboard.dismiss();
+        setVisible(false);
+        await Promise.resolve(onOpenSavedTripRoute(route.id));
+    };
+
+    const onDeleteSavedRoute = async (route: SavedTripPlannerRoute) => {
+        if (deletingSavedRouteId) {
+            return;
+        }
+
+        setDeletingSavedRouteId(route.id);
+        try {
+            await removeSavedTripPlannerRoute(route.id);
+            Alert.alert('Маршрутът е премахнат', 'Запазеният маршрут беше изтрит.');
+        } catch {
+            Alert.alert('Грешка', 'Неуспешно изтриване на запазения маршрут.');
+        } finally {
+            setDeletingSavedRouteId(null);
         }
     };
 
@@ -377,6 +451,53 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
                                 </Pressable>
                             ))}
 
+                            {savedRoutes.length ? <Text style={styles.sectionTitle}>Запазени маршрути</Text> : null}
+                            {savedRoutes.map((route) => {
+                                const isDeleting = deletingSavedRouteId === route.id;
+                                const canOpenSavedRoute = !!onOpenSavedTripRoute;
+                                return (
+                                    <Pressable
+                                        key={route.id}
+                                        style={styles.card}
+                                        disabled={!canOpenSavedRoute}
+                                        onPress={() => {
+                                            void onOpenSavedRoute(route);
+                                        }}
+                                    >
+                                        <View style={styles.cardRow}>
+                                            <View style={styles.cardInfo}>
+                                                <Text style={styles.cardLine} numberOfLines={1}>{route.routeLabel}</Text>
+                                                <Text style={styles.cardStop} numberOfLines={2}>{`${route.from.name} → ${route.to.name}`}</Text>
+                                            </View>
+                                            <View style={styles.historyActionsWrap}>
+                                                {canOpenSavedRoute ? (
+                                                    <TouchableOpacity
+                                                        style={styles.editBtn}
+                                                        onPress={() => {
+                                                            void onOpenSavedRoute(route);
+                                                        }}
+                                                        disabled={isDeleting}
+                                                    >
+                                                        <Ionicons name="open-outline" size={14} color="#1D4ED8" />
+                                                    </TouchableOpacity>
+                                                ) : null}
+                                                <TouchableOpacity
+                                                    style={styles.deleteBtn}
+                                                    onPress={() => {
+                                                        void onDeleteSavedRoute(route);
+                                                    }}
+                                                    disabled={isDeleting}
+                                                >
+                                                    <Ionicons name="close" size={14} color="#94A3B8" />
+                                                </TouchableOpacity>
+                                            </View>
+                                        </View>
+                                        <Text style={styles.meta}>{`${route.routeDate} • ${route.routeTime}${route.arriveBy ? ' • пристигане до' : ' • тръгване в'}`}</Text>
+                                        <Text style={styles.arrivalEta}>{route.itinerarySummary}</Text>
+                                    </Pressable>
+                                );
+                            })}
+
                             {historyReminders.length ? <Text style={styles.sectionTitle}>История</Text> : null}
                             {historyReminders.map((entry) => {
                                 const isSubmitting = submittingHistoryId === entry.historyId;
@@ -424,8 +545,8 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
                                 );
                             })}
 
-                            {!arrivalReminders.length && !historyReminders.length ? (
-                                <Text style={styles.emptyText}>Няма напомняния.</Text>
+                            {!arrivalReminders.length && !commuteReminders.length && !savedRoutes.length && !historyReminders.length ? (
+                                <Text style={styles.emptyText}>Няма запазени напомняния или маршрути.</Text>
                             ) : null}
                         </ScrollView>
                     </View>
@@ -514,6 +635,48 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
 
                         <TouchableOpacity style={styles.saveBtn} onPress={() => void onSaveEditedCommuteReminder()} disabled={editingCommuteSubmitting}>
                             <Text style={styles.saveBtnText}>{editingCommuteSubmitting ? 'Запазване...' : 'Запази'}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
+            <Modal transparent animationType="fade" visible={!!restoringHistoryEntry} statusBarTranslucent onRequestClose={closeRestoreHistory}>
+                <KeyboardAvoidingView
+                    style={styles.editModalRoot}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 18 : 0}
+                >
+                    <Pressable style={styles.backdrop} onPress={closeRestoreHistory} />
+                    <View style={styles.editCard}>
+                        <View style={styles.header}>
+                            <View style={styles.editHeaderCopy}>
+                                <Text style={styles.title}>Възстановяване на напомняне</Text>
+                                {restoringHistoryEntry ? (
+                                    <>
+                                        <View style={styles.editLineBadge}>
+                                            <Text style={styles.editLineBadgeText}>{restoringHistoryEntry.line}</Text>
+                                        </View>
+                                        <Text style={styles.editStopName}>{restoringHistoryEntry.stopName}</Text>
+                                    </>
+                                ) : null}
+                            </View>
+                            <TouchableOpacity style={styles.closeBtn} onPress={closeRestoreHistory}>
+                                <Ionicons name="close" size={18} color="#64748B" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.editLabel}>Минути преди пристигане</Text>
+                        <TextInput
+                            style={styles.editInput}
+                            value={restoringMinutesInput}
+                            onChangeText={(value) => setRestoringMinutesInput(normalizeReminderMinutesInput(value))}
+                            keyboardType="number-pad"
+                            maxLength={3}
+                            placeholder="5"
+                            placeholderTextColor="#94A3B8"
+                        />
+
+                        <TouchableOpacity style={styles.saveBtn} onPress={() => void onConfirmRestoreHistory()} disabled={restoringSubmitting}>
+                            <Text style={styles.saveBtnText}>{restoringSubmitting ? 'Възстановяване...' : 'Възстанови'}</Text>
                         </TouchableOpacity>
                     </View>
                 </KeyboardAvoidingView>

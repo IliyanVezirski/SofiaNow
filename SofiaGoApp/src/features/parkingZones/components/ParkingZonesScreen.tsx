@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { parkingZonesFeatureCollection, PARKING_ZONE_RULES } from '../data/parkingZones.static';
 import { getParkingZonePolicy } from '../data/parkingZonePolicy.static';
 import type { ParkingZoneId } from '../types';
-import { PARKING_SMS_OPTIONS } from '../../../services/parkingSms';
 
 type ZoneListItem = {
     id: string;
@@ -111,7 +110,6 @@ export const ParkingZonesScreen: React.FC<Props> = ({
                                 {items.map((item) => {
                                     const isActive = item.id === inspectedZoneFeatureId;
                                     const policy = getParkingZonePolicy(item.zoneId);
-                                    const smsOption = PARKING_SMS_OPTIONS.find((option) => option.id === item.zoneId) ?? null;
                                     return (
                                         <View key={item.id}>
                                             <TouchableOpacity
@@ -134,15 +132,24 @@ export const ParkingZonesScreen: React.FC<Props> = ({
 
                                             {isActive && policy && (
                                                 <View style={[styles.inlineInfoCard, { borderColor: `${zoneRule.lineColor}55` }]}>
-                                                    <Text style={styles.infoLine}>{`Зона: ${policy.zoneId === 'blue' ? 'Синя' : 'Зелена'}`}</Text>
-                                                    <Text style={styles.infoLine}>{`Период: ${policy.activePeriodLabel}`}</Text>
-                                                    <Text style={styles.infoLine}>{`Дни: ${policy.activeDaysLabel}`}</Text>
-                                                    <Text style={styles.infoLine}>{`Часове: ${policy.activeHoursLabel}`}</Text>
-                                                    <Text style={styles.infoLine}>{`Максимален престой: ${policy.maxStayLabel}`}</Text>
-                                                    <Text style={styles.infoLine}>{`Плащане: ${policy.paymentLabel}`}</Text>
-                                                    {smsOption ? <Text style={styles.infoLine}>{`Цена: ${smsOption.hourlyPriceLabel}`}</Text> : null}
-
-                                                    <Text style={styles.infoDisclaimer}>{policy.disclaimer}</Text>
+                                                    <View style={styles.infoGrid}>
+                                                        <View style={styles.infoCell}>
+                                                            <Text style={styles.infoLabel}>Работно време</Text>
+                                                            <Text style={styles.infoValue}>{policy.activeSummaryLabel}</Text>
+                                                        </View>
+                                                        <View style={styles.infoCell}>
+                                                            <Text style={styles.infoLabel}>Цена</Text>
+                                                            <Text style={styles.infoValue}>{policy.priceLabel}</Text>
+                                                        </View>
+                                                        <View style={styles.infoCell}>
+                                                            <Text style={styles.infoLabel}>SMS</Text>
+                                                            <Text style={styles.infoValue}>{policy.smsNumber}</Text>
+                                                        </View>
+                                                        <View style={styles.infoCell}>
+                                                            <Text style={styles.infoLabel}>Макс. престой</Text>
+                                                            <Text style={styles.infoValue}>{policy.maxStayLabel}</Text>
+                                                        </View>
+                                                    </View>
 
                                                     <TouchableOpacity
                                                         activeOpacity={0.88}
@@ -282,18 +289,30 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         paddingVertical: 12,
     },
-    infoLine: {
+    infoGrid: {
+        gap: 8,
+    },
+    infoCell: {
+        borderRadius: 12,
+        backgroundColor: '#F8FAFC',
+        paddingHorizontal: 10,
+        paddingVertical: 9,
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.9)',
+    },
+    infoLabel: {
+        fontSize: 10,
+        lineHeight: 14,
+        color: '#64748B',
+        fontWeight: '800',
+        textTransform: 'uppercase',
+        marginBottom: 2,
+    },
+    infoValue: {
         fontSize: 12,
         lineHeight: 18,
         color: '#334155',
-        fontWeight: '600',
-    },
-    infoDisclaimer: {
-        marginTop: 8,
-        fontSize: 11,
-        lineHeight: 16,
-        color: '#64748B',
-        fontWeight: '600',
+        fontWeight: '700',
     },
     showOnMapButton: {
         marginTop: 10,

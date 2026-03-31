@@ -24,6 +24,6 @@ const translations = {
 
 export const i18n = new I18n(translations);
 
-// Set default locale to Bulgarian, but fallback to system if missing
-i18n.locale = Localization.getLocales()[0]?.languageTag.startsWith('bg') ? 'bg' : 'bg'; // Hardcoded base to BG per requirements
+i18n.locale = Localization.getLocales()[0]?.languageTag.startsWith('bg') ? 'bg' : 'en';
+i18n.defaultLocale = 'bg';
 i18n.enableFallback = true;

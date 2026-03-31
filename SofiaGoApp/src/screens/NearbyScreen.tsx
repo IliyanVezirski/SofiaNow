@@ -6,7 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useUserLocation } from '../features/map/hooks/useUserLocation';
 import { fetchAllStops, Stop } from '../services/stopsApi';
-import { haversineDistanceMeters, inferLineTypeFromToken, getVehicleAccentColor, getVehicleIconName, formatUnixTime, VehicleType } from '../services/transitUtils';
+import { haversineDistanceMeters, resolveDisplayLineType, getVehicleAccentColor, getVehicleIconName, formatUnixTime, VehicleType } from '../services/transitUtils';
 import { fetchStopEtas, StopEta } from '../services/cgmApi';
 import { fetchFullStopSchedule } from '../services/cgmApi/stopEtas';
 import { getEtaScheduleInfo } from '../services/cgmApi/schedules';
@@ -37,7 +37,7 @@ const resolveTypes = (stop: Stop): VehicleType[] => {
         return [...new Set(stop.vehicleTypes)].sort();
     }
     const tSet = new Set<VehicleType>();
-    stop.lines.forEach(l => tSet.add(inferLineTypeFromToken(l)));
+    stop.lines.forEach(l => tSet.add(resolveDisplayLineType(l)));
     return [...tSet].sort();
 };
 

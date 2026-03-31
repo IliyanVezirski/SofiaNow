@@ -1,6 +1,6 @@
 import { StaticScheduleEntry, DayType, ScheduleBasedStop, ScheduleBasedDirection, LineScheduleDirection } from '../../types/vehicles';
 import { collapseContainedDirections } from '../routeDirectionMerge';
-import { getRouteMetadata, inferLineTypeFromToken } from '../transitUtils';
+import { getRouteMetadata } from '../transitUtils';
 import { resolveLineByRouteShortName, stopCoordinatesById, stopNameById } from './routeResolver';
 
 // ── Lazy schedule data ──
@@ -101,9 +101,7 @@ const getScheduleRouteIdMap = () => {
     for (const schedRouteId of Object.keys(idx)) {
         const line = resolveLineByRouteShortName(schedRouteId);
         const meta = getRouteMetadata(schedRouteId);
-        const inferredType = inferLineTypeFromToken(line);
-        const type = inferredType === 'bus' ? meta.type : inferredType;
-        const key = `${type}:${line}`;
+        const key = `${meta.type}:${line}`;
         if (!_scheduleRouteIdMap.has(key)) _scheduleRouteIdMap.set(key, schedRouteId);
     }
     return _scheduleRouteIdMap;
@@ -131,8 +129,7 @@ export const getStaticStopSchedule = (stopId: string, dayType?: DayType): Static
             const destination = key.slice(sepIdx + 1);
             const meta = getRouteMetadata(routeId);
             const line = resolveLineByRouteShortName(routeId);
-            const inferredType = inferLineTypeFromToken(line);
-            const type = inferredType === 'bus' ? meta.type : inferredType;
+            const type = meta.type;
             const times = dayTimes[dt] || [];
             if (times.length > 0) results.push({ line, type, destination, times, routeId });
         }

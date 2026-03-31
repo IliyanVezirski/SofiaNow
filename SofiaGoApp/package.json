@@ -9,6 +9,7 @@
     "web": "expo start --web",
     "web:serve": "node scripts/webServer.js",
     "generate:schedule": "node generate_schedule_static.js",
+    "generate:route-geometry": "node scripts/generate-route-geometry.js",
     "generate:parking-lots": "node scripts/generate-parking-lots.js",
     "generate:parking-zones": "node scripts/generate-parking-zones.js"
   },

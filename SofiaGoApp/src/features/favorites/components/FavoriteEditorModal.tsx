@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { FavoriteLinePreference, FavoritePlace, PlaceSearchResult, formatFavoriteCommuteWeekdays, getFavoriteCommuteNotificationShiftLabel, getFavoritePresetLabel, hasFavoriteCoordinates, searchLocations } from '../../../services/places';
+import { formatFavoriteCommuteWeekdays, getFavoriteCommuteNotificationShiftLabel } from '../../../services/places/commute';
+import { getFavoritePresetLabel, hasFavoriteCoordinates } from '../../../services/places/normalization';
+import { searchLocations } from '../../../services/places/search';
+import type { FavoriteLinePreference, FavoritePlace, PlaceSearchResult } from '../../../services/places/types';
 import { Stop, summarizeStopDirections } from '../../../services/stopsApi';
 
 export type FavoriteEditorSection = 'name' | 'location';
@@ -264,6 +267,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
     const hasCoordinates = hasFavoriteCoordinates({ ...favorite, latitude, longitude });
     const enabledLines = linePreferences.filter((entry) => entry.enabled);
     const hasSavedRoute = !!favorite.defaultCommute?.itinerarySummary;
+    const hasEditableLocationData = hasCoordinates || !!selectedStopId || linePreferences.length > 0;
     const locationSummary = hasCoordinates ? `${latitude?.toFixed(5)}, ${longitude?.toFixed(5)}` : 'Не е зададена';
     const hasPersonalNotifications = linePreferences.some((entry) => entry.enabled && entry.notificationsEnabled);
 
@@ -581,7 +585,7 @@ export const FavoriteEditorModal: React.FC<Props> = ({
                             <Text style={styles.saveButtonText}>{isDraft ? 'Добави мястото' : 'Запази промените'}</Text>
                         </TouchableOpacity>
 
-                        {!isDraft && (
+                        {!isDraft && hasEditableLocationData && (
                             <TouchableOpacity
                                 style={styles.clearRow}
                                 onPress={() => {

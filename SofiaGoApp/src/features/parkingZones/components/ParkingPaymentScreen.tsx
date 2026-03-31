@@ -14,7 +14,7 @@ import {
     sendParkingSmsAutomatically,
     type ParkingSmsZoneId,
     type ScheduledParkingSmsEntry,
-} from '../../../services/parkingSms';
+} from '../../../services/parking';
 
 const formatTimeForInput = (date: Date) => `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 const normalizeTimeInput = (value: string) => value.replace(/[^\d:]/g, '').slice(0, 5);

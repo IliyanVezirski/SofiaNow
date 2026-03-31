@@ -1,5 +1,5 @@
 import GtfsRealtimeBindings from 'gtfs-realtime-bindings';
-import { calculateBearingDegrees, getRouteMetadata, inferLineTypeFromToken, VehicleType } from './transitUtils';
+import { calculateBearingDegrees, getRouteMetadata, VehicleType } from './transitUtils';
 import { MapBounds } from './stopsApi';
 import bundledRouteNames from '../data/routeNames.static.json';
 import bundledStops from '../data/stops.static.json';
@@ -397,8 +397,7 @@ export const fetchVehiclesNearby = async (lat: number, lon: number): Promise<Veh
                     vLon > lon - lonDelta && vLon < lon + lonDelta) {
                     const routeMetadata = getRouteMetadata(entity.vehicle.trip?.routeId);
                     const resolvedLine = resolveLineByRouteShortName(entity.vehicle.trip?.routeId);
-                    const inferredType = inferLineTypeFromToken(resolvedLine);
-                    const resolvedType = inferredType === 'bus' ? routeMetadata.type : inferredType;
+                    const resolvedType = routeMetadata.type;
                     const vehicleId = entity.vehicle.vehicle?.id || entity.id;
                     const tripId = entity.vehicle.trip?.tripId || entity.id;
                     const lastUpdatedUnix = Number(entity.vehicle.timestamp || 0) || Math.floor(Date.now() / 1000);
@@ -473,8 +472,7 @@ export const fetchVehiclesInBounds = async (bounds: MapBounds): Promise<Vehicle[
                 if (vLat <= bounds.north && vLat >= bounds.south && vLon <= bounds.east && vLon >= bounds.west) {
                     const routeMetadata = getRouteMetadata(entity.vehicle.trip?.routeId);
                     const resolvedLine = resolveLineByRouteShortName(entity.vehicle.trip?.routeId);
-                    const inferredType = inferLineTypeFromToken(resolvedLine);
-                    const resolvedType = inferredType === 'bus' ? routeMetadata.type : inferredType;
+                    const resolvedType = routeMetadata.type;
                     const vehicleId = entity.vehicle.vehicle?.id || entity.id;
                     const tripId = entity.vehicle.trip?.tripId || entity.id;
                     const lastUpdatedUnix = Number(entity.vehicle.timestamp || 0) || Math.floor(Date.now() / 1000);
@@ -550,7 +548,7 @@ export const fetchStopEtas = async (stopIds: string[]): Promise<Record<string, S
 
             const routeMetadata = getRouteMetadata(tripUpdate.trip.routeId);
             const resolvedLine = resolveLineByRouteShortName(tripUpdate.trip.routeId);
-            const resolvedType = inferLineTypeFromToken(resolvedLine);
+            const resolvedType = routeMetadata.type;
 
             (tripUpdate.stopTimeUpdate || []).forEach((stopTimeUpdate: any) => {
                 const stopId = stopTimeUpdate.stopId;
@@ -607,7 +605,7 @@ export const fetchFullStopSchedule = async (stopId: string): Promise<StopEta[]> 
 
             const routeMetadata = getRouteMetadata(tripUpdate.trip.routeId);
             const resolvedLine = resolveLineByRouteShortName(tripUpdate.trip.routeId);
-            const resolvedType = inferLineTypeFromToken(resolvedLine);
+            const resolvedType = routeMetadata.type;
 
             const stopTimeUpdates = tripUpdate.stopTimeUpdate || [];
             const lastTripStopUpdate = stopTimeUpdates.length > 0
@@ -753,8 +751,7 @@ const getScheduleRouteIdMap = () => {
     for (const schedRouteId of Object.keys(idx)) {
         const line = resolveLineByRouteShortName(schedRouteId);
         const meta = getRouteMetadata(schedRouteId);
-        const inferredType = inferLineTypeFromToken(line);
-        const type = inferredType === 'bus' ? meta.type : inferredType;
+        const type = meta.type;
         const key = `${type}:${line}`;
         if (!_scheduleRouteIdMap.has(key)) {
             _scheduleRouteIdMap.set(key, schedRouteId);
@@ -781,8 +778,7 @@ export const getStaticStopSchedule = (stopId: string, dayType?: DayType): Static
         const destination = key.slice(sepIdx + 1);
         const meta = getRouteMetadata(routeId);
         const line = resolveLineByRouteShortName(routeId);
-        const inferredType = inferLineTypeFromToken(line);
-        const type = inferredType === 'bus' ? meta.type : inferredType;
+        const type = meta.type;
         const times = dayTimes[dt] || [];
         if (times.length > 0) results.push({ line, type, destination, times, routeId });
     }
@@ -904,7 +900,7 @@ export const fetchGlobalDepartures = async (limit = 120): Promise<GlobalDepartur
 
             const routeMetadata = getRouteMetadata(tripUpdate.trip.routeId);
             const resolvedLine = resolveLineByRouteShortName(tripUpdate.trip.routeId);
-            const resolvedType = inferLineTypeFromToken(resolvedLine);
+            const resolvedType = routeMetadata.type;
 
             (tripUpdate.stopTimeUpdate || []).forEach((stopTimeUpdate: any) => {
                 const stopId = String(stopTimeUpdate.stopId || '');

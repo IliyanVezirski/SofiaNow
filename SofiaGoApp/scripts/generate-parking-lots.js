@@ -34,9 +34,8 @@ const isDryRun = process.argv.includes('--dry-run');
 function buildQueryForBBox([south, west, north, east]) {
         return `[out:json][timeout:35];
 (
-    nwr[amenity=parking][name](${south},${west},${north},${east});
-    nwr[amenity=parking][access=private][capacity](${south},${west},${north},${east});
-    nwr[amenity=parking][access=customers][capacity](${south},${west},${north},${east});
+    nwr[amenity=parking][fee=yes](${south},${west},${north},${east});
+    nwr[amenity=parking][charge](${south},${west},${north},${east});
 );
 out center;`;
 }
@@ -62,6 +61,9 @@ function classifyCategory(tags) {
 
 function parseElement(el) {
     const tags = el.tags || {};
+    const isPaidParking = tags.fee === 'yes' || !!tags.charge;
+    if (!isPaidParking) return null;
+
     let lat, lon;
     if (el.type === 'node') {
         lat = el.lat;
@@ -75,15 +77,18 @@ function parseElement(el) {
 
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
-    // Allow unnamed private/customers parkings; generate a fallback name
-    let name = tags.name || null;
+    const operator = (tags.operator || '').trim();
+    const normalizedOperator = operator.toLowerCase();
+    let name = tags.name || tags['name:en'] || null;
     if (!name) {
-        if (tags.access === 'private' || tags.access === 'customers' || tags.access === 'no') {
-            name = tags.operator
-                ? `${tags.operator} (частен паркинг)`
-                : `Частен паркинг (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+        if (normalizedOperator.includes('център за градска мобилност') || normalizedOperator === 'цгм') {
+            return null;
+        }
+
+        if (operator) {
+            name = /паркинг|parking/i.test(operator) ? operator : `${operator} паркинг`;
         } else {
-            return null; // Skip unnamed public parkings
+            return null;
         }
     }
 
@@ -97,8 +102,9 @@ function parseElement(el) {
         longitude: lon,
         category: classifyCategory(tags),
         capacity: Number.isFinite(capacity) ? capacity : null,
-        fee: tags.fee === 'yes',
-        operator: tags.operator || null,
+        fee: true,
+        charge: tags.charge || null,
+        operator: operator || null,
         parkRide: tags.park_ride === 'yes',
         openingHours: tags.opening_hours || null,
         website: tags.website || null,
@@ -183,6 +189,9 @@ async function main() {
     for (const [cat, count] of Object.entries(categoryCounts)) {
         console.log(`  ${cat}: ${count}`);
     }
+    console.log(`  with charge: ${parkingLots.filter((lot) => !!lot.charge).length}`);
+    console.log(`  with openingHours: ${parkingLots.filter((lot) => !!lot.openingHours).length}`);
+    console.log(`  with operator: ${parkingLots.filter((lot) => !!lot.operator).length}`);
 
     if (isDryRun) {
         console.log('\n[DRY RUN] Would write to:', OUTPUT_PATH);

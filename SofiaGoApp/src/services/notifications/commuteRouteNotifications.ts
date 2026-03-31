@@ -1,33 +1,23 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { ensureTransitNotificationPermissions } from './transitArrivalNotifications';
-import { fetchStopEtas } from '../cgmApi/stopEtas';
-import { getEtaScheduleInfo } from '../cgmApi/schedules';
-import type { FavoriteCommuteWeekday } from '../places';
-import type { StopEta } from '../../types/vehicles';
+import type { FavoriteCommuteWeekday } from '../places/types';
+import {
+    formatWeekdays,
+    getNextOccurrenceUnix,
+    getNextOccurrenceUnixForWeekday,
+    parseReminderTime,
+} from './commuteRouteNotification.utils';
+import {
+    buildCommuteRouteBody,
+    ensureFavoriteCommuteRouteCategoryRegistered,
+    normalizeCommuteNotificationWeekdays,
+} from './commuteRouteNotification.policy';
 
 const TRANSIT_NOTIFICATION_CHANNEL_ID = 'transit-arrivals-v2';
 const DEFAULT_NOTIFICATION_SOUND = Platform.OS === 'ios' ? 'default' : undefined;
 export const FAVORITE_COMMUTE_ROUTE_NOTIFICATION_CATEGORY_ID = 'favorite-commute-route';
 export const FAVORITE_COMMUTE_ROUTE_NOTIFICATION_ACTION_SHOW_ROUTE = 'show-route';
-
-const WEEKDAY_LABELS: Record<FavoriteCommuteWeekday, string> = {
-    1: 'Нд',
-    2: 'Пн',
-    3: 'Вт',
-    4: 'Ср',
-    5: 'Чт',
-    6: 'Пт',
-    7: 'Сб',
-};
-
-const formatWeekdays = (weekdays: FavoriteCommuteWeekday[]) => {
-    if (weekdays.length === 7) {
-        return 'всеки ден';
-    }
-
-    return weekdays.map((weekday) => WEEKDAY_LABELS[weekday]).join(', ');
-};
 
 interface CommuteRouteNotificationRequest {
     favoriteId?: string | null;
@@ -51,297 +41,6 @@ interface CommuteRouteNotificationResult {
     message: string;
     notificationIds?: string[];
 }
-
-const parseReminderTime = (value: string) => {
-    const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(value || '').trim());
-    if (!match) {
-        return null;
-    }
-
-    return {
-        hour: Number(match[1]),
-        minute: Number(match[2]),
-    };
-};
-
-const formatDurationMinutes = (seconds: number | null | undefined) => {
-    if (!Number.isFinite(seconds) || Number(seconds) <= 0) {
-        return null;
-    }
-
-    return `${Math.max(1, Math.round(Number(seconds) / 60))} мин`;
-};
-
-const formatDistance = (meters: number | null | undefined) => {
-    if (!Number.isFinite(meters) || Number(meters) <= 0) {
-        return null;
-    }
-
-    const normalized = Math.round(Number(meters));
-    if (normalized >= 1000) {
-        return `${(normalized / 1000).toFixed(normalized >= 10000 ? 0 : 1).replace(/\.0$/, '')} км`;
-    }
-
-    return `${normalized} м`;
-};
-
-const formatScheduleClock = (scheduledMinSinceMidnight: number | null | undefined) => {
-    if (!Number.isFinite(scheduledMinSinceMidnight)) {
-        return null;
-    }
-
-    const totalMinutes = Math.max(0, Math.round(Number(scheduledMinSinceMidnight)));
-    const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
-    const minutes = totalMinutes % 60;
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-};
-
-const ensureFavoriteCommuteRouteCategoryRegistered = async () => {
-    await Notifications.setNotificationCategoryAsync(FAVORITE_COMMUTE_ROUTE_NOTIFICATION_CATEGORY_ID, [
-        {
-            identifier: FAVORITE_COMMUTE_ROUTE_NOTIFICATION_ACTION_SHOW_ROUTE,
-            buttonTitle: 'Покажи маршрута',
-            options: {
-                opensAppToForeground: true,
-            },
-        },
-    ]);
-};
-
-const weekdayToJsDay = (weekday: FavoriteCommuteWeekday) => (weekday === 1 ? 0 : weekday - 1);
-
-const formatClockFromUnix = (unixSeconds: number) => {
-    const date = new Date(unixSeconds * 1000);
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-};
-
-const formatDelayText = (delayMinutes: number | null | undefined) => {
-    if (delayMinutes == null) {
-        return null;
-    }
-
-    if (delayMinutes > 0) {
-        return `закъснява с ${delayMinutes} мин`;
-    }
-
-    if (delayMinutes < 0) {
-        return `идва с ${Math.abs(delayMinutes)} мин по-рано`;
-    }
-
-    return 'е по разписание';
-};
-
-const buildPlannedFirstStopText = ({
-    routeStartUnix,
-    firstTransitStopName,
-    firstTransitLine,
-    firstTransitStopOffsetMinutes,
-}: {
-    routeStartUnix: number;
-    firstTransitStopName?: string | null;
-    firstTransitLine?: string | null;
-    firstTransitStopOffsetMinutes?: number | null;
-}) => {
-    const normalizedLine = String(firstTransitLine || '').trim().toUpperCase();
-    if (!normalizedLine || !Number.isFinite(firstTransitStopOffsetMinutes)) {
-        return null;
-    }
-
-    const stopLabel = firstTransitStopName || 'първата спирка';
-    const scheduledUnix = routeStartUnix + (Math.round(Number(firstTransitStopOffsetMinutes)) * 60);
-    return {
-        normalizedLine,
-        stopLabel,
-        scheduledClock: formatClockFromUnix(scheduledUnix),
-    };
-};
-
-const getNextOccurrenceUnixForWeekday = (weekday: FavoriteCommuteWeekday, hour: number, minute: number) => {
-    const now = new Date();
-    const nowMs = now.getTime();
-    const candidate = new Date(now);
-    const currentDay = candidate.getDay();
-    let dayDelta = weekdayToJsDay(weekday) - currentDay;
-    candidate.setHours(hour, minute, 0, 0);
-
-    if (dayDelta < 0 || (dayDelta === 0 && candidate.getTime() <= nowMs + 1000)) {
-        dayDelta += 7;
-    }
-
-    candidate.setDate(candidate.getDate() + dayDelta);
-    return Math.floor(candidate.getTime() / 1000);
-};
-
-const getNextOccurrenceUnix = (weekdays: FavoriteCommuteWeekday[], hour: number, minute: number) => {
-    let best: number | null = null;
-
-    weekdays.forEach((weekday) => {
-        const candidateUnix = getNextOccurrenceUnixForWeekday(weekday, hour, minute);
-        if (best == null || candidateUnix < best) {
-            best = candidateUnix;
-        }
-    });
-
-    return best;
-};
-
-const pickMatchingFirstStopEta = ({
-    etas,
-    line,
-    targetArrivalUnix,
-}: {
-    etas: StopEta[];
-    line: string;
-    targetArrivalUnix: number;
-}) => {
-    const matchingLine = etas
-        .filter((eta) => String(eta.line || '').trim().toUpperCase() === line)
-        .sort((left, right) => Math.abs(left.arrivalTimestamp - targetArrivalUnix) - Math.abs(right.arrivalTimestamp - targetArrivalUnix));
-
-    const best = matchingLine[0] ?? null;
-    if (!best) {
-        return null;
-    }
-
-    return Math.abs(best.arrivalTimestamp - targetArrivalUnix) <= (90 * 60) ? best : null;
-};
-
-const formatCountdownText = (reminderOffsetMinutes: number | null | undefined) => {
-    if (!Number.isFinite(reminderOffsetMinutes) || Number(reminderOffsetMinutes) <= 0) {
-        return '';
-    }
-
-    const minutes = Math.round(Number(reminderOffsetMinutes));
-    return minutes === 1
-        ? 'Остава 1 мин до тръгване за да си навреме на спирката. '
-        : `Остават ${minutes} мин до тръгване за да си навреме на спирката. `;
-};
-
-const buildGenericCommuteRouteBody = ({
-    routeStartUnix,
-    routeSummary,
-    firstTransitStopName,
-    firstTransitLine,
-    firstTransitStopOffsetMinutes,
-    walkDurationSeconds,
-    walkDistanceMeters,
-    reminderOffsetMinutes,
-}: {
-    routeStartUnix: number;
-    routeSummary: string;
-    firstTransitStopName?: string | null;
-    firstTransitLine?: string | null;
-    firstTransitStopOffsetMinutes?: number | null;
-    walkDurationSeconds?: number | null;
-    walkDistanceMeters?: number | null;
-    reminderOffsetMinutes?: number | null;
-}) => {
-    const walkParts = [formatDurationMinutes(walkDurationSeconds), formatDistance(walkDistanceMeters)].filter(Boolean);
-    const plannedFirstStop = buildPlannedFirstStopText({
-        routeStartUnix,
-        firstTransitStopName,
-        firstTransitLine,
-        firstTransitStopOffsetMinutes,
-    });
-    const plannedFirstStopText = plannedFirstStop
-        ? `Линия ${plannedFirstStop.normalizedLine} ще бъде на спирка ${plannedFirstStop.stopLabel} по разписание в ${plannedFirstStop.scheduledClock}.`
-        : '';
-    const countdown = formatCountdownText(reminderOffsetMinutes);
-    return `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkParts.length ? ` Пеша: ${walkParts.join(' • ')}.` : ''}${plannedFirstStopText} ${routeSummary}`.trim();
-};
-
-const buildCommuteRouteBody = async ({
-    routeSummary,
-    routeStartUnix,
-    firstTransitStopId,
-    firstTransitStopName,
-    firstTransitLine,
-    firstTransitStopOffsetMinutes,
-    walkDurationSeconds,
-    walkDistanceMeters,
-    reminderOffsetMinutes,
-}: {
-    routeSummary: string;
-    routeStartUnix: number;
-    firstTransitStopId?: string | null;
-    firstTransitStopName?: string | null;
-    firstTransitLine?: string | null;
-    firstTransitStopOffsetMinutes?: number | null;
-    walkDurationSeconds?: number | null;
-    walkDistanceMeters?: number | null;
-    reminderOffsetMinutes?: number | null;
-}) => {
-    const normalizedLine = String(firstTransitLine || '').trim().toUpperCase();
-    const walkParts = [formatDurationMinutes(walkDurationSeconds), formatDistance(walkDistanceMeters)].filter(Boolean);
-    const walkText = walkParts.length ? ` Пеша: ${walkParts.join(' • ')}.` : '';
-    const plannedFirstStop = buildPlannedFirstStopText({
-        routeStartUnix,
-        firstTransitStopName,
-        firstTransitLine,
-        firstTransitStopOffsetMinutes,
-    });
-    if (!firstTransitStopId || !normalizedLine || !Number.isFinite(firstTransitStopOffsetMinutes)) {
-        return buildGenericCommuteRouteBody({
-            routeStartUnix,
-            routeSummary,
-            firstTransitStopName,
-            firstTransitLine,
-            firstTransitStopOffsetMinutes,
-            walkDurationSeconds,
-            walkDistanceMeters,
-            reminderOffsetMinutes,
-        });
-    }
-
-    const firstStopUnix = routeStartUnix + (Math.round(Number(firstTransitStopOffsetMinutes)) * 60);
-    const nowUnix = Math.floor(Date.now() / 1000);
-    if (firstStopUnix - nowUnix > 6 * 3600) {
-        return buildGenericCommuteRouteBody({
-            routeStartUnix,
-            routeSummary,
-            firstTransitStopName,
-            firstTransitLine,
-            firstTransitStopOffsetMinutes,
-            walkDurationSeconds,
-            walkDistanceMeters,
-            reminderOffsetMinutes,
-        });
-    }
-
-    const etasByStopId = await fetchStopEtas([firstTransitStopId]);
-    const matchingEta = pickMatchingFirstStopEta({
-        etas: etasByStopId[firstTransitStopId] || [],
-        line: normalizedLine,
-        targetArrivalUnix: firstStopUnix,
-    });
-
-    const countdown = formatCountdownText(reminderOffsetMinutes);
-
-    if (!matchingEta) {
-        const stopLabel = firstTransitStopName || 'първата спирка';
-        if (plannedFirstStop) {
-            return `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${plannedFirstStop.normalizedLine} на ${plannedFirstStop.stopLabel} е по разписание в ${plannedFirstStop.scheduledClock}.`;
-        }
-
-        return `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${normalizedLine} на ${stopLabel} няма актуални данни.`;
-    }
-
-    const scheduleInfo = getEtaScheduleInfo({
-        stopId: matchingEta.stopId,
-        routeId: matchingEta.routeId,
-        arrivalTimestamp: matchingEta.arrivalTimestamp,
-    });
-    const delayText = formatDelayText(scheduleInfo.delayMinutes);
-    const scheduleClock = formatScheduleClock(scheduleInfo.scheduledMinSinceMidnight);
-    const stopLabel = firstTransitStopName || 'първата спирка';
-    const vehicleText = scheduleClock
-        ? `${normalizedLine} на ${stopLabel} е по график в ${scheduleClock} и се очаква в ${formatClockFromUnix(matchingEta.arrivalTimestamp)}`
-        : `${normalizedLine} на ${stopLabel} се очаква в ${formatClockFromUnix(matchingEta.arrivalTimestamp)}`;
-
-    return delayText
-        ? `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${vehicleText} и ${delayText}.`
-        : `${countdown}Тръгни в ${formatClockFromUnix(routeStartUnix)}.${walkText} ${vehicleText}.`;
-};
 
 export const cancelCommuteRouteNotification = async (notificationIds?: string[] | string | null) => {
     const normalizedIds = Array.isArray(notificationIds)
@@ -384,11 +83,7 @@ export const scheduleCommuteRouteNotification = async ({
         };
     }
 
-    const normalizedWeekdays = Array.from(new Set(
-        weekdays
-            .map((weekday) => Number(weekday))
-            .filter((weekday): weekday is FavoriteCommuteWeekday => Number.isInteger(weekday) && weekday >= 1 && weekday <= 7),
-    ));
+    const normalizedWeekdays = normalizeCommuteNotificationWeekdays(weekdays);
 
     if (!normalizedWeekdays.length) {
         return {

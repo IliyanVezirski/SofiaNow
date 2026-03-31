@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import { DayType, StaticScheduleEntry } from '../../types/vehicles';
 import { AvailableLine, LineRouteGeometry, LineRouteDirection } from '../stopsApi';
 import { collapseContainedDirections, containsStopSequence } from '../routeDirectionMerge';
-import { VehicleType, inferLineTypeFromToken } from '../transitUtils';
+import { VehicleType, getGtfsRouteType } from '../transitUtils';
 
 const TRIP_BASE_URL = 'https://www.sofiatraffic.bg';
 const PUBLIC_TRANSPORT_URL = `${TRIP_BASE_URL}/bg/public-transport`;
@@ -119,10 +119,8 @@ const inferVehicleTypeFromTripApi = (rawType: number | undefined, extId: string,
         case 4:
             return 'trolley';
         case 1:
-        default: {
-            const inferred = inferLineTypeFromToken(line || extId);
-            return inferred === 'bus' ? 'bus' : inferred;
-        }
+        default:
+            return getGtfsRouteType(extId) || 'bus';
     }
 };
 

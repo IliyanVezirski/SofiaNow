@@ -8,6 +8,7 @@ export interface ParkingLot {
     category: ParkingLotCategory;
     capacity: number | null;
     fee: boolean;
+    charge: string | null;
     operator: string | null;
     parkRide: boolean;
     openingHours: string | null;

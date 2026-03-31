@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { loadScheduledParkingSmsEntries, subscribeToScheduledParkingSmsChanges, type ScheduledParkingSmsEntry } from '../../../services/parkingSms';
+import { loadScheduledParkingSmsEntries, subscribeToScheduledParkingSmsChanges, type ScheduledParkingSmsEntry } from '../../../services/parking';
 
 interface Props {
     transparent?: boolean;

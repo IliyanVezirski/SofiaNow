@@ -1,4 +1,4 @@
-import { Itinerary } from '../../../services/tripPlanner';
+import type { Itinerary } from '../../../services/transit';
 
 const MODE_COLORS: Record<string, string> = {
     WALK: '#94A3B8',

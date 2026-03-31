@@ -11,5 +11,10 @@
   },
   "name": "Sofia",
   "version": "1.0.0",
-  "scripts": {}
+  "scripts": {
+    "start": "npm run start --prefix SofiaGoApp",
+    "android": "npm run android --prefix SofiaGoApp",
+    "web": "npm run web --prefix SofiaGoApp",
+    "typecheck": "npx tsc --noEmit -p SofiaGoApp/tsconfig.json"
+  }
 }

@@ -2,8 +2,8 @@ import React from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ParkingLot, ParkingLotCategory } from '../types/parkingLots';
-import type { LiveParkingLot } from '../../../services/parkingApi';
-import { openExternalDrivingNavigation } from '../../../services/externalNavigation';
+import type { LiveParkingLot } from '../../../services/parking';
+import { openExternalDrivingNavigation } from '../../../services/integrations';
 
 const CATEGORY_META: Record<ParkingLotCategory, { label: string; icon: string; color: string }> = {
     buffer:         { label: 'Буферен паркинг',     icon: 'train-outline',               color: '#0D9488' },
@@ -75,7 +75,7 @@ export const ParkingLotInfoPanel: React.FC<Props> = ({ lot, liveData, onClose, i
                         {lot.fee && (
                             <View style={styles.detailRow}>
                                 <Ionicons name="card-outline" size={13} color="#475569" />
-                                <Text style={styles.detailText}>Платен</Text>
+                                <Text style={styles.detailText}>{lot.charge || 'Платен'}</Text>
                             </View>
                         )}
                         {lot.parkRide && (

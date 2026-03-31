@@ -1,4 +1,4 @@
-import { getRouteMetadata, inferLineTypeFromToken, VehicleType } from '../transitUtils';
+import { getRouteMetadata, VehicleType } from '../transitUtils';
 import bundledRouteNames from '../../data/routeNames.static.json';
 
 export const routeShortNameByRouteId: Record<string, string> = bundledRouteNames;
@@ -84,7 +84,7 @@ const buildRouteKeyCandidates = (routeId: string) => {
         || routeShortNameByRouteId[normalizedRouteId],
     );
     const normalizedLine = resolvedShortName || sanitizeToken(metadata.line);
-    const inferredType = metadata.type || inferLineTypeFromToken(normalizedLine);
+    const inferredType = metadata.type;
     const candidates = new Set<string>();
 
     if (normalizedLine) {

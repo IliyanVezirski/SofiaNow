@@ -6,9 +6,18 @@ import * as Location from 'expo-location';
 import { MapContainer, Popup, TileLayer, CircleMarker, Marker, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import { fetchStopEtas, fetchVehiclesInBounds, StopEta, Vehicle } from '../services/cgmApi';
 import { fetchLineRouteGeometry, fetchLineRouteGeometryByRouteId, fetchStopById, fetchStopsInBounds, LineRouteGeometry, MapBounds, Stop, summarizeStopDirections } from '../services/stopsApi';
-import { addFavoritePlace, FavoritePlace, loadFavoritePlaces, PlaceSearchResult, removeFavoritePlace, reorderFavoritePlaces, searchCentralLocations, updateFavoritePlace, updateFavoritePlaceName } from '../services/places';
+import {
+    addFavoritePlace,
+    removeFavoritePlace,
+    reorderFavoritePlaces,
+    updateFavoritePlace,
+    updateFavoritePlaceName,
+} from '../services/places/repository';
+import { searchCentralLocations } from '../services/places/search';
+import { loadFavoritePlaces } from '../services/places/storage';
+import type { FavoritePlace, PlaceSearchResult } from '../services/places/types';
 import 'leaflet/dist/leaflet.css';
-import { VehicleType, formatUnixTime, getVehicleAccentColor, getVehicleIcon, getVehicleTypeLabel, inferLineTypeFromToken, VEHICLE_TYPE_ORDER } from '../services/transitUtils';
+import { VehicleType, formatUnixTime, getVehicleAccentColor, getVehicleIcon, getVehicleTypeLabel, resolveDisplayLineType, VEHICLE_TYPE_ORDER } from '../services/transitUtils';
 import { RouteSelection } from '../types/routes';
 import { FavoritesPanel } from '../features/favorites/components/FavoritesPanel';
 
@@ -542,7 +551,7 @@ export default function MapScreen({
                 return true;
             }
 
-            return normalizedStopLines.some((line) => selectedVehicleTypes.includes(inferLineTypeFromToken(line)));
+            return normalizedStopLines.some((line) => selectedVehicleTypes.includes(resolveDisplayLineType(line)));
         });
     }, [stops, selectedLines, selectedVehicleTypes, isRouteMode]);
     const renderedStops = useMemo(() => {

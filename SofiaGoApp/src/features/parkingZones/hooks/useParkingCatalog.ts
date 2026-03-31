@@ -8,7 +8,7 @@ import {
     loadCachedParkingCatalogSnapshot,
     PARKING_CATALOG_REFRESH_INTERVAL_MS,
     type ParkingCatalogSnapshot,
-} from '../../../services/parkingCatalog';
+} from '../../../services/parking';
 
 export function useParkingCatalog() {
     const [snapshot, setSnapshot] = useState<ParkingCatalogSnapshot>(() => getBundledParkingCatalogSnapshot());

@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Platform, Pressable, StatusBar, TouchableOpacity, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { FavoritePlace, cancelFavoriteCommuteReminder, formatFavoriteCommuteWeekdays, hasFavoriteCoordinates, updateFavoriteCommuteReminderSettings } from '../../../services/places';
+import { formatFavoriteCommuteWeekdays } from '../../../services/places/commute';
+import { hasFavoriteCoordinates } from '../../../services/places/normalization';
+import { cancelFavoriteCommuteReminder, updateFavoriteCommuteReminderSettings } from '../../../services/places/repository';
+import type { FavoritePlace } from '../../../services/places/types';
 import { Stop } from '../../../services/stopsApi';
 import { FavoriteEditorModal } from './FavoriteEditorModal';
 import type { FavoriteEditorSection } from './FavoriteEditorModal';
@@ -76,6 +79,8 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
     const [routePlannerFavoriteId, setRoutePlannerFavoriteId] = useState<string | null>(null);
     const [routePlannerVisible, setRoutePlannerVisible] = useState(false);
     const [routePlannerOpenBuilder, setRoutePlannerOpenBuilder] = useState(false);
+    const [routePlannerOpenSavedDetails, setRoutePlannerOpenSavedDetails] = useState(false);
+    const [routePlannerSessionKey, setRoutePlannerSessionKey] = useState(0);
     const [submittingFavoriteId, setSubmittingFavoriteId] = useState<string | null>(null);
     const [orderedPlaces, setOrderedPlaces] = useState<FavoritePlace[]>(places);
     const [editorLocationOnly, setEditorLocationOnly] = useState(false);
@@ -195,6 +200,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
             setRoutePlannerVisible(false);
             setRoutePlannerFavoriteId(null);
             setRoutePlannerOpenBuilder(false);
+            setRoutePlannerOpenSavedDetails(false);
         }
     }, [orderedPlaces, routePlannerFavoriteId]);
 
@@ -226,9 +232,14 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
         openFavoriteEditor(favoriteId, 'location');
     };
 
-    const openRoutePlanner = (favorite: FavoritePlace, openBuilder = false) => {
+    const openRoutePlanner = (favorite: FavoritePlace, mode: 'default' | 'builder' | 'details' = 'default') => {
         setActiveFavoriteId(favorite.id);
-        setRoutePlannerOpenBuilder(openBuilder || !hasFavoriteCoordinates(favorite));
+        const hasSavedRoute = !!favorite.defaultCommute?.itinerarySummary;
+        const shouldOpenBuilder = mode === 'builder' || !hasFavoriteCoordinates(favorite) || (!hasSavedRoute && mode !== 'details');
+        const shouldOpenSavedDetails = mode === 'details' && hasSavedRoute;
+        setRoutePlannerSessionKey((previous) => previous + 1);
+        setRoutePlannerOpenBuilder(shouldOpenBuilder);
+        setRoutePlannerOpenSavedDetails(shouldOpenSavedDetails);
         setRoutePlannerFavoriteId(favorite.id);
         setRoutePlannerVisible(true);
     };
@@ -240,6 +251,134 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
             [
                 { text: 'Отказ', style: 'cancel' },
                 { text: 'Изтрий', style: 'destructive', onPress: () => onRemove(favorite.id) },
+            ],
+        );
+    };
+
+    const clearFavoriteRouteData = async (favoriteId: string) => {
+        const favorite = orderedPlaces.find((place) => place.id === favoriteId);
+        if (!favorite || !favorite.defaultCommute?.itinerarySummary) {
+            return;
+        }
+
+        const clearedFavorite: FavoritePlace = {
+            ...favorite,
+            selectedStopId: null,
+            selectedStopName: null,
+            selectedLines: [],
+            personalNotificationLeadMinutes: 5,
+            defaultCommute: null,
+        };
+
+        setOrderedPlaces((current) => current.map((place) => (
+            place.id === favoriteId ? clearedFavorite : place
+        )));
+        setEditingSection(null);
+        setEditorPrefill(null);
+        setRoutePlannerOpenBuilder(false);
+        setRoutePlannerOpenSavedDetails(false);
+        setRoutePlannerFavoriteId(null);
+        setActiveRouteLineTabIds((previous) => ({
+            ...previous,
+            [favoriteId]: null,
+        }));
+
+        try {
+            await onUpdate(favoriteId, {
+                name: favorite.name,
+                latitude: favorite.latitude,
+                longitude: favorite.longitude,
+                selectedStopId: null,
+                selectedStopName: null,
+                selectedLines: [],
+                personalNotificationLeadMinutes: 5,
+                defaultCommute: null,
+            });
+        } catch (error) {
+            setOrderedPlaces((current) => current.map((place) => (
+                place.id === favoriteId ? favorite : place
+            )));
+            throw error;
+        }
+    };
+
+    const hasFavoriteSavedData = (favorite: FavoritePlace) => (
+        hasFavoriteCoordinates(favorite)
+        || !!favorite.selectedStopId
+        || !!favorite.selectedStopName
+        || favorite.selectedLines.length > 0
+        || favorite.defaultCommute != null
+    );
+
+    const clearFavoriteSavedData = async (favoriteId: string) => {
+        const favorite = orderedPlaces.find((place) => place.id === favoriteId);
+        if (!favorite || !hasFavoriteSavedData(favorite)) {
+            return;
+        }
+
+        const clearedFavorite: FavoritePlace = {
+            ...favorite,
+            latitude: null,
+            longitude: null,
+            selectedStopId: null,
+            selectedStopName: null,
+            selectedLines: [],
+            personalNotificationLeadMinutes: 5,
+            defaultCommute: null,
+        };
+
+        setOrderedPlaces((current) => current.map((place) => (
+            place.id === favoriteId ? clearedFavorite : place
+        )));
+        setEditingSection(null);
+        setEditorPrefill(null);
+        setRoutePlannerVisible(false);
+        setRoutePlannerOpenBuilder(false);
+        setRoutePlannerOpenSavedDetails(false);
+        setRoutePlannerFavoriteId(null);
+        setActiveRouteLineTabIds((previous) => ({
+            ...previous,
+            [favoriteId]: null,
+        }));
+
+        try {
+            await onUpdate(favoriteId, {
+                name: favorite.name,
+                latitude: null,
+                longitude: null,
+                selectedStopId: null,
+                selectedStopName: null,
+                selectedLines: [],
+                personalNotificationLeadMinutes: 5,
+                defaultCommute: null,
+            });
+        } catch (error) {
+            setOrderedPlaces((current) => current.map((place) => (
+                place.id === favoriteId ? favorite : place
+            )));
+            throw error;
+        }
+    };
+
+    const confirmClearFavoriteSavedData = (favorite: FavoritePlace) => {
+        if (!hasFavoriteSavedData(favorite)) {
+            return;
+        }
+
+        Alert.alert(
+            'Изчистване на данните',
+            `Ще се изчистят запазените данни за ${favorite.name}, без да се изтрива самото място.`,
+            [
+                { text: 'Отказ', style: 'cancel' },
+                {
+                    text: 'Изчисти',
+                    style: 'destructive',
+                    onPress: () => {
+                        void clearFavoriteSavedData(favorite.id).catch(() => {
+                            Alert.alert('Грешка', 'Неуспешно изчистване на данните за мястото.');
+                        });
+                    },
+                },
             ],
         );
     };
@@ -390,9 +529,9 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                             <TouchableOpacity
                                                 style={[styles.routeIconButton, !hasCoords && styles.routeIconButtonDisabled]}
                                                 disabled={!hasCoords}
-                                                onPress={() => openRoutePlanner(fav)}
+                                                onPress={() => onSelect(fav)}
                                             >
-                                                <Ionicons name="navigate-outline" size={15} color={hasCoords ? '#1D4ED8' : '#94A3B8'} />
+                                                <Ionicons name="location-outline" size={15} color={hasCoords ? '#059669' : '#94A3B8'} />
                                             </TouchableOpacity>
                                         </View>
 
@@ -418,7 +557,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                                                     <TouchableOpacity
                                                         activeOpacity={0.82}
                                                         style={[styles.statusChip, styles.statusChipButton, fav.defaultCommute?.itinerarySummary ? styles.statusChipOk : styles.statusChipWarn]}
-                                                        onPress={() => openRoutePlanner(fav, true)}
+                                                        onPress={() => openRoutePlanner(fav, fav.defaultCommute?.itinerarySummary ? 'details' : 'builder')}
                                                     >
                                                         <Ionicons name={fav.defaultCommute?.itinerarySummary ? 'navigate' : 'navigate-outline'} size={11} color={fav.defaultCommute?.itinerarySummary ? '#059669' : '#94A3B8'} />
                                                         <Text style={[styles.statusChipText, fav.defaultCommute?.itinerarySummary ? styles.statusChipTextOk : styles.statusChipTextWarn]}>{fav.defaultCommute?.itinerarySummary ? 'Маршрут' : 'Добави маршрут'}</Text>
@@ -435,7 +574,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
 
                                                 {/* Route summary hero */}
                                                 {fav.defaultCommute?.itinerarySummary ? (
-                                                    <TouchableOpacity style={styles.routeHero} activeOpacity={0.82} onPress={() => openRoutePlanner(fav, true)}>
+                                                    <TouchableOpacity style={styles.routeHero} activeOpacity={0.82} onPress={() => openRoutePlanner(fav, 'details')}>
                                                         {displayRouteLineTabs.length > 0 && (
                                                             <View style={styles.routeBadgesRow}>
                                                                 {displayRouteLineTabs.map((tab, tabIdx) => (
@@ -507,21 +646,15 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
 
                                                 
 
-                                                {/* Primary action */}
-                                                {hasSavedRouteGeometry ? (
-                                                    <TouchableOpacity style={styles.primaryAction} onPress={() => onShowRouteOnMap?.(fav.defaultCommute!.routeGeoJson!)}>
-                                                        <Ionicons name="map-outline" size={15} color="#FFFFFF" />
-                                                        <Text style={styles.primaryActionText}>Покажи на картата</Text>
+                                                {/* Delete — subtle */}
+                                                {hasFavoriteSavedData(fav) ? (
+                                                    <TouchableOpacity
+                                                        style={styles.deleteRow}
+                                                        onPress={() => confirmClearFavoriteSavedData(fav)}
+                                                    >
+                                                        <Text style={styles.deleteRowText}>Изчисти данните</Text>
                                                     </TouchableOpacity>
                                                 ) : null}
-
-                                          
-                                               
-
-                                                {/* Delete — subtle */}
-                                                <TouchableOpacity style={styles.deleteRow} onPress={() => confirmRemoveFavorite(fav)}>
-                                                    <Text style={styles.deleteRowText}>Изтрий</Text>
-                                                </TouchableOpacity>
                                             </View>
                                         )}
                                     </View>
@@ -552,6 +685,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                     await onUpdate(favoriteId, updates);
                     setActiveFavoriteId(favoriteId);
                     setRoutePlannerOpenBuilder(true);
+                    setRoutePlannerOpenSavedDetails(false);
                     setRoutePlannerFavoriteId(favoriteId);
                 }}
                 onSave={async (favoriteId, updates) => {
@@ -615,62 +749,22 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
 
                     if (fallbackFavoriteId) {
                         setActiveFavoriteId(fallbackFavoriteId);
+                        setRoutePlannerSessionKey((previous) => previous + 1);
                         setRoutePlannerOpenBuilder(true);
+                        setRoutePlannerOpenSavedDetails(false);
                         setRoutePlannerFavoriteId(fallbackFavoriteId);
                     }
                 }}
                 onUpdateRouteNotificationSettings={async (favoriteId, updates) => updateFavoriteCommuteReminderSettings(favoriteId, updates)}
-                onRemoveSavedRoute={async (favoriteId) => {
-                    const favorite = orderedPlaces.find((place) => place.id === favoriteId);
-                    if (!favorite) {
-                        return;
-                    }
-
-                    const clearedFavorite: FavoritePlace = {
-                        ...favorite,
-                        selectedStopId: null,
-                        selectedStopName: null,
-                        selectedLines: [],
-                        personalNotificationLeadMinutes: 5,
-                        defaultCommute: null,
-                    };
-
-                    setOrderedPlaces((current) => current.map((place) => (
-                        place.id === favoriteId ? clearedFavorite : place
-                    )));
-                    setEditingSection(null);
-                    setEditorPrefill(null);
-                    setRoutePlannerOpenBuilder(false);
-                    setRoutePlannerFavoriteId(null);
-                    setActiveRouteLineTabIds((previous) => ({
-                        ...previous,
-                        [favoriteId]: null,
-                    }));
-
-                    try {
-                        await onUpdate(favoriteId, {
-                            name: favorite.name,
-                            latitude: favorite.latitude,
-                            longitude: favorite.longitude,
-                            selectedStopId: null,
-                            selectedStopName: null,
-                            selectedLines: [],
-                            personalNotificationLeadMinutes: 5,
-                            defaultCommute: null,
-                        });
-                    } catch (error) {
-                        setOrderedPlaces((current) => current.map((place) => (
-                            place.id === favoriteId ? favorite : place
-                        )));
-                        throw error;
-                    }
-                }}
+                onRemoveSavedRoute={clearFavoriteRouteData}
             />
 
             <FavoriteRoutePlannerModal
                 visible={visible && routePlannerVisible && !!routePlannerFavorite}
+                sessionKey={routePlannerSessionKey}
                 targetFavorite={routePlannerFavorite}
                 openBuilderByDefault={routePlannerOpenBuilder}
+                openSavedDetailsByDefault={routePlannerOpenSavedDetails}
                 currentLocation={currentLocation}
                 searchableStops={searchableStops}
                 onShowOnMap={(route) => {
@@ -679,6 +773,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                 onOpenPlaceEditor={(favoriteId, prefill) => {
                     setRoutePlannerVisible(false);
                     setRoutePlannerOpenBuilder(false);
+                    setRoutePlannerOpenSavedDetails(false);
                     setRoutePlannerFavoriteId(null);
                     setEditorPrefill(prefill ? { favoriteId, ...prefill } : null);
                     openFavoriteEditor(favoriteId, 'location');
@@ -686,6 +781,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                 onClose={() => {
                     setRoutePlannerVisible(false);
                     setRoutePlannerOpenBuilder(false);
+                    setRoutePlannerOpenSavedDetails(false);
                     setRoutePlannerFavoriteId(null);
                 }}
                 onSave={async (favoriteId, payload) => {
@@ -700,6 +796,7 @@ export const FavoritesPanel: React.FC<Props> = ({ visible, places, searchableSto
                     });
                     setRoutePlannerVisible(false);
                     setRoutePlannerOpenBuilder(false);
+                    setRoutePlannerOpenSavedDetails(false);
                     setRoutePlannerFavoriteId(null);
                     setActiveFavoriteId(favoriteId);
                 }}

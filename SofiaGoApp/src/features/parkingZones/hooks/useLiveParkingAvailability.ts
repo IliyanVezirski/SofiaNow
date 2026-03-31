@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchLiveParkingAvailability, LiveParkingLot } from '../../../services/parkingApi';
+import { fetchLiveParkingAvailability, LiveParkingLot } from '../../../services/parking';
 
 const POLL_INTERVAL_MS = 30_000;
 

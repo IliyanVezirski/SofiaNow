@@ -14,6 +14,7 @@ interface Props {
     etas: StopEta[];
     onClose: () => void;
     onOpenSchedule: (stopId: string, stopName: string) => void;
+    onOpenSavedTripRoute?: (routeId: string) => void | Promise<void>;
     onPlaceAction?: () => void;
     placeSaved?: boolean;
     placeSubmitting?: boolean;
@@ -24,6 +25,7 @@ export const StopInfoPanel: React.FC<Props> = ({
     etas,
     onClose,
     onOpenSchedule,
+    onOpenSavedTripRoute,
     onPlaceAction,
     placeSaved = false,
     placeSubmitting = false,
@@ -105,7 +107,7 @@ export const StopInfoPanel: React.FC<Props> = ({
                         }) : <Text style={styles.info}>Няма налични ETA в момента</Text>}
                     </ScrollView>
                     <View style={styles.footerActions}>
-                        <ReminderCenterButton inline />
+                        <ReminderCenterButton inline onOpenSavedTripRoute={onOpenSavedTripRoute} />
                         <TouchableOpacity style={styles.scheduleBtn} onPress={() => onOpenSchedule(stop.id, stop.name)}>
                             <Ionicons name="calendar-outline" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
                             <Text style={styles.scheduleBtnText}>Разписание</Text>

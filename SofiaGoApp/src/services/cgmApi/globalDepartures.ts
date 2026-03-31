@@ -1,5 +1,5 @@
 import { GlobalDeparture } from '../../types/vehicles';
-import { getRouteMetadata, inferLineTypeFromToken } from '../transitUtils';
+import { getRouteMetadata } from '../transitUtils';
 import { getTripUpdateEntities } from './gtfsFeed';
 import { resolveLineByRouteShortName } from './routeResolver';
 
@@ -15,7 +15,7 @@ export const fetchGlobalDepartures = async (limit = 120): Promise<GlobalDepartur
 
             const routeMetadata = getRouteMetadata(tripUpdate.trip.routeId);
             const resolvedLine = resolveLineByRouteShortName(tripUpdate.trip.routeId);
-            const resolvedType = inferLineTypeFromToken(resolvedLine);
+            const resolvedType = routeMetadata.type;
 
             (tripUpdate.stopTimeUpdate || []).forEach((stu: any) => {
                 const stopId = String(stu.stopId || '');

@@ -1,17 +1,27 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { FAVORITE_COMMUTE_NOTIFICATION_SCHEDULE_VERSION, FAVORITE_COMMUTE_WEEKDAY_OPTIONS, FavoriteCommutePlan, FavoriteCommuteRouteLineTab, FavoriteCommuteWeekday, FavoriteLinePreference, FavoritePlace, formatFavoriteCommuteWeekdays, hasFavoriteCoordinates, resolveFavoriteCommuteNotificationWeekdays } from '../../../services/places';
-import { Itinerary, ItineraryLeg, PlanType, TripLocation, planTrip, searchLocations as searchTripLocations } from '../../../services/tripPlanner';
+import { formatFavoriteCommuteWeekdays, resolveFavoriteCommuteNotificationWeekdays } from '../../../services/places/commute';
+import { FAVORITE_COMMUTE_NOTIFICATION_SCHEDULE_VERSION, FAVORITE_COMMUTE_WEEKDAY_OPTIONS } from '../../../services/places/constants';
+import { hasFavoriteCoordinates } from '../../../services/places/normalization';
+import type {
+    FavoriteCommutePlan,
+    FavoriteCommuteRouteLineTab,
+    FavoriteCommuteWeekday,
+    FavoriteLinePreference,
+    FavoritePlace,
+} from '../../../services/places/types';
+import { type Itinerary, type ItineraryLeg, type PlanType, type TripLocation, planTrip, searchLocations as searchTripLocations, type Stop } from '../../../services/transit';
 import { cancelCommuteRouteNotification, scheduleCommuteRouteNotification } from '../../../services/notifications/commuteRouteNotifications';
-import { Stop } from '../../../services/stopsApi';
 import { buildRouteGeoJSON, TripRouteGeoJSON } from '../../tripPlanner/utils/routeGeoJson';
 
 interface Props {
     visible?: boolean;
     inline?: boolean;
+    sessionKey?: number;
     targetFavorite: FavoritePlace | null;
     openBuilderByDefault?: boolean;
+    openSavedDetailsByDefault?: boolean;
     currentLocation?: { latitude: number; longitude: number } | null;
     searchableStops: Stop[];
     onShowOnMap?: (route: TripRouteGeoJSON) => void;
@@ -339,7 +349,29 @@ const mapTripLocationSearchResult = (result: TripLocation): PlannerPointSearchRe
     longitude: result.longitude,
 });
 
-export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inline = false, targetFavorite, openBuilderByDefault = false, currentLocation, searchableStops, onShowOnMap, onOpenPlaceEditor, onClose, onSave }) => {
+const getSavedItinerarySnapshot = (favorite: FavoritePlace | null) => {
+    const commutePlan = favorite?.defaultCommute ?? null;
+    if (!commutePlan?.itinerary || !Array.isArray(commutePlan.itinerary.legs)) {
+        return null;
+    }
+
+    return commutePlan.itinerary;
+};
+
+export const FavoriteRoutePlannerModal: React.FC<Props> = ({
+    visible = true,
+    inline = false,
+    sessionKey = 0,
+    targetFavorite,
+    openBuilderByDefault = false,
+    openSavedDetailsByDefault = false,
+    currentLocation,
+    searchableStops,
+    onShowOnMap,
+    onOpenPlaceEditor,
+    onClose,
+    onSave,
+}) => {
     const initialNow = new Date();
     const [originName, setOriginName] = useState('');
     const [originLatitude, setOriginLatitude] = useState<number | null>(null);
@@ -451,11 +483,17 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
     }, [destinationQuery, isEditingDestination, visible]);
 
     useEffect(() => {
+        let cancelled = false;
+
         if (!targetFavorite) {
             return;
         }
 
         const existingPlan = targetFavorite.defaultCommute;
+        const savedItinerarySnapshot = getSavedItinerarySnapshot(targetFavorite);
+        const nextRouteDateInput = existingPlan?.routeDate || formatDateForInput(new Date());
+        const nextRouteTimeInput = existingPlan?.routeTime || formatTimeForInput(new Date());
+        const nextArriveBy = existingPlan?.arriveBy ?? true;
         if (existingPlan?.originName && Number.isFinite(existingPlan.originLatitude) && Number.isFinite(existingPlan.originLongitude)) {
             setOriginName(existingPlan.originName);
             setOriginLatitude(existingPlan.originLatitude);
@@ -482,30 +520,96 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         setOriginSearchResults([]);
         setOriginSearchLoading(false);
         setPlanType(existingPlan?.planType || '0');
-        setRouteDateInput(existingPlan?.routeDate || formatDateForInput(new Date()));
-        setRouteTimeInput(existingPlan?.routeTime || formatTimeForInput(new Date()));
+        setRouteDateInput(nextRouteDateInput);
+        setRouteTimeInput(nextRouteTimeInput);
+        setArriveBy(nextArriveBy);
         const normalizedReminderOffsetMinutes = parseReminderOffsetMinutes(existingPlan?.reminderOffsetMinutes) ?? 5;
         setReminderOffsetMinutes(normalizedReminderOffsetMinutes);
         setReminderOffsetInput(String(normalizedReminderOffsetMinutes));
         setReminderWeekdays(existingPlan?.reminderWeekdays?.length ? existingPlan.reminderWeekdays : FAVORITE_COMMUTE_WEEKDAY_OPTIONS.map((option) => option.value));
         setSelectedItineraryIndex(existingPlan?.itineraryIndex || 0);
         setNotificationEnabled(existingPlan?.notificationEnabled || false);
-        setItineraries([]);
+        setItineraries(savedItinerarySnapshot && openSavedDetailsByDefault ? [savedItinerarySnapshot] : []);
         setError(null);
         setExpandedLegKey(null);
-        setShowSavedRouteDetails(false);
-        setShowPlannerBuilder(openBuilderByDefault || !existingPlan?.itinerarySummary);
-    }, [
-        openBuilderByDefault,
-        targetFavorite?.id,
-        targetFavorite?.defaultCommute?.lastPlannedAt,
-    ]);
+        setShowSavedRouteDetails(openSavedDetailsByDefault && !!existingPlan?.itinerarySummary);
+        setShowPlannerBuilder((openBuilderByDefault || !existingPlan?.itinerarySummary) && !openSavedDetailsByDefault);
+        setSelectedItineraryIndex(savedItinerarySnapshot && openSavedDetailsByDefault ? 0 : (existingPlan?.itineraryIndex || 0));
+
+        if (!visible || !openSavedDetailsByDefault || !existingPlan?.itinerarySummary || savedItinerarySnapshot) {
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        if (visible && openSavedDetailsByDefault && existingPlan?.itinerarySummary) {
+            const from = buildTripLocation(
+                existingPlan.originName || (currentLocation ? 'Моята локация' : 'Начална точка'),
+                Number.isFinite(existingPlan.originLatitude) ? existingPlan.originLatitude : (currentLocation?.latitude ?? null),
+                Number.isFinite(existingPlan.originLongitude) ? existingPlan.originLongitude : (currentLocation?.longitude ?? null),
+            );
+            const to = buildTripLocation(targetFavorite.name, targetFavorite.latitude, targetFavorite.longitude);
+            const parsedDate = parseInputDate(nextRouteDateInput);
+
+            if (!from || !to || !parsedDate || !isValidTimeInput(nextRouteTimeInput)) {
+                return () => {
+                    cancelled = true;
+                };
+            }
+
+            setLoading(true);
+            void (async () => {
+                try {
+                    const result = await planTrip({
+                        from,
+                        to,
+                        type: existingPlan.planType || '0',
+                        date: formatDateForApi(parsedDate),
+                        time: nextRouteTimeInput.trim(),
+                        arriveBy: nextArriveBy,
+                    });
+
+                    if (cancelled) {
+                        return;
+                    }
+
+                    if (!result.length) {
+                        setError('Не е намерен маршрут.');
+                        return;
+                    }
+
+                    const preferredItineraryIndex = typeof existingPlan.itineraryIndex === 'number'
+                        && existingPlan.itineraryIndex >= 0
+                        && existingPlan.itineraryIndex < result.length
+                        ? existingPlan.itineraryIndex
+                        : 0;
+
+                    setItineraries(result);
+                    setSelectedItineraryIndex(preferredItineraryIndex);
+                    setExpandedLegKey(null);
+                } catch (routeError: any) {
+                    if (!cancelled) {
+                        setError(routeError?.message || 'Грешка при изчисляване на маршрут.');
+                    }
+                } finally {
+                    if (!cancelled) {
+                        setLoading(false);
+                    }
+                }
+            })();
+        }
+
+        return () => {
+            cancelled = true;
+        };
+    }, [sessionKey, targetFavorite?.id]);
 
     if (!targetFavorite || (!inline && !visible)) {
         return null;
     }
 
     const existingPlan = targetFavorite.defaultCommute;
+    const savedItinerarySnapshot = getSavedItinerarySnapshot(targetFavorite);
     const canPlanRoute = Number.isFinite(originLatitude) && Number.isFinite(originLongitude) && Number.isFinite(destinationLatitude) && Number.isFinite(destinationLongitude);
     const isOriginAtCurrentLocation = !!currentLocation
         && Number.isFinite(originLatitude)
@@ -527,8 +631,6 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
         reminderTime: effectiveReminderTime,
         reminderWeekdays,
     });
-    const canSaveWithoutReplanning = hasSavedRoute && !showPlannerBuilder;
-
     const toggleReminderWeekday = (weekday: FavoriteCommuteWeekday) => {
         setReminderWeekdays((previous) => {
             const exists = previous.includes(weekday);
@@ -630,7 +732,9 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
             };
         const routeGeoJson = commuteItinerary ? buildRouteGeoJSON(commuteItinerary) : (existingPlan?.routeGeoJson || null);
         const routeSummary = commuteItinerary ? buildItinerarySummary(commuteItinerary) : (existingPlan?.itinerarySummary || '');
-        const routeLabel = existingPlan?.routeLabel || `${originName || 'Начална точка'} → ${targetFavorite.name}`;
+        const routeLabel = commuteItinerary
+            ? `${originName || 'Начална точка'} → ${targetFavorite.name}`
+            : (existingPlan?.routeLabel || `${originName || 'Начална точка'} → ${targetFavorite.name}`);
         const transportLabels = commuteItinerary ? buildTransportLabels(commuteItinerary) : (existingPlan?.transportLabels || []);
         const routeLineTabs = commuteItinerary ? buildRouteLineTabs(commuteItinerary) : (existingPlan?.routeLineTabs || []);
 
@@ -685,7 +789,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                 planType,
                 routeDate: routeDateInput.trim(),
                 routeTime: routeTimeInput.trim(),
-                arriveBy: true,
+                arriveBy,
                 routeStartTime: effectiveRouteStartTime,
                 reminderOffsetMinutes: reminderOffsetMinutes,
                 reminderWeekdays,
@@ -696,6 +800,7 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
                 firstTransitStopOffsetMinutes: firstTransitReminderContext.firstTransitStopOffsetMinutes,
                 walkDurationSeconds: firstTransitReminderContext.walkDurationSeconds,
                 walkDistanceMeters: firstTransitReminderContext.walkDistanceMeters,
+                itinerary: commuteItinerary || existingPlan?.itinerary || null,
                 routeGeoJson,
                 itineraryIndex: commuteItinerary ? selectedItineraryIndex : (existingPlan?.itineraryIndex || 0),
                 itinerarySummary: routeSummary,
@@ -750,6 +855,15 @@ export const FavoriteRoutePlannerModal: React.FC<Props> = ({ visible = true, inl
 
         setShowSavedRouteDetails(true);
         setShowPlannerBuilder(false);
+        setError(null);
+        setExpandedLegKey(null);
+
+        if (savedItinerarySnapshot) {
+            setItineraries([savedItinerarySnapshot]);
+            setSelectedItineraryIndex(0);
+            return;
+        }
+
         await fetchPlannedRoutes();
     };
 

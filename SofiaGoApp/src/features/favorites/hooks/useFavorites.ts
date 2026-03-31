@@ -1,14 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-    FavoriteLinePreference,
-    FavoritePlace,
-    loadFavoritePlaces,
     addFavoritePlace,
     reorderFavoritePlaces,
     removeFavoritePlace,
-    subscribeToFavoritePlaceChanges,
     updateFavoritePlace,
-} from '../../../services/places';
+} from '../../../services/places/repository';
+import { loadFavoritePlaces, subscribeToFavoritePlaceChanges } from '../../../services/places/storage';
+import type { FavoriteLinePreference, FavoritePlace } from '../../../services/places/types';
 
 export const useFavorites = () => {
     const [favoritePlaces, setFavoritePlaces] = useState<FavoritePlace[]>([]);

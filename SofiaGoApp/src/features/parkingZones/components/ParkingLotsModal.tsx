@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { FlatList, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ParkingLot, ParkingLotCategory } from '../types/parkingLots';
-import type { LiveParkingLot } from '../../../services/parkingApi';
-import { fetchLiveParkingAvailability } from '../../../services/parkingApi';
+import type { LiveParkingLot } from '../../../services/parking';
+import { fetchLiveParkingAvailability } from '../../../services/parking';
 import { isPrivateParkingCandidate } from '../utils/privateParking';
-import { openExternalDrivingNavigation } from '../../../services/externalNavigation';
+import { openExternalDrivingNavigation } from '../../../services/integrations';
 
 const CATEGORY_META: Record<ParkingLotCategory, { label: string; icon: string; color: string }> = {
     buffer:         { label: 'Буферен',       icon: 'train-outline',     color: '#0D9488' },
@@ -108,7 +108,7 @@ export const ParkingLotsScreen: React.FC<Props> = ({
                     {item.fee && (
                         <View style={styles.detailChip}>
                             <Ionicons name="card-outline" size={12} color="#475569" />
-                            <Text style={styles.detailText}>Платен</Text>
+                            <Text style={styles.detailText}>{item.charge || 'Платен'}</Text>
                         </View>
                     )}
                     {item.parkRide && (

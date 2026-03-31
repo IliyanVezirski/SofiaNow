@@ -1,6 +1,6 @@
 import { Vehicle } from '../../types/vehicles';
 import { MapBounds } from '../../types/map';
-import { getRouteMetadata, inferLineTypeFromToken } from '../transitUtils';
+import { getRouteMetadata } from '../transitUtils';
 import { getVehiclePositionEntities, getTripUpdateEntities } from './gtfsFeed';
 import { getUpcomingStopTargetsByTripId, pickNextStopTarget, resolveVehicleHeading } from './headingResolver';
 import { resolveLineByRouteShortName, stopCoordinatesById } from './routeResolver';
@@ -25,8 +25,7 @@ const buildVehicleFromEntity = (
     const vLon = entity.vehicle.position.longitude;
     const routeMetadata = getRouteMetadata(entity.vehicle.trip?.routeId);
     const resolvedLine = resolveLineByRouteShortName(entity.vehicle.trip?.routeId);
-    const inferredType = inferLineTypeFromToken(resolvedLine);
-    const resolvedType = inferredType === 'bus' ? routeMetadata.type : inferredType;
+    const resolvedType = routeMetadata.type;
     const vehicleId = entity.vehicle.vehicle?.id || entity.id;
     const tripId = entity.vehicle.trip?.tripId || entity.id;
     const lastUpdatedUnix = Number(entity.vehicle.timestamp || 0) || Math.floor(Date.now() / 1000);

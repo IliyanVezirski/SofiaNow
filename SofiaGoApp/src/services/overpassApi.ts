@@ -6,6 +6,10 @@ const OVERPASS_BASE_URL = 'https://overpass-api.de/api/interpreter';
 // Sofia region bounding box [south, west, north, east] for Overpass format
 const SOFIA_BBOX = '42.45,22.85,42.95,23.65';
 
+function escapeOverpassRegex(input: string): string {
+  return input.replace(/[.*+?^${}()|\\[\]"/]/g, '\\$&');
+}
+
 export interface OverpassElement {
   type: 'node' | 'way' | 'relation';
   id: number;
@@ -72,10 +76,10 @@ export async function searchPoisByName(
   const q = `
     [out:json][timeout:25];
     (
-      node["name"](${SOFIA_BBOX})["name"~"${query.trim()}", i];
-      way["name"](${SOFIA_BBOX})["name"~"${query.trim()}", i];
-      node["name:bg"](${SOFIA_BBOX})["name:bg"~"${query.trim()}", i];
-      way["name:bg"](${SOFIA_BBOX})["name:bg"~"${query.trim()}", i];
+      node["name"](${SOFIA_BBOX})["name"~"${escapeOverpassRegex(query.trim())}", i];
+      way["name"](${SOFIA_BBOX})["name"~"${escapeOverpassRegex(query.trim())}", i];
+      node["name:bg"](${SOFIA_BBOX})["name:bg"~"${escapeOverpassRegex(query.trim())}", i];
+      way["name:bg"](${SOFIA_BBOX})["name:bg"~"${escapeOverpassRegex(query.trim())}", i];
     );
     out center ${limit};
   `;
@@ -151,10 +155,10 @@ export async function searchAmenities(
   const q = `
     [out:json][timeout:25];
     (
-      node["amenity"](${SOFIA_BBOX})["name"~"${query.trim()}", i];
-      node["shop"](${SOFIA_BBOX})["name"~"${query.trim()}", i];
-      node["tourism"](${SOFIA_BBOX})["name"~"${query.trim()}", i];
-      node["leisure"](${SOFIA_BBOX})["name"~"${query.trim()}", i];
+      node["amenity"](${SOFIA_BBOX})["name"~"${escapeOverpassRegex(query.trim())}", i];
+      node["shop"](${SOFIA_BBOX})["name"~"${escapeOverpassRegex(query.trim())}", i];
+      node["tourism"](${SOFIA_BBOX})["name"~"${escapeOverpassRegex(query.trim())}", i];
+      node["leisure"](${SOFIA_BBOX})["name"~"${escapeOverpassRegex(query.trim())}", i];
     );
     out center ${limit};
   `;
@@ -269,7 +273,7 @@ export async function unifiedSearch(
   const results: Array<{ latitude: number; longitude: number; name: string; type: string }> = [];
 
   // Search addresses via Nominatim
-  const { searchOsmLocations } = await import('./osmSearch');
+  const { searchOsmLocations } = await import('./search');
   const addresses = await searchOsmLocations(query, Math.ceil(limit / 2));
   
   for (const addr of addresses) {

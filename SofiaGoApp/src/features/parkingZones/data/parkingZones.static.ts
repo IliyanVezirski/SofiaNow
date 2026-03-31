@@ -21,7 +21,7 @@ export const PARKING_ZONE_RULES: Record<ParkingZoneId, ParkingZoneRule> = {
     },
 };
 
-export const PARKING_ZONE_DATA_GUIDANCE = 'Изпълни npm run generate:parking-zones -- --source=merge след като одобриш източника на данни.';
+export const PARKING_ZONE_DATA_GUIDANCE = 'Изпълни npm run generate:parking-zones -- --source=nmanolov за да обновиш зоните от единствения активен source.';
 
 const RAW_ZONE_FEATURES = generatedParkingZones as ParkingZoneSourceFeature[];
 
@@ -33,8 +33,10 @@ const ZONE_NAME_OVERRIDES: Partial<Record<string, string>> = {
     'podzona-5': 'Център · Московска',
     'podzona-6': 'Център · бул. Стефан Стамболов',
     'podzona-7': 'Център · Отец Паисий',
+    'podzona-8': 'Център · Зона Б-19',
     'podzona-9': 'Център · Лайош Кошут',
     'podzona-10': 'Център · Цар Асен',
+    'podzona-11': 'Център · бул. Евлоги и Христо Георгиеви',
     'podzona-12': 'Център · Велико Търново',
     'podzona-13': 'Център · Княз Александър Невски',
     'podzona-14': 'Център · бул. Ген. Данаил Николаев',
@@ -50,6 +52,7 @@ const ZONE_NAME_OVERRIDES: Partial<Record<string, string>> = {
     'podzona-24': 'Лозенец · бул. Христо Смирненски',
     'podzona-25': 'Център · Светослав Тертер',
     'podzona-26': 'Лозенец · Димитър Търкаланов',
+    'podzona-27': 'Лозенец · Крайна',
     'podzona-28': 'Лозенец · Кричим',
     'podzona-29': 'Хладилника · бул. Никола Й. Вапцаров',
     'podzona-30': 'Крива река · Яков Крайков',
@@ -58,9 +61,6 @@ const ZONE_NAME_OVERRIDES: Partial<Record<string, string>> = {
     'podzona-33': 'Център · Брегалница',
     'podzona-34': 'Център · Димитър Петков',
     'podzona-35': 'Подуяне · Русалка',
-    'podzona-8': 'Център · Зона Б-19',
-    'podzona-11': 'Център · бул. Евлоги и Христо Георгиеви',
-    'podzona-27': 'Лозенец · Крайна',
     'podzona-36': 'Подуяне · Слатина',
 };
 

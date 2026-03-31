@@ -1,0 +1,27 @@
+import { StyleSheet } from 'react-native';
+
+export const mapLayerStyles = StyleSheet.create({
+    vehicleMarkerWrap: { alignItems: 'center', justifyContent: 'center', zIndex: 10, elevation: 10 },
+    routeStopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFFFFF', borderWidth: 2, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 2, elevation: 2 },
+    routeStopDotSelected: { width: 14, height: 14, borderRadius: 7, borderWidth: 2.5, transform: [{ scale: 1.15 }] },
+    routeStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, marginTop: 3, maxWidth: 156, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 3 },
+    routeStopName: { fontSize: 10, fontWeight: '600', color: '#0F172A', textAlign: 'center', lineHeight: 12 },
+    vehicleRouteStopDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#059669', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 2, elevation: 2 },
+    vehicleRouteStopDotSelected: { width: 14, height: 14, borderRadius: 7, borderWidth: 2.5, transform: [{ scale: 1.15 }] },
+    vehicleRouteStopLabel: { backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, marginTop: 3, maxWidth: 156, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 3 },
+    vehicleRouteStopName: { fontSize: 10, fontWeight: '600', color: '#0F172A', textAlign: 'center', lineHeight: 12 },
+    vehicleRouteStopTime: { fontSize: 10, fontWeight: '700', color: '#059669', textAlign: 'center', lineHeight: 12 },
+    routeDirectionArrow: { fontSize: 16, fontWeight: '900', textShadowColor: 'rgba(255,255,255,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+    tripDirectionArrow: { fontSize: 16, fontWeight: '900', textShadowColor: 'rgba(255,255,255,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+    tripModeMarker: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.25, shadowRadius: 3, elevation: 5 },
+    droppedPinDot: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#1D4ED8', borderWidth: 2.5, borderColor: '#FFFFFF', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 4 },
+    tripStopDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#FFFFFF', borderWidth: 2.5, borderColor: '#2563EB', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 3 },
+    tripStopDotSelected: { width: 18, height: 18, borderRadius: 9, borderWidth: 3, borderColor: '#1D4ED8', transform: [{ scale: 1.15 }] },
+    tripEndpointMarker: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#059669', alignItems: 'center', justifyContent: 'center', borderWidth: 2.5, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 4, elevation: 6 },
+    tripEndpointMarkerEnd: { backgroundColor: '#DC2626' },
+    tripEndpointText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+    googleWalkingRadiusLabel: { backgroundColor: 'rgba(255,255,255,0.92)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(148,163,184,0.45)' },
+    googleWalkingRadiusLabelText: { color: '#4B5563', fontSize: 10, fontWeight: '700' },
+    googleParkingZoneLabel: { backgroundColor: 'rgba(15,23,42,0.82)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+    googleParkingZoneLabelText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+});

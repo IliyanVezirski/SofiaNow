@@ -5,13 +5,12 @@ const OUTPUT_PATH = path.resolve(__dirname, '../src/features/parkingZones/data/p
 
 const SOURCES = {
     nmanolov: 'https://raw.githubusercontent.com/nmanolov/sinia-zona/main/src/zones.json',
-    yurukov: 'https://raw.githubusercontent.com/yurukov/Bulgaria-geocoding/master/sofiatraffic_subzones.geojson',
 };
 
 const parseArgs = () => {
     const args = process.argv.slice(2);
     const options = {
-        source: 'merge',
+        source: 'nmanolov',
         dryRun: false,
     };
 
@@ -27,8 +26,8 @@ const parseArgs = () => {
         }
     }
 
-    if (!['merge', 'nmanolov', 'yurukov'].includes(options.source)) {
-        throw new Error(`Unsupported source "${options.source}". Use merge, nmanolov, or yurukov.`);
+    if (!['nmanolov'].includes(options.source)) {
+        throw new Error(`Unsupported source "${options.source}". Use nmanolov.`);
     }
 
     return options;
@@ -47,13 +46,6 @@ const fetchJson = async (url) => {
     }
 
     return response.json();
-};
-
-const mercatorToWgs84 = ([x, y]) => {
-    const lon = (x / 20037508.34) * 180;
-    let lat = (y / 20037508.34) * 180;
-    lat = (180 / Math.PI) * (2 * Math.atan(Math.exp((lat * Math.PI) / 180)) - Math.PI / 2);
-    return [Number(lon.toFixed(6)), Number(lat.toFixed(6))];
 };
 
 const areCoordinatesEqual = (left, right) => (
@@ -134,6 +126,13 @@ const compareBySubzone = (left, right) => {
     return leftNumber - rightNumber;
 };
 
+const mercatorToWgs84 = ([x, y]) => {
+    const lon = (x / 20037508.34) * 180;
+    let lat = (y / 20037508.34) * 180;
+    lat = (180 / Math.PI) * (2 * Math.atan(Math.exp((lat * Math.PI) / 180)) - Math.PI / 2);
+    return [Number(lon.toFixed(6)), Number(lat.toFixed(6))];
+};
+
 const normalizeNmanolovFeatures = (collection) => {
     if (!collection || !Array.isArray(collection.features)) {
         throw new Error('nmanolov dataset is not a GeoJSON FeatureCollection');
@@ -143,61 +142,18 @@ const normalizeNmanolovFeatures = (collection) => {
 
     for (const feature of collection.features) {
         const subzoneNumber = extractSubzoneNumber(feature?.properties?.name);
-        const zoneId = feature?.properties?.color === 'blue' || feature?.properties?.color === 'green'
-            ? feature.properties.color
-            : null;
-
-        const geometry = normalizePolygonGeometry(feature?.geometry, mercatorToWgs84);
-        if (!subzoneNumber || !zoneId || !geometry) {
-            continue;
-        }
-
-        normalized.push({
-            id: `podzona-${subzoneNumber}`,
-            zoneId,
-            name: `Подзона ${subzoneNumber}`,
-            geometry,
-        });
-    }
-
-    return normalized.sort(compareBySubzone);
-};
-
-const buildZoneIdBySubzone = (normalizedNmanolovFeatures) => {
-    const zoneIdBySubzone = new Map();
-
-    for (const feature of normalizedNmanolovFeatures) {
-        const subzoneNumber = extractSubzoneNumber(feature.name);
-        if (subzoneNumber) {
-            zoneIdBySubzone.set(subzoneNumber, feature.zoneId);
-        }
-    }
-
-    return zoneIdBySubzone;
-};
-
-const normalizeYurukovFeatures = (collection, zoneIdBySubzone) => {
-    if (!collection || !Array.isArray(collection.features)) {
-        throw new Error('yurukov dataset is not a GeoJSON FeatureCollection');
-    }
-
-    const normalized = [];
-
-    for (const feature of collection.features) {
-        const subzoneNumber = extractSubzoneNumber(feature?.properties?.podzona);
         if (!subzoneNumber) {
             continue;
         }
 
-        const zoneId = zoneIdBySubzone.get(subzoneNumber);
+        const zoneId = feature?.properties?.color === 'blue' || feature?.properties?.color === 'green'
+            ? feature.properties.color
+            : null;
         if (!zoneId) {
             continue;
         }
 
-        const geometry = normalizePolygonGeometry(feature?.geometry, (coordinate) => [
-            Number(coordinate[0].toFixed(6)),
-            Number(coordinate[1].toFixed(6)),
-        ]);
+        const geometry = normalizePolygonGeometry(feature?.geometry, mercatorToWgs84);
 
         if (!geometry) {
             continue;
@@ -224,48 +180,10 @@ const summarize = (features) => {
     return `total=${summary.total}, blue=${summary.blue}, green=${summary.green}`;
 };
 
-const YURUKOV_ZONE_ID_OVERRIDES = {
-    8: 'blue',
-    11: 'blue',
-    27: 'green',
-};
-
-const mergeFeatures = (nmanolovFeatures, yurukovFeatures) => {
-    const nmanolovById = new Map(nmanolovFeatures.map((feature) => [feature.id, feature]));
-    const merged = [...nmanolovFeatures];
-
-    for (const yurukovFeature of yurukovFeatures) {
-        if (!nmanolovById.has(yurukovFeature.id)) {
-            merged.push(yurukovFeature);
-        }
-    }
-
-    return merged.sort(compareBySubzone);
-};
-
 const main = async () => {
     const options = parseArgs();
-    const nmanolovRaw = await fetchJson(SOURCES.nmanolov);
-    const nmanolovFeatures = normalizeNmanolovFeatures(nmanolovRaw);
-
-    let outputFeatures = nmanolovFeatures;
-
-    if (options.source === 'merge' || options.source === 'yurukov') {
-        const yurukovRaw = await fetchJson(SOURCES.yurukov);
-        const zoneIdBySubzone = buildZoneIdBySubzone(nmanolovFeatures);
-
-        for (const [subzoneNumber, zoneId] of Object.entries(YURUKOV_ZONE_ID_OVERRIDES)) {
-            zoneIdBySubzone.set(Number(subzoneNumber), zoneId);
-        }
-
-        const yurukovFeatures = normalizeYurukovFeatures(yurukovRaw, zoneIdBySubzone);
-
-        if (options.source === 'yurukov') {
-            outputFeatures = yurukovFeatures;
-        } else {
-            outputFeatures = mergeFeatures(nmanolovFeatures, yurukovFeatures);
-        }
-    }
+    const raw = await fetchJson(SOURCES[options.source]);
+    const outputFeatures = normalizeNmanolovFeatures(raw);
 
     if (options.dryRun) {
         console.log(`Parking zones dry run (${options.source}): ${summarize(outputFeatures)}`);

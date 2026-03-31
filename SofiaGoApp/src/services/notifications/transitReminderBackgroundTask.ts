@@ -1,6 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 import { refreshTransitArrivalReminders } from './transitArrivalNotifications';
-import { reconcileFavoriteCommuteNotifications } from '../places';
+import { reconcileFavoriteCommuteNotifications } from '../places/repository';
 
 export const TRANSIT_REMINDER_BACKGROUND_TASK = 'sofiago-transit-reminder-refresh';
 const BACKGROUND_MIN_INTERVAL_MINUTES = 15;

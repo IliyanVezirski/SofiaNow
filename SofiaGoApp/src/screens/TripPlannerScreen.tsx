@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   BackHandler,
   Keyboard,
   ScrollView,
@@ -13,113 +14,38 @@ import {
 import {
   planTrip,
   searchLocations,
-  TripRequest,
-  Itinerary,
-  ItineraryLeg,
-  PlanType,
-} from '../services/tripPlanner';
+  type Itinerary,
+  type ItineraryLeg,
+  type PlanType,
+  type TripLocation,
+} from '../services/transit';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { ArrivalReminderControl } from '../features/notifications/components/ArrivalReminderControl';
 import { createStopEtaFromTripPlannerLeg } from '../features/notifications/utils/tripPlannerReminder';
 import { buildRouteGeoJSON, TripRouteGeoJSON } from '../features/tripPlanner/utils/routeGeoJson';
-
-export interface TripLocation {
-  latitude: number;
-  longitude: number;
-  name: string;
-}
-
-/* ─── helpers ─────────────────────────────────────────────────── */
-
-const modeIconName = (mode: string): string => {
-  switch (mode) {
-    case 'WALK': return 'footsteps-outline';
-    case 'BUS': return 'bus-outline';
-    case 'TRAM': return 'train-outline';
-    case 'TROLLEYBUS': return 'bus-outline';
-    case 'SUBWAY': return 'subway-outline';
-    case 'RAIL': return 'train-outline';
-    default: return 'bus-outline';
-  }
-};
-
-const modeColor = (mode: string): string => {
-  switch (mode) {
-    case 'WALK': return '#94A3B8';
-    case 'BUS': return '#2563EB';
-    case 'TRAM': return '#DC2626';
-    case 'TROLLEYBUS': return '#7C3AED';
-    case 'SUBWAY': return '#059669';
-    case 'RAIL': return '#D97706';
-    default: return '#64748B';
-  }
-};
-
-const fmtTime = (epoch: number) => {
-  const d = new Date(epoch);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-};
-
-const fmtDuration = (secs: number) => {
-  const m = Math.round(secs / 60);
-  if (m < 60) return `${m} мин`;
-  const h = Math.floor(m / 60);
-  return `${h} ч ${m % 60} мин`;
-};
-
-const formatDateForApi = (date: Date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const formatDateForInput = (date: Date) => {
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
-  return `${day}.${month}.${year}`;
-};
-
-const formatTimeForInput = (date: Date) => (
-  `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-);
-
-const getCurrentPlannerDateInput = () => formatDateForInput(new Date());
-const getCurrentPlannerTimeInput = () => formatTimeForInput(new Date());
-
-const parseInputDate = (value: string) => {
-  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(value || '').trim());
-  if (!match) {
-    return null;
-  }
-
-  const day = Number(match[1]);
-  const month = Number(match[2]);
-  const year = Number(match[3]);
-  const parsed = new Date(year, month - 1, day);
-  if (
-    parsed.getFullYear() !== year
-    || parsed.getMonth() !== month - 1
-    || parsed.getDate() !== day
-  ) {
-    return null;
-  }
-
-  return parsed;
-};
-
-const normalizeDateInput = (value: string) => value.replace(/[^\d.]/g, '').slice(0, 10);
-const normalizeTimeInput = (value: string) => value.replace(/[^\d:]/g, '').slice(0, 5);
-
-const isValidTimeInput = (value: string) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(value || '').trim());
-
-const PLAN_LABELS: Record<PlanType, string> = {
-  '0': 'По-малко чакане',
-  '1': 'По-малко ходене',
-  '2': 'По-малко прекачвания',
-};
+import {
+  getSavedTripPlannerRouteId,
+  listSavedTripPlannerRoutes,
+  saveTripPlannerRoute,
+  subscribeToSavedTripPlannerRouteChanges,
+  type SavedTripPlannerRoute,
+} from '../services/savedTripRoutes';
+import {
+  fmtDuration,
+  fmtTime,
+  formatDateForApi,
+  formatDateForInput,
+  getCurrentPlannerDateInput,
+  getCurrentPlannerTimeInput,
+  isValidTimeInput,
+  modeColor,
+  modeIconName,
+  normalizeDateInput,
+  normalizeTimeInput,
+  parseInputDate,
+  PLAN_LABELS,
+} from '../features/tripPlanner/utils/presentation';
 
 /* ─── component ───────────────────────────────────────────────── */
 
@@ -129,10 +55,21 @@ interface Props {
   initialFromLocation?: TripLocation | null;
   initialToLocation?: TripLocation | null;
   initialFromToken?: number;
+  initialSavedRoute?: SavedTripPlannerRoute | null;
+  initialSavedRouteToken?: number;
   isActive?: boolean;
 }
 
-export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLocation, initialToLocation, initialFromToken, isActive = true }: Props) {
+export default function TripPlannerScreen({
+  onClose,
+  onShowOnMap,
+  initialFromLocation,
+  initialToLocation,
+  initialFromToken,
+  initialSavedRoute,
+  initialSavedRouteToken,
+  isActive = true,
+}: Props) {
   const previousIsActiveRef = useRef(isActive);
   const [fromText, setFromText] = useState('');
   const [toText, setToText] = useState('');
@@ -154,6 +91,16 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
   const [error, setError] = useState<string | null>(null);
   const [itineraries, setItineraries] = useState<Itinerary[] | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [resultContext, setResultContext] = useState<{
+    from: TripLocation;
+    to: TripLocation;
+    planType: PlanType;
+    routeDate: string;
+    routeTime: string;
+    arriveBy: boolean;
+  } | null>(null);
+  const [savedRouteIds, setSavedRouteIds] = useState<Set<string>>(new Set());
+  const [savingRouteId, setSavingRouteId] = useState<string | null>(null);
 
   const resultsScrollRef = useRef<ScrollView>(null);
 
@@ -216,6 +163,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
     setItineraries(null);
     setExpandedIdx(null);
     setError(null);
+    setResultContext(null);
   }, [initialFromLocation, initialFromToken]);
 
   useEffect(() => {
@@ -227,7 +175,35 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
     setItineraries(null);
     setExpandedIdx(null);
     setError(null);
+    setResultContext(null);
   }, [initialToLocation, initialFromToken]);
+
+  useEffect(() => {
+    if (!initialSavedRoute) return;
+    setFromText(initialSavedRoute.from.name);
+    setFromLoc(initialSavedRoute.from);
+    setToText(initialSavedRoute.to.name);
+    setToLoc(initialSavedRoute.to);
+    setPlanType(initialSavedRoute.planType);
+    setDateInput(initialSavedRoute.routeDate);
+    setTimeInput(initialSavedRoute.routeTime);
+    setArriveBy(initialSavedRoute.arriveBy);
+    setItineraries([initialSavedRoute.itinerary]);
+    setExpandedIdx(0);
+    setSuggestions([]);
+    setActiveField(null);
+    setError(null);
+    setLoading(false);
+    setResultContext({
+      from: initialSavedRoute.from,
+      to: initialSavedRoute.to,
+      planType: initialSavedRoute.planType,
+      routeDate: initialSavedRoute.routeDate,
+      routeTime: initialSavedRoute.routeTime,
+      arriveBy: initialSavedRoute.arriveBy,
+    });
+    setTimeout(() => resultsScrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
+  }, [initialSavedRoute, initialSavedRouteToken]);
 
   useEffect(() => {
     const becameActive = isActive && !previousIsActiveRef.current;
@@ -248,6 +224,27 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
         debounceRef.current = null;
       }
       suggestionRequestIdRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncSavedRoutes = async () => {
+      const routes = await listSavedTripPlannerRoutes();
+      if (!cancelled) {
+        setSavedRouteIds(new Set(routes.map((route) => route.id)));
+      }
+    };
+
+    void syncSavedRoutes();
+    const unsubscribe = subscribeToSavedTripPlannerRouteChanges(() => {
+      void syncSavedRoutes();
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
     };
   }, []);
 
@@ -306,11 +303,28 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
     Keyboard.dismiss();
   };
 
+  const getSavedRouteIdForItinerary = useCallback((itinerary: Itinerary) => {
+    if (!resultContext) {
+      return null;
+    }
+
+    return getSavedTripPlannerRouteId({
+      from: resultContext.from,
+      to: resultContext.to,
+      planType: resultContext.planType,
+      routeDate: resultContext.routeDate,
+      routeTime: resultContext.routeTime,
+      arriveBy: resultContext.arriveBy,
+      itinerary,
+    });
+  }, [resultContext]);
+
   /* swap */
   const swapDirections = () => {
     setFromText(toText); setToText(fromText);
     setFromLoc(toLoc); setToLoc(fromLoc);
     setItineraries(null);
+    setResultContext(null);
   };
 
   /* search */
@@ -325,7 +339,7 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
       setError('Часът трябва да е във формат ЧЧ:ММ');
       return;
     }
-    setError(null); setLoading(true); setItineraries(null); setExpandedIdx(null);
+    setError(null); setLoading(true); setItineraries(null); setExpandedIdx(null); setResultContext(null);
     Keyboard.dismiss();
     try {
       const result = await planTrip({
@@ -339,6 +353,14 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
       if (result.length === 0) setError('Не е намерен маршрут');
       else {
         setItineraries(result);
+        setResultContext({
+          from: fromLoc,
+          to: toLoc,
+          planType,
+          routeDate: formatDateForInput(parsedDate),
+          routeTime: timeInput.trim(),
+          arriveBy,
+        });
         // Scroll to top of results after a tick so they render first
         setTimeout(() => resultsScrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
       }
@@ -348,6 +370,41 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
       setLoading(false);
     }
   };
+
+  const onSaveRoute = useCallback(async (itinerary: Itinerary) => {
+    if (!resultContext) {
+      Alert.alert('Липсва маршрут', 'Избери начална и крайна точка, преди да запазиш маршрут.');
+      return;
+    }
+
+    const routeId = getSavedRouteIdForItinerary(itinerary);
+    if (!routeId) {
+      return;
+    }
+
+    setSavingRouteId(routeId);
+    try {
+      const savedRoute = await saveTripPlannerRoute({
+        from: resultContext.from,
+        to: resultContext.to,
+        planType: resultContext.planType,
+        routeDate: resultContext.routeDate,
+        routeTime: resultContext.routeTime,
+        arriveBy: resultContext.arriveBy,
+        itinerary,
+      });
+      setSavedRouteIds((previous) => {
+        const next = new Set(previous);
+        next.add(savedRoute.id);
+        return next;
+      });
+      Alert.alert('Маршрутът е запазен', 'Ще го намериш в Напомняния при запазените маршрути.');
+    } catch {
+      Alert.alert('Грешка', 'Неуспешно запазване на маршрута.');
+    } finally {
+      setSavingRouteId(null);
+    }
+  }, [getSavedRouteIdForItinerary, resultContext]);
 
   /* ─── render ───────────────────────────────────────────────── */
 
@@ -528,12 +585,20 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
       {/* Results */}
       {itineraries && itineraries.map((item, index) => (
         <View key={index} style={{ paddingHorizontal: 14 }}>
+          {(() => {
+            const savedRouteId = getSavedRouteIdForItinerary(item);
+            return (
           <ItineraryCard
             it={item}
             expanded={expandedIdx === index}
             onToggle={() => setExpandedIdx(expandedIdx === index ? null : index)}
             onShowOnMap={onShowOnMap ? () => onShowOnMap(buildRouteGeoJSON(item)) : undefined}
+            onSaveRoute={() => void onSaveRoute(item)}
+            routeSaved={!!savedRouteId && savedRouteIds.has(savedRouteId)}
+            routeSaving={!!savedRouteId && savingRouteId === savedRouteId}
           />
+            );
+          })()}
         </View>
       ))}
       </ScrollView>
@@ -543,9 +608,26 @@ export default function TripPlannerScreen({ onClose, onShowOnMap, initialFromLoc
 
 /* ─── Itinerary card ─────────────────────────────────────────── */
 
-function ItineraryCard({ it, expanded, onToggle, onShowOnMap }: { it: Itinerary; expanded: boolean; onToggle: () => void; onShowOnMap?: () => void }) {
+function ItineraryCard({
+  it,
+  expanded,
+  onToggle,
+  onShowOnMap,
+  onSaveRoute,
+  routeSaved,
+  routeSaving,
+}: {
+  it: Itinerary;
+  expanded: boolean;
+  onToggle: () => void;
+  onShowOnMap?: () => void;
+  onSaveRoute?: () => void;
+  routeSaved?: boolean;
+  routeSaving?: boolean;
+}) {
   const safeLegs = Array.isArray(it.legs) ? it.legs : [];
   const canShowOnMap = !!onShowOnMap && safeLegs.length > 0;
+  const canSaveRoute = !!onSaveRoute && safeLegs.length > 0;
   return (
     <TouchableOpacity style={s.card} onPress={onToggle} activeOpacity={0.7}>
       {/* Summary row */}
@@ -582,6 +664,22 @@ function ItineraryCard({ it, expanded, onToggle, onShowOnMap }: { it: Itinerary;
             <TouchableOpacity style={s.showOnMapBtn} onPress={onShowOnMap}>
               <Ionicons name="map-outline" size={14} color="#FFFFFF" />
               <Text style={s.showOnMapText}>Покажи на картата</Text>
+            </TouchableOpacity>
+          )}
+          {canSaveRoute && (
+            <TouchableOpacity
+              style={[s.saveRouteBtn, routeSaved && s.saveRouteBtnSaved]}
+              onPress={onSaveRoute}
+              disabled={routeSaving}
+            >
+              <Ionicons
+                name={routeSaved ? 'bookmark' : 'bookmark-outline'}
+                size={14}
+                color={routeSaved ? '#0F766E' : '#1D4ED8'}
+              />
+              <Text style={[s.saveRouteText, routeSaved && s.saveRouteTextSaved]}>
+                {routeSaving ? 'Запазване...' : routeSaved ? 'Запазен маршрут' : 'Запази маршрут'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -921,4 +1019,28 @@ const s = StyleSheet.create({
     paddingVertical: 8,
   },
   showOnMapText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+  saveRouteBtn: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderRadius: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(239,246,255,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(147,197,253,0.72)',
+  },
+  saveRouteBtnSaved: {
+    backgroundColor: 'rgba(204,251,241,0.82)',
+    borderColor: 'rgba(15,118,110,0.18)',
+  },
+  saveRouteText: {
+    color: '#1D4ED8',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  saveRouteTextSaved: {
+    color: '#0F766E',
+  },
 });

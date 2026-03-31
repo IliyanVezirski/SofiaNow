@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Stop, fetchStopsInBounds, fetchAllStops } from '../../../services/stopsApi';
 import { MapBounds } from '../../../types/map';
-import { VehicleType, inferLineTypeFromToken } from '../../../services/transitUtils';
+import { VehicleType, resolveDisplayLineType } from '../../../services/transitUtils';
 import { MIN_BOUNDS_DELTA_FOR_REFRESH, MAX_RENDERED_STOPS, resolveTransitDataViewportSuppressed } from '../../map/constants';
 
 export const useStops = (
@@ -63,7 +63,7 @@ export const useStops = (
             const matchesLine = !normalizedSelectedLines.length || normalizedSelectedLines.some((l) => normalizedStopLines.includes(l));
             if (!matchesLine) return false;
             if (!selectedVehicleTypes.length) return true;
-            return normalizedStopLines.some((l) => selectedVehicleTypes.includes(inferLineTypeFromToken(l)));
+            return normalizedStopLines.some((l) => selectedVehicleTypes.includes(resolveDisplayLineType(l)));
         });
     }, [stops, selectedLines, selectedVehicleTypes, isRouteMode]);
 

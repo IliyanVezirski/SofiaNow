@@ -31,7 +31,12 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
+.env.*
 .env*.local
+
+# large static archives
+gtfs_static.zip
 
 # typescript
 *.tsbuildinfo

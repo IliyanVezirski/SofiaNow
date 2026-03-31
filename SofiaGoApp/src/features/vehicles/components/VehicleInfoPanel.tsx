@@ -48,9 +48,20 @@ export const VehicleInfoPanel: React.FC<Props> = ({
                             delaySeconds != null && delaySeconds < 0 ? { color: '#2563EB', fontWeight: '700' } : undefined,
                     ]}>{`Закъснение: ${delayText}`}</Text>
                     <TouchableOpacity style={styles.routeBtn} disabled={routeLoading} onPress={onLoadRoute}>
-                        <Text style={styles.routeBtnText}>
-                            {routeLoading ? 'Зареждане...' : isRouteActive ? 'Скрий маршрута' : '\uD83D\uDDFA\uFE0F Продължи маршрута'}
-                        </Text>
+                        {routeLoading ? (
+                            <Text style={styles.routeBtnText}>Зареждане...</Text>
+                        ) : (
+                            <View style={styles.routeBtnContent}>
+                                <Ionicons
+                                    name={isRouteActive ? 'eye-off-outline' : 'map-outline'}
+                                    size={15}
+                                    color="#FFFFFF"
+                                />
+                                <Text style={styles.routeBtnText}>
+                                    {isRouteActive ? 'Скрий маршрута' : 'Продължи маршрута'}
+                                </Text>
+                            </View>
+                        )}
                     </TouchableOpacity>
                 </View>
             </View>
@@ -81,5 +92,6 @@ const styles = StyleSheet.create({
     closeBtnText: { fontSize: 14, fontWeight: '700', color: '#6B7280' },
     info: { fontSize: 13, color: '#374151', marginBottom: 2 },
     routeBtn: { marginTop: 8, backgroundColor: 'rgba(5,150,105,0.82)', borderRadius: 12, paddingVertical: 8, alignItems: 'center' },
+    routeBtnContent: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     routeBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 });
