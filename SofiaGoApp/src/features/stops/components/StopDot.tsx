@@ -3,7 +3,6 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import type { Stop } from '../../../services/stopsApi';
 import { VehicleType, resolveDisplayLineType } from '../../../services/transitUtils';
-import { getStopTypeInfo } from '../../map/utils/mapScreen';
 
 type Props = {
     stop: Stop;
@@ -29,38 +28,24 @@ export function StopDot({ stop, selected }: Props) {
         return sorted;
     }, [stop.lines, stop.vehicleTypes]);
 
-    if (types.length === 0) {
-        return <View style={[styles.stopDot, selected && styles.stopDotSelected]} />;
-    }
-
     const hasSubway = types.includes('subway');
-    const primaryColor = hasSubway ? '#0056A4' : getStopTypeInfo(types[0]).color;
-
-    if (types.length > 1 && !hasSubway) {
-        const colors = types.map((type) => getStopTypeInfo(type).color);
-        return (
-            <View style={[styles.stopDotBase, selected && styles.stopDotBaseSelected]}>
-                <View style={styles.multiTypeDot}>
-                    {colors.map((color, index) => (
-                        <View key={index} style={[styles.multiTypeDotSegment, { backgroundColor: color }]} />
-                    ))}
-                </View>
-                {selected ? (
-                    <View style={styles.stopLabelContainer}>
-                        <Text style={styles.stopLabelText}>{stop.name}</Text>
-                    </View>
-                ) : null}
-            </View>
-        );
-    }
 
     return (
-        <View style={[styles.stopDotBase, selected && styles.stopDotBaseSelected]}>
+        <View style={[
+            styles.stopDotBase,
+            hasSubway ? styles.subwayStopDotBase : styles.standardStopDotBase,
+            selected && styles.stopDotBaseSelected,
+            selected && (hasSubway ? styles.subwayStopDotBaseSelected : styles.standardStopDotBaseSelected),
+        ]}>
+            {selected ? (
+                <View style={[
+                    styles.selectionHalo,
+                    hasSubway ? styles.subwaySelectionHalo : styles.standardSelectionHalo,
+                ]} />
+            ) : null}
             {hasSubway ? (
                 <Text style={styles.subwayLabel}>M</Text>
-            ) : (
-                <View style={[styles.primaryTypeDot, { backgroundColor: primaryColor }]} />
-            )}
+            ) : null}
             {selected ? (
                 <View style={styles.stopLabelContainer}>
                     <Text style={styles.stopLabelText}>{stop.name}</Text>
@@ -72,34 +57,39 @@ export function StopDot({ stop, selected }: Props) {
 
 const styles = StyleSheet.create({
     stopDotBase: {
-        width: 18,
-        height: 18,
-        borderRadius: 9,
+        width: 16,
+        height: 16,
+        borderRadius: 8,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.9)',
+        borderWidth: 1,
         elevation: 2,
         shadowColor: '#0F172A',
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.08,
         shadowRadius: 2,
     },
-    stopDotBaseSelected: {
+    standardStopDotBase: {
+        backgroundColor: '#A7CFB3',
+        borderColor: 'rgba(255,255,255,0.95)',
+    },
+    subwayStopDotBase: {
         backgroundColor: '#FFFFFF',
-        transform: [{ scale: 1.35 }],
+        borderColor: '#0056A4',
+    },
+    stopDotBaseSelected: {
+        transform: [{ scale: 1.15 }],
         shadowOpacity: 0.18,
         shadowRadius: 4,
         zIndex: 10,
     },
-    stopDot: {
-        backgroundColor: 'rgba(148,163,184,0.35)',
-        borderRadius: 7,
-        width: 14,
-        height: 14,
+    standardStopDotBaseSelected: {
+        backgroundColor: '#A7CFB3',
+        borderColor: '#FFFFFF',
     },
-    stopDotSelected: {
-        backgroundColor: '#1D4ED8',
-        transform: [{ scale: 1.3 }],
+    subwayStopDotBaseSelected: {
+        backgroundColor: '#FFFFFF',
+        borderColor: '#0056A4',
     },
     stopLabelContainer: {
         position: 'absolute',
@@ -116,7 +106,7 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.12,
         shadowRadius: 4,
-        borderWidth: 1,
+        borderWidth: 0.5,
         borderColor: 'rgba(226,232,240,0.72)',
     },
     stopLabelText: {
@@ -125,25 +115,26 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         textAlign: 'center',
     },
-    multiTypeDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        overflow: 'hidden',
-        flexDirection: 'row',
+    selectionHalo: {
+        position: 'absolute',
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        borderWidth: 1.5,
     },
-    multiTypeDotSegment: {
-        flex: 1,
+    standardSelectionHalo: {
+        borderColor: 'rgba(93, 154, 114, 0.4)',
+        backgroundColor: 'rgba(167, 207, 179, 0.14)',
+    },
+    subwaySelectionHalo: {
+        borderColor: 'rgba(0, 86, 164, 0.28)',
+        backgroundColor: 'rgba(0, 86, 164, 0.08)',
     },
     subwayLabel: {
+        width: 10,
         color: '#0056A4',
         fontWeight: '800',
         fontSize: 9,
         lineHeight: 11,
-    },
-    primaryTypeDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
     },
 });

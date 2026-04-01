@@ -65,6 +65,7 @@ type Props = {
     reporting: any;
     routeLoading: boolean;
     reportButtonBottomOffset: number;
+    routeStopsToggleTopOffset: number;
     routing: any;
     schedule: any;
     search: any;
@@ -133,6 +134,7 @@ export function MapFeaturePanels({
     reporting,
     routeLoading,
     reportButtonBottomOffset,
+    routeStopsToggleTopOffset,
     routing,
     schedule,
     search,
@@ -233,6 +235,7 @@ export function MapFeaturePanels({
                     onSelectStop={onRouteStopSelect}
                     onClose={() => routing.setRouteStopsPanelVisible(false)}
                     onToggleOpen={() => routing.setRouteStopsPanelVisible(true)}
+                    toggleTopOffset={routeStopsToggleTopOffset}
                 />
             ) : null}
 

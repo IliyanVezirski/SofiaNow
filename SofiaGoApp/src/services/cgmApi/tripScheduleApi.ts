@@ -93,6 +93,16 @@ const normalizeText = (value: string) => value
     .replace(/\s+/g, ' ')
     .replace(/[.\-–—,;:()]/g, '');
 
+const normalizeComparableStopId = (value: string) => {
+    const normalized = String(value || '').trim().toUpperCase();
+    if (!normalized) {
+        return '';
+    }
+
+    const prefixedNumericMatch = normalized.match(/^[A-Z]+(\d+)$/);
+    return prefixedNumericMatch?.[1] || normalized;
+};
+
 const matchesNormalizedText = (candidate: string, targets: string[]) => {
     const normalizedCandidate = normalizeText(candidate || '');
     if (!normalizedCandidate || targets.length === 0) {
@@ -214,6 +224,8 @@ const mergeStopScheduleEntriesIntoDirection = (master: TripApiDirection, candida
         candidate.stops.map((stop) => stop.id),
     );
 
+    const getEntryKey = (entry: TripApiStopScheduleEntry) => `${entry.dayType}:${entry.destination}`;
+
     candidate.availableDayTypes.forEach((dayType) => {
         availableDayTypes.add(dayType);
     });
@@ -227,23 +239,19 @@ const mergeStopScheduleEntriesIntoDirection = (master: TripApiDirection, candida
         const mergedEntries = new Map<string, TripApiStopScheduleEntry>();
 
         masterStop.scheduleEntries.forEach((entry) => {
-            mergedEntries.set(`${entry.dayType}:${master.id}`, {
+            mergedEntries.set(getEntryKey(entry), {
                 ...entry,
-                destination: master.name,
-                routeId: master.id,
                 times: [...entry.times],
                 partialTimeKinds: { ...(entry.partialTimeKinds || {}) },
             });
         });
 
         candidateStop.scheduleEntries.forEach((entry) => {
-            const entryKey = `${entry.dayType}:${master.id}`;
+            const entryKey = getEntryKey(entry);
             const existing = mergedEntries.get(entryKey);
             if (!existing) {
                 mergedEntries.set(entryKey, {
                     ...entry,
-                    destination: master.name,
-                    routeId: master.id,
                     times: [...entry.times].sort((left, right) => left - right),
                     partialTimeKinds: partialTimeKind
                         ? Object.fromEntries(entry.times.map((time) => [String(time), partialTimeKind]))
@@ -655,6 +663,11 @@ export const getTripApiStopScheduleEntries = (
             .map((value) => value.trim())
             .filter(Boolean),
     ));
+    const comparableRequestedStopIds = new Set(
+        requestedStopIds
+            .map((value) => normalizeComparableStopId(value))
+            .filter(Boolean),
+    );
     const normalizedDirectionTargets = Array.from(new Set(
         [directionName, ...directionAliases]
             .filter((value): value is string => Boolean(value))
@@ -664,6 +677,8 @@ export const getTripApiStopScheduleEntries = (
     const matchStop = (candidate: TripApiStop) => (
         requestedStopIds.includes(candidate.id)
         || requestedStopIds.includes(candidate.apiStopId)
+        || comparableRequestedStopIds.has(normalizeComparableStopId(candidate.id))
+        || comparableRequestedStopIds.has(normalizeComparableStopId(candidate.apiStopId))
     );
 
     const preferredDirections = lineSchedule.directions.filter((candidate) => {

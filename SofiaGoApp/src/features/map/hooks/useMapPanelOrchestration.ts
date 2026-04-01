@@ -1,4 +1,4 @@
-import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
+import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef } from 'react';
 
 interface UseMapPanelOrchestrationParams {
     dismissTransientPanelsToken?: number;
@@ -41,6 +41,8 @@ export const useMapPanelOrchestration = ({
     closeSchedule,
     closeSelectedStop,
 }: UseMapPanelOrchestrationParams) => {
+    const wasParkingModeRef = useRef(isParkingMode);
+
     useEffect(() => {
         if (typeof searchRequestToken === 'number' && searchRequestToken > 0) {
             setSearchModalVisible((previous) => {
@@ -83,7 +85,10 @@ export const useMapPanelOrchestration = ({
     }, [filterPanelVisible, setFavoritesVisible, setSearchModalVisible]);
 
     useEffect(() => {
-        if (!isParkingMode) {
+        const wasParkingMode = wasParkingModeRef.current;
+        wasParkingModeRef.current = isParkingMode;
+
+        if (!isParkingMode || wasParkingMode) {
             return;
         }
 

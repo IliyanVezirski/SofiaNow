@@ -23,10 +23,13 @@ interface Props {
     onSelectStop: (stop: RouteStopItem) => void;
     onClose: () => void;
     onToggleOpen: () => void;
+    toggleLeftOffset?: number;
+    toggleTopOffset?: number;
 }
 
 export const RouteStopsPanel: React.FC<Props> = ({
     visible, lineName, searchQuery, onSearchChange, stops, selectedStopId, onSelectStop, onClose, onToggleOpen,
+    toggleLeftOffset = 12, toggleTopOffset = 112,
 }) => {
     const { width, height } = useWindowDimensions();
     const [expandedDirections, setExpandedDirections] = useState<Set<string>>(new Set());
@@ -85,7 +88,7 @@ export const RouteStopsPanel: React.FC<Props> = ({
 
     if (!visible) {
         return (
-            <TouchableOpacity style={[styles.toggleBtn, { right: 12 }]} onPress={onToggleOpen}>
+            <TouchableOpacity style={[styles.toggleBtn, { left: toggleLeftOffset, top: toggleTopOffset }]} onPress={onToggleOpen}>
                 <Ionicons name="git-network-outline" size={20} color="#334155" />
             </TouchableOpacity>
         );

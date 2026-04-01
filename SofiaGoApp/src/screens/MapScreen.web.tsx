@@ -200,6 +200,14 @@ const createVehicleMarkerIcon = (vehicle: Vehicle) => L.divIcon({
     iconAnchor: [39, 40],
 });
 
+const stopHasSubway = (stop: Stop) => {
+    if (stop.vehicleTypes && stop.vehicleTypes.length > 0) {
+        return stop.vehicleTypes.includes('subway');
+    }
+
+    return stop.lines.some((line) => resolveDisplayLineType(line) === 'subway');
+};
+
 const normalizeHeadingDegrees = (value: number) => ((value % 360) + 360) % 360;
 
 const shortestHeadingDelta = (from: number, to: number) => {
@@ -217,16 +225,29 @@ const interpolateHeadingDegrees = (from: number, to: number, progress: number) =
     return normalizeHeadingDegrees(from + (shortestHeadingDelta(from, to) * progress));
 };
 
-const createStopMarkerIcon = (stop: Stop) => L.divIcon({
-    className: 'sofiago-stop-marker',
-    html: `
-        <div title="${stop.name} | ${summarizeStopDirections(stop, 1).replace('Посока: ', '')}" style="display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:12px;background:transparent;">
-            <div style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;border:2px solid #2563EB;background:#FFFFFF;box-shadow:0 2px 8px rgba(37,99,235,0.34);font-size:16px;line-height:16px;">🚏</div>
-        </div>
-    `,
-    iconSize: [52, 52],
-    iconAnchor: [26, 26],
-});
+const createStopMarkerIcon = (stop: Stop, selected = false) => {
+    const isSubwayStop = stopHasSubway(stop);
+    const selectionHalo = selected
+        ? (isSubwayStop
+            ? '<div style="position:absolute;inset:-4px;border-radius:12px;border:1.5px solid rgba(0,86,164,0.28);background:rgba(0,86,164,0.08);"></div>'
+            : '<div style="position:absolute;inset:-4px;border-radius:12px;border:1.5px solid rgba(93,154,114,0.4);background:rgba(167,207,179,0.14);"></div>')
+        : '';
+    const markerInner = isSubwayStop
+        ? '<div style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:9px;background:#FFFFFF;border:2px solid #0056A4;box-shadow:0 2px 8px rgba(0,86,164,0.28);color:#0056A4;font-size:12px;font-weight:900;line-height:12px;">M</div>'
+        : '<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:8px;background:#A7CFB3;border:1px solid rgba(255,255,255,0.95);box-shadow:0 2px 8px rgba(15,23,42,0.14);"></div>';
+
+    return L.divIcon({
+        className: 'sofiago-stop-marker',
+        html: `
+            <div title="${stop.name} | ${summarizeStopDirections(stop, 1).replace('Посока: ', '')}" style="position:relative;display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:12px;background:transparent;">
+                ${selectionHalo}
+                ${markerInner}
+            </div>
+        `,
+        iconSize: [52, 52],
+        iconAnchor: [26, 26],
+    });
+};
 
 const createRouteStopMarkerIcon = (name: string, index: number, accentColor: string) => L.divIcon({
     className: 'sofiago-route-stop-marker',
@@ -1157,7 +1178,7 @@ export default function MapScreen({
                         <WebMarker
                             key={stop.id}
                             position={[stop.latitude, stop.longitude]}
-                            icon={createStopMarkerIcon(stop)}
+                            icon={createStopMarkerIcon(stop, selectedStop?.id === stop.id)}
                             zIndexOffset={700}
                             eventHandlers={{
                                 click: (event: any) => {

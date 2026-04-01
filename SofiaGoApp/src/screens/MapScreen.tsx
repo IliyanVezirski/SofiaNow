@@ -64,7 +64,6 @@ import {
     getCurrentLocation,
     getDroppedPinFavoriteState,
     getHasActiveRouteOverlay,
-    getHasReliableInitialLocation,
     getLiveLines,
     getPreferredInitialCenterCoordinate,
     getSelectedLotLiveData,
@@ -165,7 +164,7 @@ export default function MapScreen({
     const restoreRouteBoundsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // ── Core map hooks ──
-    const { location, refresh: refreshLocation } = useUserLocation();
+    const { hasFreshLocation, location, refresh: refreshLocation } = useUserLocation();
     const camera = useMapCamera();
     const bounds = useMapBounds();
 
@@ -487,30 +486,6 @@ export default function MapScreen({
         [location?.coords.latitude, location?.coords.longitude],
     );
 
-    const hasReliableInitialLocation = useMemo(
-        () => getHasReliableInitialLocation(location),
-        [location?.timestamp, location?.coords.accuracy, location?.coords.latitude, location?.coords.longitude],
-    );
-
-    // ── Initialize camera from location ──
-    useEffect(() => {
-        if (
-            !location ||
-            !hasReliableInitialLocation ||
-            highlightedRoute ||
-            hasAppliedInitialLocationCameraRef.current ||
-            camera.hasInitialCameraTarget
-        ) {
-            return;
-        }
-
-        hasAppliedInitialLocationCameraRef.current = true;
-        suppressUserRecenterRegionSyncUntilRef.current = Date.now() + 1800;
-        camera.lockCamera(location.coords.latitude, location.coords.longitude);
-        bounds.setMapBounds(createFocusedBounds(location.coords.latitude, location.coords.longitude, USER_LOCATION_REGION_DELTA));
-        setUserLocationVisible(true);
-    }, [bounds, camera, hasReliableInitialLocation, highlightedRoute, location]);
-
     // ── Refresh ETAs alongside vehicles ──
     useEffect(() => {
         if (!vehicles.length) return;
@@ -740,7 +715,7 @@ export default function MapScreen({
         googleMapRef,
         handledParkingZoneFocusTokenRef,
         hasAppliedInitialLocationCameraRef,
-        hasReliableInitialLocation,
+        hasFreshLocation,
         highlightedRoute,
         isUserFollowLocked,
         location,
@@ -1061,6 +1036,7 @@ export default function MapScreen({
                     reporting={reporting}
                     routeLoading={vehicleRoute.vehicleRouteLoading}
                     reportButtonBottomOffset={reportButtonBottomOffset}
+                    routeStopsToggleTopOffset={stackedTopFloatingOffset}
                     routing={routing}
                     schedule={schedule}
                     search={search}

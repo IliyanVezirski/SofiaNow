@@ -48,7 +48,7 @@ interface UseMapFocusSyncParams {
     googleMapRef: MutableRefObject<GoogleMapView | null>;
     handledParkingZoneFocusTokenRef: MutableRefObject<number>;
     hasAppliedInitialLocationCameraRef: MutableRefObject<boolean>;
-    hasReliableInitialLocation: boolean;
+    hasFreshLocation: boolean;
     highlightedRoute: unknown;
     isUserFollowLocked: boolean;
     location: LocationLike | null | undefined;
@@ -108,7 +108,7 @@ export const useMapFocusSync = ({
     googleMapRef,
     handledParkingZoneFocusTokenRef,
     hasAppliedInitialLocationCameraRef,
-    hasReliableInitialLocation,
+    hasFreshLocation,
     highlightedRoute,
     isUserFollowLocked,
     location,
@@ -134,7 +134,7 @@ export const useMapFocusSync = ({
     useEffect(() => {
         if (
             !location
-            || !hasReliableInitialLocation
+            || !hasFreshLocation
             || highlightedRoute
             || hasAppliedInitialLocationCameraRef.current
             || camera.hasInitialCameraTarget
@@ -155,7 +155,7 @@ export const useMapFocusSync = ({
         bounds,
         camera,
         hasAppliedInitialLocationCameraRef,
-        hasReliableInitialLocation,
+        hasFreshLocation,
         highlightedRoute,
         location,
         setUserLocationVisible,

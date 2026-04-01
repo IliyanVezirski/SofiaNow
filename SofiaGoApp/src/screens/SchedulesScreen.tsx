@@ -4,6 +4,7 @@ import { getVehicleIconName, VehicleType } from '../services/transitUtils';
 import { AvailableLine, fetchAvailableLines, fetchLineRouteGeometryByRouteId, fetchLineRouteGeometry, fetchStopById, fetchAllStops, LineRouteGeometry, Stop } from '../services/stopsApi';
 import { getStaticStopSchedule, getScheduleBasedDirections, resolveScheduleRouteId, StaticScheduleEntry, DayType, getDayTypeForDate } from '../services/cgmApi';
 import { convertTripApiScheduleToRouteGeometry, fetchTripApiAvailableLines, fetchTripApiLineSchedule, getTripApiStopScheduleEntries, TripApiLineSchedule } from '../services/cgmApi/tripScheduleApi';
+import { collapseContainedDirections } from '../services/transit/routeDirectionMerge';
 import { RouteSelection } from '../types/routes';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -25,6 +26,34 @@ const getLineKind = (line: AvailableLine): ScheduleKind => {
     if (line.type === 'tram') return 'tram';
     if (line.type === 'subway') return 'subway';
     return 'bus';
+};
+
+const collapseShortRouteDirections = (directions: LineRouteGeometry['directions']) => collapseContainedDirections(
+    directions,
+    (direction) => ({
+        ...direction,
+        mergedDirectionNames: [...(direction.mergedDirectionNames || [direction.name]).filter(Boolean)],
+        coordinates: direction.coordinates.map((coordinate) => [...coordinate] as [number, number]),
+        stops: direction.stops.map((stop) => ({ ...stop })),
+    }),
+    (master, candidate) => {
+        const mergedNames = new Set(
+            [...(master.mergedDirectionNames || [master.name]), ...(candidate.mergedDirectionNames || [candidate.name])]
+                .filter(Boolean),
+        );
+        master.mergedDirectionNames = Array.from(mergedNames);
+    },
+);
+
+const getDirectionDisplayLabel = (direction: LineRouteGeometry['directions'][number], fallbackIndex: number) => {
+    const firstStopName = direction.stops[0]?.name?.trim() || '';
+    const lastStopName = direction.stops[direction.stops.length - 1]?.name?.trim() || '';
+
+    if (firstStopName && lastStopName && firstStopName !== lastStopName) {
+        return `${firstStopName} → ${lastStopName}`;
+    }
+
+    return direction.name || `Посока ${fallbackIndex + 1}`;
 };
 
 interface SchedulesScreenProps {
@@ -155,7 +184,7 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
 
     const filteredDirections = useMemo(() => {
         if (!routeGeometry) return [];
-        const visibleDirections = routeGeometry.directions.filter((direction) => {
+        const visibleDirections = collapseShortRouteDirections(routeGeometry.directions).filter((direction) => {
             if (!direction.availableDayTypes || direction.availableDayTypes.length === 0) {
                 return true;
             }
@@ -393,7 +422,7 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                     <Ionicons name="search-outline" size={16} color="#94A3B8" style={{ marginRight: 8 }} />
                     <TextInput
                         style={styles.globalSearchInput}
-                    placeholder="Търси спирка по име..."
+                    placeholder="Търси спирка по име"
                     placeholderTextColor="#9CA3AF"
                     value={stopSearch}
                     onChangeText={(text) => {
@@ -412,28 +441,34 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                     <View style={styles.routeCard}>
                         <Text style={styles.routeCardTitle}>{`Резултати (${globalSearchResults.length})`}</Text>
                         {globalSearchResults.map((stop) => (
-                            <TouchableOpacity
+                            <View
                                 key={stop.id}
                                 style={[
                                     styles.stopRow,
                                     expandedStopId === stop.id && styles.stopRowActive,
                                 ]}
-                                activeOpacity={0.7}
-                                onPress={() => { void handleStopPress(stop.id); }}
                             >
-                                <View style={styles.stopIndexIcon}>
-                                    <Ionicons name="flag-outline" size={13} color="#64748B" />
-                                </View>
-                                <View style={styles.stopInfo}>
-                                    <Text style={styles.stopName}>{stop.name}</Text>
-                                    <Text style={styles.stopMeta}>{`ID: ${stop.id} • Линии: ${stop.lines.slice(0, 6).join(', ')}`}</Text>
-                                    {expandedStopId === stop.id && (
-                                        <View style={styles.stopEtaPanel}>
-                                            {renderStopSchedule()}
+                                <TouchableOpacity
+                                    style={styles.stopRowPressable}
+                                    activeOpacity={0.7}
+                                    onPress={() => { void handleStopPress(stop.id); }}
+                                >
+                                    <View style={styles.stopRowMain}>
+                                        <View style={styles.stopIndexIcon}>
+                                            <Ionicons name="flag-outline" size={13} color="#64748B" />
                                         </View>
-                                    )}
-                                </View>
-                            </TouchableOpacity>
+                                        <View style={styles.stopInfo}>
+                                            <Text style={styles.stopName}>{stop.name}</Text>
+                                            <Text style={styles.stopMeta}>{`ID: ${stop.id} • Линии: ${stop.lines.slice(0, 6).join(', ')}`}</Text>
+                                        </View>
+                                    </View>
+                                </TouchableOpacity>
+                                {expandedStopId === stop.id && (
+                                    <View style={styles.stopEtaPanel}>
+                                        {renderStopSchedule()}
+                                    </View>
+                                )}
+                            </View>
                         ))}
                     </View>
                 </ScrollView>
@@ -531,7 +566,7 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                                                         <Ionicons name="navigate-outline" size={14} color="#475569" />
                                                         <Text style={styles.accordionHeaderText} numberOfLines={2}>
-                                                            {direction.name || `Посока ${dirIndex + 1}`}
+                                                            {getDirectionDisplayLabel(direction, dirIndex)}
                                                         </Text>
                                                     </View>
                                                     <Text style={styles.accordionSubText}>{`${direction.stops.length} спирки`}</Text>
@@ -541,34 +576,40 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                             {isExpanded && (
                                                 <View style={styles.accordionBody}>
                                                     {direction.stops.map((stop, stopIndex) => (
-                                                        <TouchableOpacity
+                                                        <View
                                                             key={`${dirIndex}-${stop.id}-${stopIndex}`}
                                                             style={[
                                                                 styles.stopRow,
                                                                 expandedStopId === stop.id && styles.stopRowActive,
                                                             ]}
-                                                            activeOpacity={0.7}
-                                                            onPress={() => { void handleStopPress(stop.id, direction.id, direction.name, direction.mergedDirectionNames || []); }}
                                                         >
-                                                            <Text style={styles.stopIndex}>{`${stopIndex + 1}.`}</Text>
-                                                            <View style={styles.stopInfo}>
-                                                                <Text style={styles.stopName}>{stop.name}</Text>
-                                                                <Text style={styles.stopMeta}>{`ID: ${stop.id}`}</Text>
-                                                                {expandedStopId === stop.id && (
-                                                                    <View style={styles.stopEtaPanel}>
-                                                                        {renderStopSchedule()}
+                                                            <TouchableOpacity
+                                                                style={styles.stopRowPressable}
+                                                                activeOpacity={0.7}
+                                                                onPress={() => { void handleStopPress(stop.id, direction.id, direction.name, direction.mergedDirectionNames || []); }}
+                                                            >
+                                                                <View style={styles.stopRowMain}>
+                                                                    <Text style={styles.stopIndex}>{`${stopIndex + 1}.`}</Text>
+                                                                    <View style={styles.stopInfo}>
+                                                                        <Text style={styles.stopName}>{stop.name}</Text>
+                                                                        <Text style={styles.stopMeta}>{`ID: ${stop.id}`}</Text>
                                                                     </View>
-                                                                )}
-                                                            </View>
-                                                            {onFocusStop && (
-                                                                <TouchableOpacity
-                                                                    style={styles.stopMapBtn}
-                                                                    onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
-                                                                >
-                                                                        <Ionicons name="locate-outline" size={14} color="#475569" />
-                                                                </TouchableOpacity>
+                                                                    {onFocusStop && (
+                                                                        <TouchableOpacity
+                                                                            style={styles.stopMapBtn}
+                                                                            onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
+                                                                        >
+                                                                                <Ionicons name="locate-outline" size={14} color="#475569" />
+                                                                        </TouchableOpacity>
+                                                                    )}
+                                                                </View>
+                                                            </TouchableOpacity>
+                                                            {expandedStopId === stop.id && (
+                                                                <View style={styles.stopEtaPanel}>
+                                                                    {renderStopSchedule()}
+                                                                </View>
                                                             )}
-                                                        </TouchableOpacity>
+                                                        </View>
                                                     ))}
                                                 </View>
                                             )}
@@ -848,13 +889,21 @@ const styles = StyleSheet.create({
         marginBottom: 6,
     },
     stopRow: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
+        width: '100%',
+        alignSelf: 'stretch',
         paddingVertical: 8,
         paddingHorizontal: 8,
         borderTopWidth: 1,
         borderTopColor: 'rgba(226,232,240,0.72)',
         borderRadius: 12,
+    },
+    stopRowPressable: {
+        width: '100%',
+    },
+    stopRowMain: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        width: '100%',
     },
     stopRowActive: {
         backgroundColor: 'rgba(248,250,252,0.84)',
@@ -897,10 +946,12 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(226,232,240,0.72)',
     },
     stopEtaPanel: {
-        marginTop: 6,
+        marginTop: 8,
         paddingTop: 6,
         borderTopWidth: 1,
         borderTopColor: 'rgba(226,232,240,0.72)',
+        width: '100%',
+        alignSelf: 'stretch',
     },
     dayTypeRow: {
         flexDirection: 'row',
@@ -953,15 +1004,17 @@ const styles = StyleSheet.create({
     lineGroupTimes: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 6,
+        justifyContent: 'space-between',
+        rowGap: 6,
     },
     lineGroupTime: {
         backgroundColor: 'rgba(248,250,252,0.72)',
         borderRadius: 8,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
+        width: '15.6%',
+        paddingHorizontal: 2,
+        paddingVertical: 4,
         textAlign: 'center',
-        fontSize: 12,
+        fontSize: 11,
         color: '#1E293B',
         overflow: 'hidden',
         borderWidth: 1,
