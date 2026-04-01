@@ -529,8 +529,8 @@
   {
     "id": "osm-way-1103632921",
     "name": "Billa паркинг",
-    "latitude": 42.6738708,
-    "longitude": 23.3328006,
+    "latitude": 42.6738823,
+    "longitude": 23.3328274,
     "category": "commercial",
     "capacity": null,
     "fee": true,
@@ -546,8 +546,8 @@
   {
     "id": "osm-way-1103632922",
     "name": "Billa паркинг",
-    "latitude": 42.6740293,
-    "longitude": 23.3332189,
+    "latitude": 42.6740341,
+    "longitude": 23.3332396,
     "category": "commercial",
     "capacity": null,
     "fee": true,
