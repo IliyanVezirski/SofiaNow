@@ -53,6 +53,7 @@ export default {
       'expo-asset',
       'expo-font',
       'expo-background-task',
+      './plugins/withParkingSmsAutomation',
     ],
     extra: {
       eas: {
