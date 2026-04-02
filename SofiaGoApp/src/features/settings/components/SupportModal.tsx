@@ -24,7 +24,7 @@ export const SupportModal: React.FC<Props> = ({
                 <Pressable style={styles.backdrop} onPress={onClose} />
                 <View style={[styles.card, { maxHeight: cardMaxHeight }]}>
                     <View style={styles.header}>
-                        <Text style={styles.title}>Подкрепа</Text>
+                        <Text style={styles.title}>Почерпка</Text>
                         <Pressable onPress={onClose} style={styles.closeButton}>
                             <Ionicons name="close" size={16} color="#334155" />
                         </Pressable>
@@ -33,10 +33,10 @@ export const SupportModal: React.FC<Props> = ({
                     <View style={styles.section}>
                         <View style={styles.supportCard}>
                             <View style={styles.supportTitleRow}>
-                                <Ionicons name="heart-outline" size={14} color="#1D4ED8" />
-                                <Text style={styles.supportTitle}>Подкрепи Sofia Go</Text>
+                                {/* <Ionicons name="heart-outline" size={14} color="#1D4ED8" /> */}
+                                <Text style={styles.supportTitle}>Почерпи разработчика</Text>
                             </View>
-                            <Text style={styles.supportSubtitle}>Твоята подкрепа помага да подобрим приложението и транспортните функции.</Text>
+                            <Text style={styles.supportSubtitle}>Харесвате ли Sofia Go? Почерпете разработчика едно кафе.</Text>
                         </View>
 
                         <TouchableOpacity
@@ -44,7 +44,7 @@ export const SupportModal: React.FC<Props> = ({
                             onPress={onOpenSupport}
                             style={styles.primaryButton}
                         >
-                            <Text style={styles.primaryButtonText}>Подкрепи</Text>
+                            <Text style={styles.primaryButtonText}>Почерпи</Text>
                         </TouchableOpacity>
                     </View>
                 </View>

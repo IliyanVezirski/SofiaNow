@@ -80,7 +80,7 @@ import {
 
 import { INITIAL_ZOOM_LEVEL, MAP_STYLE, MAX_RENDERED_STOPS, MAX_RENDERED_VEHICLES, DEFAULT_BOUNDS_DELTA, DEFAULT_CENTER_COORDINATE, createFallbackBounds } from '../features/map/constants';
 
-const SUPPORT_REVOLUT_URL = 'https://revolut.me/iliyantyb2';
+const SUPPORT_REVOLUT_URL = 'https://buymeacoffee.com/iliqnski90c';
 const GOOGLE_FIT_EDGE_PADDING = { top: 60, right: 60, bottom: 80, left: 60 };
 const USER_LOCATION_REGION_DELTA = DEFAULT_BOUNDS_DELTA / 5;
 
