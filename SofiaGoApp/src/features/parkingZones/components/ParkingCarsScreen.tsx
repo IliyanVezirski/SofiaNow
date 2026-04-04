@@ -4,16 +4,18 @@ import { Ionicons } from '@expo/vector-icons';
 
 import {
     MAX_PARKING_CAR_NAME_LENGTH,
+    getParkingCarPlateKindLabel,
     type ParkingCar,
+    type ParkingCarPlateKind,
     validateParkingCarPlate,
 } from '../../../services/parkingCars';
 
 interface Props {
     cars: ParkingCar[];
     loading?: boolean;
-    onAddCar: (plate: string, name?: string) => Promise<unknown> | unknown;
+    onAddCar: (plate: string, name?: string, plateKind?: ParkingCarPlateKind) => Promise<unknown> | unknown;
     onRemoveCar: (id: string) => Promise<unknown> | unknown;
-    onUpdateCar: (id: string, plate: string, name?: string) => Promise<unknown> | unknown;
+    onUpdateCar: (id: string, plate: string, name?: string, plateKind?: ParkingCarPlateKind) => Promise<unknown> | unknown;
     onSetDefaultCar: (id: string) => Promise<unknown> | unknown;
     onClose: () => void;
 }
@@ -29,24 +31,38 @@ export const ParkingCarsScreen: React.FC<Props> = ({
 }) => {
     const [nameInput, setNameInput] = useState('');
     const [plateInput, setPlateInput] = useState('');
+    const [plateKind, setPlateKind] = useState<ParkingCarPlateKind>('bg');
     const [addCarVisible, setAddCarVisible] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [editingCarId, setEditingCarId] = useState<string | null>(null);
     const [editingPlateInput, setEditingPlateInput] = useState('');
     const [editingNameInput, setEditingNameInput] = useState('');
+    const [editingPlateKind, setEditingPlateKind] = useState<ParkingCarPlateKind>('bg');
     const [editingSubmitting, setEditingSubmitting] = useState(false);
     const [editingErrorMessage, setEditingErrorMessage] = useState<string | null>(null);
 
-    const validation = useMemo(() => validateParkingCarPlate(plateInput), [plateInput]);
+    const validation = useMemo(() => validateParkingCarPlate(plateInput, plateKind), [plateInput, plateKind]);
     const liveValidationError = plateInput.trim().length > 0 && !validation.isValid ? validation.error : null;
     const helperMessage = errorMessage
         || liveValidationError
         || (plateInput.trim().length > 0
-            ? 'Номерът е валиден.'
-            : 'Въведи номера така, както ще се прати по SMS: на латиница, без интервали и тирета.');
-    const editingValidation = useMemo(() => validateParkingCarPlate(editingPlateInput), [editingPlateInput]);
+            ? (plateKind === 'foreign' ? 'Номерът ще се изпрати по SMS точно както е въведен.' : 'Номерът е валиден.')
+            : (plateKind === 'foreign'
+                ? 'Въведи номера точно както е изписан на колата.'
+                : 'Въведи номера така, както ще се прати по SMS: на латиница, без интервали и тирета.'));
+    const editingValidation = useMemo(() => validateParkingCarPlate(editingPlateInput, editingPlateKind), [editingPlateInput, editingPlateKind]);
     const liveEditingValidationError = editingPlateInput.trim().length > 0 && !editingValidation.isValid ? editingValidation.error : null;
+    const editingHelperMessage = editingErrorMessage
+        || liveEditingValidationError
+        || (editingPlateInput.trim().length > 0
+            ? (editingPlateKind === 'foreign' ? 'Номерът ще се запази точно както е въведен.' : 'Номерът е валиден.')
+            : (editingPlateKind === 'foreign'
+                ? 'Въведи номера точно както е изписан на колата.'
+                : 'Въведи номера така, както ще се прати по SMS: на латиница, без интервали и тирета.'));
+
+    const platePlaceholder = plateKind === 'foreign' ? 'AB-123-CD' : 'CA1234AB';
+    const editingPlatePlaceholder = editingPlateKind === 'foreign' ? 'AB-123-CD' : 'CA1234AB';
 
     const closeAddCarEditor = () => {
         if (submitting) {
@@ -56,11 +72,25 @@ export const ParkingCarsScreen: React.FC<Props> = ({
         setAddCarVisible(false);
         setNameInput('');
         setPlateInput('');
+        setPlateKind('bg');
         setErrorMessage(null);
     };
 
+    const openAddCarEditor = (nextPlateKind: ParkingCarPlateKind) => {
+        setEditingCarId(null);
+        setEditingPlateInput('');
+        setEditingNameInput('');
+        setEditingPlateKind('bg');
+        setEditingErrorMessage(null);
+        setNameInput('');
+        setPlateInput('');
+        setPlateKind(nextPlateKind);
+        setErrorMessage(null);
+        setAddCarVisible(true);
+    };
+
     const handleAddCar = async () => {
-        const nextValidation = validateParkingCarPlate(plateInput);
+        const nextValidation = validateParkingCarPlate(plateInput, plateKind);
         if (!nextValidation.isValid) {
             setErrorMessage(nextValidation.error);
             return;
@@ -69,7 +99,7 @@ export const ParkingCarsScreen: React.FC<Props> = ({
         setSubmitting(true);
         setErrorMessage(null);
         try {
-            await onAddCar(nextValidation.normalizedPlate, nameInput);
+            await onAddCar(nextValidation.normalizedPlate, nameInput, plateKind);
             closeAddCarEditor();
         } catch (error) {
             setErrorMessage(error instanceof Error ? error.message : 'Не успяхме да запазим колата.');
@@ -82,6 +112,7 @@ export const ParkingCarsScreen: React.FC<Props> = ({
         setEditingCarId(car.id);
         setEditingPlateInput(car.plate);
         setEditingNameInput(car.name || '');
+        setEditingPlateKind(car.plateKind);
         setEditingErrorMessage(null);
     };
 
@@ -90,7 +121,7 @@ export const ParkingCarsScreen: React.FC<Props> = ({
             return;
         }
 
-        const nextValidation = validateParkingCarPlate(editingPlateInput);
+        const nextValidation = validateParkingCarPlate(editingPlateInput, editingPlateKind);
         if (!nextValidation.isValid) {
             setEditingErrorMessage(nextValidation.error);
             return;
@@ -99,10 +130,11 @@ export const ParkingCarsScreen: React.FC<Props> = ({
         setEditingSubmitting(true);
         setEditingErrorMessage(null);
         try {
-            await onUpdateCar(editingCarId, nextValidation.normalizedPlate, editingNameInput);
+            await onUpdateCar(editingCarId, nextValidation.normalizedPlate, editingNameInput, editingPlateKind);
             setEditingCarId(null);
             setEditingPlateInput('');
             setEditingNameInput('');
+            setEditingPlateKind('bg');
         } catch (error) {
             setEditingErrorMessage(error instanceof Error ? error.message : 'Не успяхме да запазим колата.');
         } finally {
@@ -138,13 +170,7 @@ export const ParkingCarsScreen: React.FC<Props> = ({
                     <View style={styles.headerActions}>
                         <TouchableOpacity
                             style={styles.addButton}
-                            onPress={() => {
-                                setEditingCarId(null);
-                                setEditingPlateInput('');
-                                setEditingNameInput('');
-                                setEditingErrorMessage(null);
-                                setAddCarVisible(true);
-                            }}
+                            onPress={() => openAddCarEditor('bg')}
                         >
                             <Ionicons name="add" size={16} color="#FFFFFF" />
                             <Text style={styles.addButtonText}>Добави кола</Text>
@@ -181,7 +207,7 @@ export const ParkingCarsScreen: React.FC<Props> = ({
                             <View style={styles.cardHeader}>
                                 <View style={styles.cardInfo}>
                                     <Text style={item.name ? styles.cardNameTitle : styles.cardTitle}>{item.name || item.displayPlate}</Text>
-                                    <Text style={styles.cardSubtitle}>{item.name ? item.displayPlate : 'Запазен номер за паркиране'}</Text>
+                                    <Text style={styles.cardSubtitle}>{item.name ? `${item.displayPlate} • ${getParkingCarPlateKindLabel(item.plateKind)}` : getParkingCarPlateKindLabel(item.plateKind)}</Text>
                                     <TouchableOpacity style={styles.nameLink} onPress={() => handleStartNameEdit(item)}>
                                         <Ionicons name="pencil-outline" size={13} color="#1D4ED8" />
                                         <Text style={styles.nameLinkText}>Редактирай</Text>
@@ -197,6 +223,20 @@ export const ParkingCarsScreen: React.FC<Props> = ({
 
                             {isEditingCar ? (
                                 <View style={styles.nameEditorWrap}>
+                                    <View style={styles.kindSelectorWrap}>
+                                        <TouchableOpacity
+                                            style={[styles.kindChip, editingPlateKind === 'bg' && styles.kindChipActive]}
+                                            onPress={() => setEditingPlateKind('bg')}
+                                        >
+                                            <Text style={[styles.kindChipText, editingPlateKind === 'bg' && styles.kindChipTextActive]}>Български</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.kindChip, editingPlateKind === 'foreign' && styles.kindChipActive]}
+                                            onPress={() => setEditingPlateKind('foreign')}
+                                        >
+                                            <Text style={[styles.kindChipText, editingPlateKind === 'foreign' && styles.kindChipTextActive]}>Чуждестранен</Text>
+                                        </TouchableOpacity>
+                                    </View>
                                     <TextInput
                                         style={[styles.input, (editingErrorMessage || liveEditingValidationError) ? styles.inputError : null]}
                                         value={editingPlateInput}
@@ -206,12 +246,12 @@ export const ParkingCarsScreen: React.FC<Props> = ({
                                                 setEditingErrorMessage(null);
                                             }
                                         }}
-                                        placeholder="CA1234AB"
+                                        placeholder={editingPlatePlaceholder}
                                         placeholderTextColor="#94A3B8"
-                                        autoCapitalize="characters"
+                                        autoCapitalize={editingPlateKind === 'foreign' ? 'characters' : 'characters'}
                                         autoCorrect={false}
                                         spellCheck={false}
-                                        maxLength={12}
+                                        maxLength={editingPlateKind === 'foreign' ? 20 : 12}
                                     />
                                     <TextInput
                                         style={styles.nameInput}
@@ -224,7 +264,9 @@ export const ParkingCarsScreen: React.FC<Props> = ({
                                         spellCheck={false}
                                         maxLength={MAX_PARKING_CAR_NAME_LENGTH}
                                     />
-                                    {(editingErrorMessage || liveEditingValidationError) ? <Text style={styles.helperTextError}>{editingErrorMessage || liveEditingValidationError}</Text> : null}
+                                    <Text style={[styles.helperText, (editingErrorMessage || liveEditingValidationError) ? styles.helperTextError : null, !editingErrorMessage && !liveEditingValidationError && editingPlateInput.trim().length > 0 ? styles.helperTextValid : null]}>
+                                        {editingHelperMessage}
+                                    </Text>
                                     <View style={styles.nameEditorActions}>
                                         <TouchableOpacity
                                             style={[styles.secondaryButton, editingSubmitting && styles.secondaryButtonDisabled]}
@@ -240,6 +282,7 @@ export const ParkingCarsScreen: React.FC<Props> = ({
                                                 setEditingCarId(null);
                                                 setEditingPlateInput('');
                                                 setEditingNameInput('');
+                                                setEditingPlateKind('bg');
                                                 setEditingErrorMessage(null);
                                             }}
                                         >
@@ -280,6 +323,20 @@ export const ParkingCarsScreen: React.FC<Props> = ({
                             <Ionicons name="close" size={16} color="#334155" />
                         </Pressable>
                         <Text style={styles.editorTitle}>Добави кола</Text>
+                        <View style={styles.kindSelectorWrap}>
+                            <TouchableOpacity
+                                style={[styles.kindChip, plateKind === 'bg' && styles.kindChipActive]}
+                                onPress={() => setPlateKind('bg')}
+                            >
+                                <Text style={[styles.kindChipText, plateKind === 'bg' && styles.kindChipTextActive]}>Български</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.kindChip, plateKind === 'foreign' && styles.kindChipActive]}
+                                onPress={() => setPlateKind('foreign')}
+                            >
+                                <Text style={[styles.kindChipText, plateKind === 'foreign' && styles.kindChipTextActive]}>Чуждестранен</Text>
+                            </TouchableOpacity>
+                        </View>
                         <TextInput
                             style={styles.nameInput}
                             value={nameInput}
@@ -300,12 +357,12 @@ export const ParkingCarsScreen: React.FC<Props> = ({
                                     setErrorMessage(null);
                                 }
                             }}
-                            placeholder="CA1234AB"
+                            placeholder={platePlaceholder}
                             placeholderTextColor="#94A3B8"
                             autoCapitalize="characters"
                             autoCorrect={false}
                             spellCheck={false}
-                            maxLength={12}
+                            maxLength={plateKind === 'foreign' ? 20 : 12}
                         />
                         <Text style={[styles.helperText, (errorMessage || liveValidationError) ? styles.helperTextError : null, !errorMessage && !liveValidationError && plateInput.trim().length > 0 ? styles.helperTextValid : null]}>
                             {helperMessage}
@@ -436,6 +493,34 @@ const styles = StyleSheet.create({
         color: '#0F172A',
         marginBottom: 10,
         paddingRight: 44,
+    },
+    kindSelectorWrap: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: 10,
+    },
+    kindChip: {
+        flex: 1,
+        height: 38,
+        borderRadius: 10,
+        backgroundColor: 'rgba(241,245,249,0.9)',
+        borderWidth: 1,
+        borderColor: '#CBD5E1',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 0,
+    },
+    kindChipActive: {
+        backgroundColor: '#1D4ED8',
+        borderColor: '#1D4ED8',
+    },
+    kindChipText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#475569',
+    },
+    kindChipTextActive: {
+        color: '#FFFFFF',
     },
     nameInput: {
         height: 44,

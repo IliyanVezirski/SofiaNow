@@ -41,12 +41,15 @@ interface UseMapFocusSyncParams {
     };
     focusParkingZoneBounds?: RouteBounds | null;
     focusParkingZoneToken?: number;
+    focusEcoParkBounds?: RouteBounds | null;
+    focusEcoParkToken?: number;
     focusStopCoordinate?: FocusCoordinate | null;
     focusStopId?: string | null;
     onFocusStopHandled?: () => void;
     googleInitialRegion: Region;
     googleMapReady: boolean;
     googleMapRef: MutableRefObject<GoogleMapView | null>;
+    handledEcoParkFocusTokenRef: MutableRefObject<number>;
     handledParkingZoneFocusTokenRef: MutableRefObject<number>;
     hasAppliedInitialLocationCameraRef: MutableRefObject<boolean>;
     hasFreshLocation: boolean;
@@ -100,6 +103,8 @@ export const useMapFocusSync = ({
     bounds,
     camera,
     closeSelectedStop,
+    focusEcoParkBounds,
+    focusEcoParkToken,
     focusParkingZoneBounds,
     focusParkingZoneToken,
     focusStopCoordinate,
@@ -108,6 +113,7 @@ export const useMapFocusSync = ({
     googleInitialRegion,
     googleMapReady,
     googleMapRef,
+    handledEcoParkFocusTokenRef,
     handledParkingZoneFocusTokenRef,
     hasAppliedInitialLocationCameraRef,
     hasFreshLocation,
@@ -199,6 +205,65 @@ export const useMapFocusSync = ({
         location?.coords.longitude,
         setUserLocationVisible,
         userLocationRegionDelta,
+    ]);
+
+    useEffect(() => {
+        if (!focusEcoParkBounds || typeof focusEcoParkToken !== 'number' || focusEcoParkToken <= 0) {
+            return;
+        }
+
+        if (handledEcoParkFocusTokenRef.current === focusEcoParkToken) {
+            return;
+        }
+
+        handledEcoParkFocusTokenRef.current = focusEcoParkToken;
+
+        camera.unlockCamera();
+        camera.setTripCameraBounds(null);
+        camera.setRouteCameraBounds(null);
+        selectedVehicleIdRef.current = null;
+        setSelectedVehicleId(null);
+        closeSelectedStop();
+        setDroppedPin(null);
+        bounds.setMapBounds({
+            north: focusEcoParkBounds.ne[1],
+            south: focusEcoParkBounds.sw[1],
+            east: focusEcoParkBounds.ne[0],
+            west: focusEcoParkBounds.sw[0],
+        });
+
+        if (platformIsAndroid && googleMapReady && googleMapRef.current) {
+            suppressUserRecenterRegionSyncUntilRef.current = Date.now() + 900;
+            googleMapRef.current.fitToCoordinates(
+                [toMapCoordinate(focusEcoParkBounds.ne), toMapCoordinate(focusEcoParkBounds.sw)],
+                { edgePadding: GOOGLE_FIT_EDGE_PADDING, animated: true },
+            );
+            return;
+        }
+
+        camera.setRouteCameraBounds(focusEcoParkBounds);
+
+        const releaseRouteBoundsTimer = setTimeout(() => {
+            camera.setRouteCameraBounds(null);
+        }, 650);
+
+        return () => {
+            clearTimeout(releaseRouteBoundsTimer);
+        };
+    }, [
+        bounds,
+        camera,
+        closeSelectedStop,
+        focusEcoParkBounds,
+        focusEcoParkToken,
+        googleMapReady,
+        googleMapRef,
+        handledEcoParkFocusTokenRef,
+        platformIsAndroid,
+        selectedVehicleIdRef,
+        setDroppedPin,
+        setSelectedVehicleId,
+        suppressUserRecenterRegionSyncUntilRef,
     ]);
 
     useEffect(() => {

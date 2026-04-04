@@ -14,11 +14,13 @@ import {
     INVALID_PLATE_ERROR_MESSAGE,
 } from './messages';
 import { sanitizeParkingCarName, validateParkingCarPlate } from './validation';
+import type { ParkingCarPlateKind } from './types';
 
 const createParkingCar = (
     id: string,
     plate: string,
     displayPlate: string,
+    plateKind: ParkingCarPlateKind,
     name: string | null,
     isDefault: boolean,
 ): ParkingCar => ({
@@ -26,6 +28,7 @@ const createParkingCar = (
     name,
     plate,
     displayPlate,
+    plateKind,
     isDefault,
     createdAt: Date.now(),
 });
@@ -33,14 +36,14 @@ const createParkingCar = (
 export const createParkingCarsService = ({ store, createId }: ParkingCarsDependencies) => ({
     loadParkingCars: () => store.load(),
 
-    addParkingCar: async (value: string, nameValue = '') => {
-        const validation = validateParkingCarPlate(value);
+    addParkingCar: async (value: string, nameValue = '', plateKind: ParkingCarPlateKind = 'bg') => {
+        const validation = validateParkingCarPlate(value, plateKind);
         if (!validation.isValid) {
             throw new Error(validation.error || INVALID_PLATE_ERROR_MESSAGE);
         }
 
         const currentCars = await store.load();
-        if (hasParkingCarWithPlate(currentCars, validation.normalizedPlate)) {
+        if (hasParkingCarWithPlate(currentCars, validation.normalizedPlate, undefined, validation.plateKind)) {
             throw new Error(DUPLICATE_CAR_ERROR_MESSAGE);
         }
 
@@ -49,6 +52,7 @@ export const createParkingCarsService = ({ store, createId }: ParkingCarsDepende
                 createId(),
                 validation.normalizedPlate,
                 validation.displayPlate,
+                validation.plateKind,
                 sanitizeParkingCarName(nameValue),
                 currentCars.length === 0,
             ),
@@ -58,8 +62,8 @@ export const createParkingCarsService = ({ store, createId }: ParkingCarsDepende
         return store.save(nextCars);
     },
 
-    updateParkingCar: async (id: string, plateValue: string, nameValue = '') => {
-        const validation = validateParkingCarPlate(plateValue);
+    updateParkingCar: async (id: string, plateValue: string, nameValue = '', plateKind: ParkingCarPlateKind = 'bg') => {
+        const validation = validateParkingCarPlate(plateValue, plateKind);
         if (!validation.isValid) {
             throw new Error(validation.error || INVALID_PLATE_ERROR_MESSAGE);
         }
@@ -69,7 +73,7 @@ export const createParkingCarsService = ({ store, createId }: ParkingCarsDepende
             return currentCars;
         }
 
-        if (hasParkingCarWithPlate(currentCars, validation.normalizedPlate, id)) {
+        if (hasParkingCarWithPlate(currentCars, validation.normalizedPlate, id, validation.plateKind)) {
             throw new Error(DUPLICATE_OTHER_CAR_ERROR_MESSAGE);
         }
 
@@ -79,6 +83,7 @@ export const createParkingCarsService = ({ store, createId }: ParkingCarsDepende
             name: nextName,
             plate: validation.normalizedPlate,
             displayPlate: validation.displayPlate,
+            plateKind: validation.plateKind,
         })));
     },
 

@@ -40,7 +40,7 @@ export const useNavigationPreferences = ({
                     return;
                 }
 
-                const nextMode = storedMode === 'parking' || storedMode === 'transit' ? storedMode : null;
+                const nextMode = storedMode === 'parking' || storedMode === 'transit' || storedMode === 'eco' ? storedMode : null;
                 const nextParkingAction = storedParkingAction && isParkingActionKey(storedParkingAction) ? storedParkingAction : null;
 
                 setMapExperienceMode(nextMode ?? DEFAULT_MAP_EXPERIENCE_MODE);

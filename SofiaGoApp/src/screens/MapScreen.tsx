@@ -36,16 +36,19 @@ import { useReporting } from '../features/reporting/hooks/useReporting';
 import { useParkingZones } from '../features/parkingZones/hooks/useParkingZones';
 import { useParkingCars } from '../features/parkingZones/hooks/useParkingCars';
 import { useLiveParkingAvailability } from '../features/parkingZones/hooks/useLiveParkingAvailability';
+import { useEcoParks } from '../features/eco/hooks/useEcoParks';
 import { ParkingZoneInfoPanel } from '../features/parkingZones/components/ParkingZoneInfoPanel';
 import type { ParkingLot } from '../features/parkingZones/types/parkingLots';
 import type { ParkingZoneId } from '../features/parkingZones/types';
 import { MapClearActions } from '../features/map/components/MapClearActions';
+import { GoogleEcoLayers } from '../features/map/components/GoogleEcoLayers';
 import { GoogleParkingLayers } from '../features/map/components/GoogleParkingLayers';
 import { GoogleMapCanvas } from '../features/map/components/GoogleMapCanvas';
 import { GoogleTransitLayers } from '../features/map/components/GoogleTransitLayers';
 import type { MapExperienceMode } from '../features/map/components/MapModeSwitcher';
 import { MapFeaturePanels } from '../features/map/components/MapFeaturePanels';
 import { MapFloatingControls } from '../features/map/components/MapFloatingControls';
+import { MapboxEcoLayers } from '../features/map/components/MapboxEcoLayers';
 import { MapboxMapCanvas } from '../features/map/components/MapboxMapCanvas';
 import { MapboxParkingLayers } from '../features/map/components/MapboxParkingLayers';
 import { MapboxTransitLayers } from '../features/map/components/MapboxTransitLayers';
@@ -104,6 +107,10 @@ interface MapScreenProps {
     focusStopCoordinate?: { latitude: number; longitude: number } | null;
     focusStopId?: string | null;
     onFocusStopHandled?: () => void;
+    focusedEcoParkId?: string | null;
+    focusEcoParkBounds?: { ne: [number, number]; sw: [number, number] } | null;
+    focusEcoParkToken?: number;
+    onClearFocusedEcoPark?: () => void;
     focusedParkingZoneFeatureId?: string | null;
     focusParkingZoneBounds?: { ne: [number, number]; sw: [number, number] } | null;
     focusParkingZoneToken?: number;
@@ -136,6 +143,10 @@ export default function MapScreen({
     focusStopCoordinate,
     focusStopId,
     onFocusStopHandled,
+    focusedEcoParkId,
+    focusEcoParkBounds,
+    focusEcoParkToken,
+    onClearFocusedEcoPark,
     focusedParkingZoneFeatureId,
     focusParkingZoneBounds,
     focusParkingZoneToken,
@@ -154,6 +165,7 @@ export default function MapScreen({
     const stopAnnotationRefs = useRef<Record<string, { refresh: () => void } | null>>({});
     const previousSelectedStopAnnotationIdRef = useRef<string | null>(null);
     const hasAppliedInitialLocationCameraRef = useRef(false);
+    const handledEcoParkFocusTokenRef = useRef(0);
     const handledParkingZoneFocusTokenRef = useRef(0);
     const suppressUserRecenterRegionSyncUntilRef = useRef(0);
     const tripRouteViewportSnapshotRef = useRef<{
@@ -275,6 +287,9 @@ export default function MapScreen({
     const detectedParkingZoneId = parkingZones.userZone?.id ?? null;
     const isTransitMode = mapExperienceMode === 'transit';
     const isParkingMode = mapExperienceMode === 'parking';
+    const isEcoMode = mapExperienceMode === 'eco';
+    const ecoParks = useEcoParks(bounds.mapBounds, isEcoMode);
+    const shouldShowEcoParks = isEcoMode;
     const floatingControls = useMapFloatingControls({
         mapExperienceMode,
         supportUrl: SUPPORT_REVOLUT_URL.trim(),
@@ -340,6 +355,14 @@ export default function MapScreen({
     const parkingOverlayBottomOffset = Math.max(Math.min(Math.max(height * 0.38, 200), 300) - parkingOverlayStretchDown, 96);
     const parkingPaymentPanelHeight = Math.min(Math.max(height * 0.62, 420), 620) + parkingOverlayStretchDown;
     const parkingCarsPanelHeight = Math.min(Math.max(height * 0.56, 380), 540) + parkingOverlayStretchDown;
+
+    useEffect(() => {
+        if (mapExperienceMode === 'eco') {
+            return;
+        }
+
+        onClearFocusedEcoPark?.();
+    }, [mapExperienceMode, onClearFocusedEcoPark]);
 
     useEffect(() => {
         onParkingZoneChange?.(detectedParkingZoneId);
@@ -751,6 +774,8 @@ export default function MapScreen({
         bounds,
         camera,
         closeSelectedStop: selectedStop.closeSelectedStop,
+        focusEcoParkBounds,
+        focusEcoParkToken,
         focusParkingZoneBounds,
         focusParkingZoneToken,
         focusStopCoordinate,
@@ -759,6 +784,7 @@ export default function MapScreen({
         googleInitialRegion,
         googleMapReady,
         googleMapRef,
+        handledEcoParkFocusTokenRef,
         handledParkingZoneFocusTokenRef,
         hasAppliedInitialLocationCameraRef,
         hasFreshLocation,
@@ -885,6 +911,14 @@ export default function MapScreen({
                             onParkingLotPress={pinParkingActions.openParkingLotPanel}
                         />
 
+                        {shouldShowEcoParks ? (
+                            <GoogleEcoLayers
+                                focusedParkId={focusedEcoParkId}
+                                parksFeatureCollection={ecoParks.visibleParks}
+                                shouldShowParks
+                            />
+                        ) : null}
+
                         <GoogleTransitLayers
                             currentLocation={currentLocation}
                             droppedPin={droppedPin}
@@ -935,6 +969,14 @@ export default function MapScreen({
                         onParkingLotPress={pinParkingActions.openParkingLotPanel}
                     />
 
+                    {shouldShowEcoParks ? (
+                        <MapboxEcoLayers
+                            focusedParkId={focusedEcoParkId}
+                            parksFeatureCollection={ecoParks.visibleParks}
+                            shouldShowParks
+                        />
+                    ) : null}
+
                     <MapboxTransitLayers
                         droppedPin={droppedPin}
                         hasActiveRouteOverlay={hasActiveRouteOverlay}
@@ -973,6 +1015,7 @@ export default function MapScreen({
                     filterPanelOpaque={!!selectedStop.selectedStop || search.searchModalVisible || favorites.favoritesVisible || !!filterPanelVisible}
                     googleShowTraffic={floatingControls.googleShowTraffic}
                     isActive={isActive}
+                    isEcoMode={isEcoMode}
                     isParkingMode={isParkingMode}
                     isTransitMode={isTransitMode}
                     mapExperienceMode={mapExperienceMode}

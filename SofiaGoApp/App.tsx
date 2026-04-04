@@ -50,9 +50,13 @@ export default function App() {
           focusStopCoordinate={appFlow.focusStopCoordinate}
           focusStopId={appFlow.focusStopId}
           onFocusStopHandled={appFlow.clearFocusedStop}
+          focusedEcoParkId={appFlow.focusedEcoParkId}
           focusedParkingZoneFeatureId={appFlow.focusedParkingZoneFeatureId}
+          focusEcoParkBounds={appFlow.focusEcoParkBounds}
+          focusEcoParkToken={appFlow.focusEcoParkToken}
           focusParkingZoneBounds={appFlow.focusParkingZoneBounds}
           focusParkingZoneToken={appFlow.focusParkingZoneToken}
+          onClearFocusedEcoPark={appFlow.handleClearFocusedEcoPark}
           onClearFocusedParkingZone={appFlow.handleClearFocusedParkingZone}
           tripPlannerRoute={appFlow.tripPlannerRoute}
           onClearTripRoute={appFlow.handleCloseShownTripRoute}
@@ -68,8 +72,10 @@ export default function App() {
         />
 
         <AppOverlays
+          activeEcoPanel={appFlow.activeEcoPanel}
           activeTab={appFlow.activeTab}
           focusedParkingZoneFeatureId={appFlow.focusedParkingZoneFeatureId}
+          onCloseEcoPanel={() => appFlow.setActiveEcoPanel(null)}
           onCloseNearby={() => appFlow.setActiveTab('map')}
           onCloseParkingCars={() => appFlow.setParkingCarsVisible(false)}
           onCloseParkingLots={() => appFlow.setParkingLotsVisible(false)}
@@ -84,6 +90,7 @@ export default function App() {
             appFlow.setSelectedRoute(route);
             appFlow.setActiveTab('map');
           }}
+          onShowEcoParkOnMap={appFlow.handleShowEcoParkOnMap}
           onShowParkingZoneOnMap={appFlow.handleShowParkingZoneOnMap}
           onShowPlannerRoute={(route) => appFlow.handleShowTripRouteOnMap(route, 'planner')}
           parkingCars={{

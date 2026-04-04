@@ -4,8 +4,10 @@ export const hasParkingCar = (cars: ParkingCar[], id: string) => cars.some((car)
 
 export const findParkingCarById = (cars: ParkingCar[], id: string) => cars.find((car) => car.id === id) ?? null;
 
-export const hasParkingCarWithPlate = (cars: ParkingCar[], plate: string, excludedId?: string) => cars.some((car) => (
-    car.plate === plate && car.id !== excludedId
+export const hasParkingCarWithPlate = (cars: ParkingCar[], plate: string, excludedId?: string, plateKind?: ParkingCar['plateKind']) => cars.some((car) => (
+    car.plate === plate
+    && car.id !== excludedId
+    && (plateKind ? car.plateKind === plateKind : true)
 ));
 
 export const updateParkingCarById = (

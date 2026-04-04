@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 
-import { buildParkingHomeActionButtons, buildTransitHomeActionButtons } from '../homeActions';
+import { buildEcoHomeActionButtons, buildParkingHomeActionButtons, buildTransitHomeActionButtons } from '../homeActions';
 import type { HomeActionButton, ParkingActionKey } from '../types';
+import type { EcoActionKey } from '../../features/eco/types';
 import type { useAppFlow } from './useAppFlow';
 
 type AppFlowState = ReturnType<typeof useAppFlow>;
@@ -10,6 +11,8 @@ export const useHomeActions = (appFlow: Pick<
     AppFlowState,
     | 'activeTab'
     | 'allowParkingActionHighlight'
+    | 'activeEcoPanel'
+    | 'allowEcoActionHighlight'
     | 'dismissTransientPanels'
     | 'mapExperienceMode'
     | 'parkingActionKey'
@@ -17,6 +20,7 @@ export const useHomeActions = (appFlow: Pick<
     | 'requestToggleFavorites'
     | 'searchVisible'
     | 'setActiveTab'
+    | 'setActiveEcoPanel'
     | 'setMapFiltersVisible'
     | 'setParkingActionKey'
     | 'setParkingCarsVisible'
@@ -66,13 +70,32 @@ export const useHomeActions = (appFlow: Pick<
         appFlow.setParkingZonesVisible,
     ]);
 
+    const ecoHomeActionButtons = useMemo(() => buildEcoHomeActionButtons({
+        activeEcoPanel: appFlow.activeEcoPanel as EcoActionKey | null,
+        allowEcoActionHighlight: appFlow.allowEcoActionHighlight,
+        dismissTransientPanels: appFlow.dismissTransientPanels,
+        setActiveEcoPanel: appFlow.setActiveEcoPanel,
+        setActiveTab: appFlow.setActiveTab,
+        setMapFiltersVisible: appFlow.setMapFiltersVisible,
+    }), [
+        appFlow.activeEcoPanel,
+        appFlow.allowEcoActionHighlight,
+        appFlow.dismissTransientPanels,
+        appFlow.setActiveEcoPanel,
+        appFlow.setActiveTab,
+        appFlow.setMapFiltersVisible,
+    ]);
+
     return useMemo(() => (
         appFlow.activeTab === 'map' && appFlow.mapExperienceMode === 'parking'
             ? parkingHomeActionButtons
-            : transitHomeActionButtons
+            : appFlow.activeTab === 'map' && appFlow.mapExperienceMode === 'eco'
+                ? ecoHomeActionButtons
+                : transitHomeActionButtons
     ), [
         appFlow.activeTab,
         appFlow.mapExperienceMode,
+        ecoHomeActionButtons,
         parkingHomeActionButtons,
         transitHomeActionButtons,
     ]);

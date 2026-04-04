@@ -3,6 +3,7 @@ import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 
 import type { ParkingCar } from '../../../services/parkingCars';
+import { getParkingCarPlateKindLabel } from '../../../services/parkingCars';
 import {
     openParkingSms,
     PARKING_SMS_OPTIONS,
@@ -150,7 +151,11 @@ export const ParkingPaymentScreen: React.FC<Props> = ({
                                     >
                                         <View>
                                             <Text style={car.name ? styles.carNameTitle : styles.carTitle}>{car.name || car.displayPlate}</Text>
-                                            <Text style={styles.carSubtitle}>{car.name ? `${car.displayPlate} • ${car.isDefault ? 'Основна кола' : 'Запазена кола'}` : (car.isDefault ? 'Основна кола' : 'Запазена кола')}</Text>
+                                            <Text style={styles.carSubtitle}>
+                                                {car.name
+                                                    ? `${car.displayPlate} • ${getParkingCarPlateKindLabel(car.plateKind)}${car.isDefault ? ' • Основна кола' : ' • Запазена кола'}`
+                                                    : `${getParkingCarPlateKindLabel(car.plateKind)}${car.isDefault ? ' • Основна кола' : ' • Запазена кола'}`}
+                                            </Text>
                                         </View>
                                         <Ionicons name={isSelected ? 'radio-button-on' : 'radio-button-off'} size={20} color={isSelected ? '#1D4ED8' : '#94A3B8'} />
                                     </TouchableOpacity>

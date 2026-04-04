@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 
 import type { HomeActionButton, ParkingActionKey } from './types';
+import type { EcoActionKey } from '../features/eco/types';
 
 type TransitHomeActionsParams = {
     setActiveTab: Dispatch<SetStateAction<'map' | 'schedules' | 'planner' | 'nearby'>>;
@@ -176,5 +177,72 @@ export const buildParkingHomeActionButtons = ({
             dismissTransientPanels();
             setParkingCarsVisible(true);
         },
+    },
+];
+
+type EcoHomeActionsParams = {
+    activeEcoPanel: EcoActionKey | null;
+    allowEcoActionHighlight: boolean;
+    dismissTransientPanels: () => void;
+    setActiveEcoPanel: Dispatch<SetStateAction<EcoActionKey | null>>;
+    setActiveTab: Dispatch<SetStateAction<'map' | 'schedules' | 'planner' | 'nearby'>>;
+    setMapFiltersVisible: Dispatch<SetStateAction<boolean>>;
+};
+
+const openEcoPanel = (
+    panel: EcoActionKey,
+    setActiveTab: EcoHomeActionsParams['setActiveTab'],
+    setMapFiltersVisible: EcoHomeActionsParams['setMapFiltersVisible'],
+    dismissTransientPanels: EcoHomeActionsParams['dismissTransientPanels'],
+    setActiveEcoPanel: EcoHomeActionsParams['setActiveEcoPanel'],
+) => {
+    setActiveTab('map');
+    setMapFiltersVisible(false);
+    dismissTransientPanels();
+    setActiveEcoPanel(panel);
+};
+
+export const buildEcoHomeActionButtons = ({
+    activeEcoPanel,
+    allowEcoActionHighlight,
+    dismissTransientPanels,
+    setActiveEcoPanel,
+    setActiveTab,
+    setMapFiltersVisible,
+}: EcoHomeActionsParams): HomeActionButton[] => [
+    {
+        key: 'parks',
+        label: 'Паркове',
+        icon: 'leaf-outline',
+        active: allowEcoActionHighlight && activeEcoPanel === 'parks',
+        onPress: () => openEcoPanel('parks', setActiveTab, setMapFiltersVisible, dismissTransientPanels, setActiveEcoPanel),
+    },
+    {
+        key: 'bike',
+        label: 'Вело',
+        icon: 'bicycle-outline',
+        active: allowEcoActionHighlight && activeEcoPanel === 'bike',
+        onPress: () => openEcoPanel('bike', setActiveTab, setMapFiltersVisible, dismissTransientPanels, setActiveEcoPanel),
+    },
+    {
+        key: 'playgrounds',
+        label: 'Площадки',
+        icon: 'happy-outline',
+        active: allowEcoActionHighlight && activeEcoPanel === 'playgrounds',
+        onPress: () => openEcoPanel('playgrounds', setActiveTab, setMapFiltersVisible, dismissTransientPanels, setActiveEcoPanel),
+    },
+    {
+        key: 'air',
+        label: 'Въздух',
+        icon: 'cloud-outline',
+        active: allowEcoActionHighlight && activeEcoPanel === 'air',
+        onPress: () => openEcoPanel('air', setActiveTab, setMapFiltersVisible, dismissTransientPanels, setActiveEcoPanel),
+    },
+    {
+        key: 'containers',
+        label: 'Контейнери',
+        icon: 'trash-outline',
+        active: allowEcoActionHighlight && activeEcoPanel === 'containers',
+        onPress: () => openEcoPanel('containers', setActiveTab, setMapFiltersVisible, dismissTransientPanels, setActiveEcoPanel),
     },
 ];

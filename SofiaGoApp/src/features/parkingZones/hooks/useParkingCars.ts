@@ -7,6 +7,7 @@ import {
     setDefaultParkingCar as setDefaultParkingCarEntry,
     updateParkingCar as updateParkingCarEntry,
     type ParkingCar,
+    type ParkingCarPlateKind,
 } from '../../../services/parkingCars';
 
 export function useParkingCars() {
@@ -23,8 +24,8 @@ export function useParkingCars() {
         void refresh().finally(() => setLoading(false));
     }, [refresh]);
 
-    const addCar = useCallback(async (value: string, name?: string) => {
-        const nextCars = await addParkingCarEntry(value, name);
+    const addCar = useCallback(async (value: string, name?: string, plateKind: ParkingCarPlateKind = 'bg') => {
+        const nextCars = await addParkingCarEntry(value, name, plateKind);
         setCars(nextCars);
         return nextCars;
     }, []);
@@ -41,8 +42,8 @@ export function useParkingCars() {
         return nextCars;
     }, []);
 
-    const updateCar = useCallback(async (id: string, plate: string, name?: string) => {
-        const nextCars = await updateParkingCarEntry(id, plate, name);
+    const updateCar = useCallback(async (id: string, plate: string, name?: string, plateKind: ParkingCarPlateKind = 'bg') => {
+        const nextCars = await updateParkingCarEntry(id, plate, name, plateKind);
         setCars(nextCars);
         return nextCars;
     }, []);

@@ -133,6 +133,7 @@ export const useMapStopVehicleActions = ({
                     selectedStopName: stop.name,
                     selectedLines,
                 });
+                Alert.alert('Добавено', 'Спирката е добавена в Места.');
             } catch {
                 Alert.alert('Грешка', 'Неуспешно добавяне на спирката в Моите места.');
             } finally {

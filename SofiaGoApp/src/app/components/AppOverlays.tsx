@@ -1,6 +1,7 @@
 import NearbyScreen from '../../screens/NearbyScreen';
 import SchedulesScreen from '../../screens/SchedulesScreen';
 import TripPlannerScreen from '../../screens/TripPlannerScreen';
+import { EcoDatasetScreen } from '../../features/eco/components/EcoDatasetScreen';
 import { ParkingCarsScreen } from '../../features/parkingZones/components/ParkingCarsScreen';
 import { ParkingLotsScreen } from '../../features/parkingZones/components/ParkingLotsModal';
 import { ParkingPaymentScreen } from '../../features/parkingZones/components/ParkingPaymentScreen';
@@ -11,12 +12,15 @@ import type { SavedTripPlannerRoute } from '../../services/savedTripRoutes';
 import type { TripLocation } from '../../services/transit';
 import type { RouteSelection } from '../../types/routes';
 import type { TripRouteGeoJSON } from '../../features/tripPlanner/utils/routeGeoJson';
+import type { EcoActionKey } from '../../features/eco/types';
 import { AppOverlayCard } from './AppOverlayCard';
 
 type AppOverlaysProps = {
+    activeEcoPanel: EcoActionKey | null;
     activeTab: 'map' | 'schedules' | 'planner' | 'nearby';
     focusedParkingZoneFeatureId: string | null;
     onCloseNearby: () => void;
+    onCloseEcoPanel: () => void;
     onCloseParkingCars: () => void;
     onCloseParkingLots: () => void;
     onCloseParkingPayment: () => void;
@@ -32,6 +36,7 @@ type AppOverlaysProps = {
         currentLongitude?: number | null,
     ) => void;
     onOpenRoute: (route: RouteSelection) => void;
+    onShowEcoParkOnMap: (parkId: string, bbox: [number, number, number, number]) => void;
     onShowParkingZoneOnMap: (zoneFeatureId: string) => void;
     onShowPlannerRoute: (route: TripRouteGeoJSON) => void;
     parkingCars: {
@@ -57,9 +62,11 @@ type AppOverlaysProps = {
 };
 
 export const AppOverlays = ({
+    activeEcoPanel,
     activeTab,
     focusedParkingZoneFeatureId,
     onCloseNearby,
+    onCloseEcoPanel,
     onCloseParkingCars,
     onCloseParkingLots,
     onCloseParkingPayment,
@@ -70,6 +77,7 @@ export const AppOverlays = ({
     onOpenManageCars,
     onOpenPlannerWithCoordinates,
     onOpenRoute,
+    onShowEcoParkOnMap,
     onShowParkingZoneOnMap,
     onShowPlannerRoute,
     parkingCars,
@@ -87,6 +95,17 @@ export const AppOverlays = ({
     plannerVisible,
 }: AppOverlaysProps) => (
     <>
+        <AppOverlayCard visible={activeTab === 'map' && !!activeEcoPanel} onClose={onCloseEcoPanel} cardSize="schedules">
+            {activeEcoPanel ? (
+                <EcoDatasetScreen
+                    activeDataset={activeEcoPanel}
+                    onClose={onCloseEcoPanel}
+                    onOpenPlannerWithCoordinates={onOpenPlannerWithCoordinates}
+                    onShowParkOnMap={onShowEcoParkOnMap}
+                />
+            ) : null}
+        </AppOverlayCard>
+
         <AppOverlayCard visible={activeTab === 'schedules'} onClose={onCloseSchedules} cardSize="schedules">
             <SchedulesScreen
                 onOpenRoute={onOpenRoute}

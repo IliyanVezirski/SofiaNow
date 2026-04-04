@@ -1,5 +1,5 @@
 import { CYRILLIC_PLATE_REGEX, MAX_PARKING_CAR_NAME_LENGTH, PLATE_SEPARATOR_REGEX } from './constants';
-import type { ParkingCar, ParkingCarPlateValidationResult } from './types';
+import type { ParkingCar, ParkingCarPlateKind, ParkingCarPlateValidationResult } from './types';
 
 export const sortParkingCars = (cars: ParkingCar[]) => [...cars].sort((left, right) => {
     if (left.isDefault !== right.isDefault) {
@@ -20,7 +20,15 @@ export const ensureDefaultParkingCar = (cars: ParkingCar[]) => {
     return cars;
 };
 
-export const formatParkingCarDisplayPlate = (plate: string) => {
+export const getParkingCarPlateKindLabel = (plateKind: ParkingCarPlateKind) => (
+    plateKind === 'foreign' ? 'Чуждестранен номер' : 'Български номер'
+);
+
+export const formatParkingCarDisplayPlate = (plate: string, plateKind: ParkingCarPlateKind = 'bg') => {
+    if (plateKind === 'foreign') {
+        return plate;
+    }
+
     const standardMatch = /^([A-Z]{1,2})(\d{4})([A-Z]{1,3})$/.exec(plate);
     if (standardMatch) {
         return `${standardMatch[1]} ${standardMatch[2]} ${standardMatch[3]}`;
@@ -49,19 +57,47 @@ export const sanitizeParkingCarName = (value: string) => {
     return normalizedName;
 };
 
-export const normalizeParkingCarPlate = (value: string) => String(value || '').trim().toUpperCase();
+export const normalizeParkingCarPlate = (value: string, plateKind: ParkingCarPlateKind = 'bg') => (
+    plateKind === 'foreign'
+        ? String(value || '').trim()
+        : String(value || '').trim().toUpperCase()
+);
 
-export const validateParkingCarPlate = (value: string): ParkingCarPlateValidationResult => {
+export const validateParkingCarPlate = (
+    value: string,
+    plateKind: ParkingCarPlateKind = 'bg',
+): ParkingCarPlateValidationResult => {
     const rawValue = String(value || '').trim();
-    const normalizedPlate = normalizeParkingCarPlate(rawValue);
-    const displayPlate = formatParkingCarDisplayPlate(normalizedPlate);
+    const normalizedPlate = normalizeParkingCarPlate(rawValue, plateKind);
+    const displayPlate = formatParkingCarDisplayPlate(normalizedPlate, plateKind);
 
     if (!rawValue) {
         return {
             isValid: false,
             normalizedPlate,
             displayPlate,
+            plateKind,
             error: 'Въведи регистрационен номер.',
+        };
+    }
+
+    if (plateKind === 'foreign') {
+        if (normalizedPlate.length < 3) {
+            return {
+                isValid: false,
+                normalizedPlate,
+                displayPlate,
+                plateKind,
+                error: 'Въведи пълния номер така, както е на колата.',
+            };
+        }
+
+        return {
+            isValid: true,
+            normalizedPlate,
+            displayPlate,
+            plateKind,
+            error: null,
         };
     }
 
@@ -70,6 +106,7 @@ export const validateParkingCarPlate = (value: string): ParkingCarPlateValidatio
             isValid: false,
             normalizedPlate,
             displayPlate,
+            plateKind,
             error: 'Номерът трябва да е без интервали, тирета и точки.',
         };
     }
@@ -79,6 +116,7 @@ export const validateParkingCarPlate = (value: string): ParkingCarPlateValidatio
             isValid: false,
             normalizedPlate,
             displayPlate,
+            plateKind,
             error: 'Използвай латински букви, а не кирилица.',
         };
     }
@@ -88,6 +126,7 @@ export const validateParkingCarPlate = (value: string): ParkingCarPlateValidatio
             isValid: false,
             normalizedPlate,
             displayPlate,
+            plateKind,
             error: 'Позволени са само латински букви и цифри.',
         };
     }
@@ -97,6 +136,7 @@ export const validateParkingCarPlate = (value: string): ParkingCarPlateValidatio
             isValid: false,
             normalizedPlate,
             displayPlate,
+            plateKind,
             error: 'Номерът трябва да съдържа и букви, и цифри.',
         };
     }
@@ -106,6 +146,7 @@ export const validateParkingCarPlate = (value: string): ParkingCarPlateValidatio
             isValid: false,
             normalizedPlate,
             displayPlate,
+            plateKind,
             error: 'Буквите трябва да са латински - XX9999XX',
         };
     }
@@ -114,6 +155,7 @@ export const validateParkingCarPlate = (value: string): ParkingCarPlateValidatio
         isValid: true,
         normalizedPlate,
         displayPlate,
+        plateKind,
         error: null,
     };
 };
@@ -126,7 +168,8 @@ export const normalizeStoredParkingCar = (value: unknown): ParkingCar | null => 
     const entry = value as Record<string, unknown>;
     const id = typeof entry.id === 'string' ? entry.id : '';
     const plate = typeof entry.plate === 'string' ? entry.plate : '';
-    const validation = validateParkingCarPlate(plate);
+    const plateKind: ParkingCarPlateKind = entry.plateKind === 'foreign' ? 'foreign' : 'bg';
+    const validation = validateParkingCarPlate(plate, plateKind);
 
     if (!id || !validation.isValid) {
         return null;
@@ -136,7 +179,8 @@ export const normalizeStoredParkingCar = (value: unknown): ParkingCar | null => 
         id,
         name: typeof entry.name === 'string' ? normalizeParkingCarName(entry.name).slice(0, MAX_PARKING_CAR_NAME_LENGTH) || null : null,
         plate: validation.normalizedPlate,
-        displayPlate: formatParkingCarDisplayPlate(validation.normalizedPlate),
+        displayPlate: formatParkingCarDisplayPlate(validation.normalizedPlate, validation.plateKind),
+        plateKind: validation.plateKind,
         isDefault: entry.isDefault === true,
         createdAt: typeof entry.createdAt === 'number' && Number.isFinite(entry.createdAt) ? entry.createdAt : Date.now(),
     };

@@ -321,6 +321,10 @@ interface MapScreenProps {
     dismissTransientPanelsToken?: number;
     onFocusStopHandled?: () => void;
     onBuildRouteFromCoordinate?: (dstLat: number, dstLon: number, curLat?: number, curLon?: number) => void;
+    focusedEcoParkId?: string | null;
+    focusEcoParkBounds?: { ne: [number, number]; sw: [number, number] } | null;
+    focusEcoParkToken?: number;
+    onClearFocusedEcoPark?: () => void;
 }
 
 export default function MapScreen({

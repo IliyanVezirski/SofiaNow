@@ -9,6 +9,7 @@ type Props = {
     filterPanelOpaque: boolean;
     googleShowTraffic: boolean;
     isActive: boolean;
+    isEcoMode: boolean;
     isParkingMode: boolean;
     isTransitMode: boolean;
     mapExperienceMode: MapExperienceMode;
@@ -39,6 +40,7 @@ export function MapFloatingControls({
     filterPanelOpaque,
     googleShowTraffic,
     isActive,
+    isEcoMode,
     isParkingMode,
     isTransitMode,
     mapExperienceMode,
@@ -238,7 +240,7 @@ export function MapFloatingControls({
             </View>
 
             <View style={[styles.floatingRowWrap, { bottom: bottomOffset }]}>
-                {isTransitMode && showReminderButton ? (
+                {isTransitMode && showReminderButton && !isEcoMode ? (
                     <ReminderCenterButton inline transparent opaque={filterPanelOpaque} onOpenSavedTripRoute={onOpenSavedTripRoute} />
                 ) : null}
                 {isActive && showRecenterButton ? (

@@ -32,7 +32,7 @@ export const PARKING_SMS_OPTIONS: ParkingSmsOption[] = [
 
 export const getParkingSmsOption = (zoneId: ParkingSmsZoneId) => PARKING_SMS_OPTIONS.find((option) => option.id === zoneId) || PARKING_SMS_OPTIONS[0];
 
-const normalizeParkingSmsBody = (plate: string) => String(plate || '').trim().toUpperCase();
+const normalizeParkingSmsBody = (plate: string) => String(plate || '').trim();
 
 export const buildParkingSmsUrl = (zoneId: ParkingSmsZoneId, plate: string) => {
     const option = getParkingSmsOption(zoneId);

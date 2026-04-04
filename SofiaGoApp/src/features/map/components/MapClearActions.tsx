@@ -65,7 +65,7 @@ export function MapClearActions({
 const styles = StyleSheet.create({
     clearRouteButton: {
         position: 'absolute',
-        left: 16,
+        right: 16,
         backgroundColor: 'rgba(255,255,255,0.92)',
         width: 36,
         height: 36,
