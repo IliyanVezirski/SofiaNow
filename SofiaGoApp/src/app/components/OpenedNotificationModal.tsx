@@ -1,7 +1,8 @@
-import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import type { OpenedNotification } from '../types';
 import { extractDelayHighlight } from '../utils/notifications';
+import { handleRemindAgainFromNotification } from '../../services/notifications';
 
 type Props = {
     openedNotification: OpenedNotification | null;
@@ -46,17 +47,41 @@ export function OpenedNotificationModal({ openedNotification, onClose, onShowRou
                         ) : null}
                         {notificationBodyParts.after}
                     </Text>
-                    {openedNotification?.canShowRoute ? (
-                        <TouchableOpacity
-                            style={styles.notificationModalAction}
-                            onPress={() => {
-                                const favoriteId = openedNotification.favoriteId;
-                                onClose();
-                                onShowRoute(favoriteId);
-                            }}
-                        >
-                            <Text style={styles.notificationModalActionText}>Покажи маршрута</Text>
-                        </TouchableOpacity>
+                    {openedNotification?.canRemindAgain || openedNotification?.canShowRoute ? (
+                        <View style={styles.notificationModalActions}>
+                            {openedNotification?.canRemindAgain ? (
+                                <TouchableOpacity
+                                    style={styles.notificationModalAction}
+                                    onPress={() => {
+                                        const reminderData = openedNotification.reminderData;
+                                        if (!reminderData) {
+                                            return;
+                                        }
+
+                                        onClose();
+                                        void handleRemindAgainFromNotification(reminderData).then((result) => {
+                                            Alert.alert(result.ok ? 'Готово' : 'Грешка', result.message);
+                                        }).catch(() => {
+                                            Alert.alert('Грешка', 'Неуспешно подновяване на напомнянето.');
+                                        });
+                                    }}
+                                >
+                                    <Text style={styles.notificationModalActionText}>Напомни пак</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                            {openedNotification?.canShowRoute ? (
+                                <TouchableOpacity
+                                    style={styles.notificationModalAction}
+                                    onPress={() => {
+                                        const favoriteId = openedNotification.favoriteId;
+                                        onClose();
+                                        onShowRoute(favoriteId);
+                                    }}
+                                >
+                                    <Text style={styles.notificationModalActionText}>Покажи маршрута</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                        </View>
                     ) : null}
                 </View>
             </View>
@@ -127,8 +152,11 @@ const styles = StyleSheet.create({
         color: '#2563EB',
         fontWeight: '800',
     },
-    notificationModalAction: {
+    notificationModalActions: {
         marginTop: 16,
+        gap: 10,
+    },
+    notificationModalAction: {
         borderRadius: 14,
         backgroundColor: '#0F766E',
         paddingVertical: 12,

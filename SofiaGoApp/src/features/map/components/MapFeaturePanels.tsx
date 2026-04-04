@@ -52,6 +52,9 @@ type Props = {
     onSelectStopResult: (result: CentralSearchResult) => void;
     onShowFavoriteRouteOnMap: (route: any) => void;
     onSelectedStopPlaceAction: () => void;
+    onSelectedStopNavigateAction: () => void;
+    onSelectedStopEtaVehicleAction: (eta: any) => void;
+    hasLiveVehicleForEta: (eta: any) => boolean;
     onSelectedVehicleClose: () => void;
     onSelectedVehicleLoadRoute: () => void;
     onTransitDroppedPinBuildRoute?: () => void;
@@ -121,6 +124,9 @@ export function MapFeaturePanels({
     onSelectStopResult,
     onShowFavoriteRouteOnMap,
     onSelectedStopPlaceAction,
+    onSelectedStopNavigateAction,
+    onSelectedStopEtaVehicleAction,
+    hasLiveVehicleForEta,
     onSelectedVehicleClose,
     onSelectedVehicleLoadRoute,
     onTransitDroppedPinBuildRoute,
@@ -278,6 +284,9 @@ export function MapFeaturePanels({
                     onOpenSchedule={schedule.openStopSchedule}
                     onOpenSavedTripRoute={onOpenSavedTripRoute}
                     onPlaceAction={onSelectedStopPlaceAction}
+                    onNavigateAction={onSelectedStopNavigateAction}
+                    onEtaVehicleAction={onSelectedStopEtaVehicleAction}
+                    hasLiveVehicleForEta={hasLiveVehicleForEta}
                     placeSaved={selectedStopMatchingFavorite}
                     placeSubmitting={selectedStopPlaceSubmitting}
                 />

@@ -50,6 +50,9 @@ export default function App() {
           focusStopCoordinate={appFlow.focusStopCoordinate}
           focusStopId={appFlow.focusStopId}
           onFocusStopHandled={appFlow.clearFocusedStop}
+          focusVehicleCoordinate={appFlow.focusVehicleCoordinate}
+          focusVehicleId={appFlow.focusVehicleId}
+          onFocusVehicleHandled={appFlow.clearFocusedVehicle}
           focusedEcoParkId={appFlow.focusedEcoParkId}
           focusedParkingZoneFeatureId={appFlow.focusedParkingZoneFeatureId}
           focusEcoParkBounds={appFlow.focusEcoParkBounds}
@@ -84,6 +87,7 @@ export default function App() {
           onClosePlanner={() => appFlow.setActiveTab('map')}
           onCloseSchedules={() => appFlow.setActiveTab('map')}
           onFocusStop={appFlow.handleFocusStop}
+          onFocusVehicle={appFlow.handleFocusVehicle}
           onOpenManageCars={appFlow.handleOpenManageCars}
           onOpenPlannerWithCoordinates={appFlow.handleOpenPlannerWithCoordinates}
           onOpenRoute={(route) => {

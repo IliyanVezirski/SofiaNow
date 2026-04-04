@@ -25,6 +25,7 @@
     "expo-background-task": "~55.0.10",
     "expo-dev-client": "~55.0.19",
     "expo-font": "~55.0.4",
+    "expo-keep-awake": "~55.0.6",
     "expo-localization": "~55.0.9",
     "expo-location": "~55.1.4",
     "expo-navigation-bar": "~55.0.9",

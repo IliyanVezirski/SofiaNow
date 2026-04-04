@@ -23,6 +23,8 @@ export const useAppFlow = () => {
     const [mapFiltersVisible, setMapFiltersVisible] = useState(false);
     const [focusStopCoordinate, setFocusStopCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
     const [focusStopId, setFocusStopId] = useState<string | null>(null);
+    const [focusVehicleCoordinate, setFocusVehicleCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [focusVehicleId, setFocusVehicleId] = useState<string | null>(null);
     const [mapExperienceMode, setMapExperienceMode] = useState<MapExperienceMode>(DEFAULT_MAP_EXPERIENCE_MODE);
     const [focusedEcoParkId, setFocusedEcoParkId] = useState<string | null>(null);
     const [focusEcoParkBounds, setFocusEcoParkBounds] = useState<MapCameraBounds | null>(null);
@@ -61,6 +63,17 @@ export const useAppFlow = () => {
         setFocusStopCoordinate(null);
     }, []);
 
+    const handleFocusVehicle = useCallback((vehicleId: string, latitude: number, longitude: number) => {
+        setFocusVehicleId(vehicleId);
+        setFocusVehicleCoordinate({ latitude, longitude });
+        setActiveTab('map');
+    }, []);
+
+    const clearFocusedVehicle = useCallback(() => {
+        setFocusVehicleId(null);
+        setFocusVehicleCoordinate(null);
+    }, []);
+
     const handleShowEcoParkOnMap = useCallback((
         parkId: string,
         bbox: [number, number, number, number],
@@ -96,14 +109,18 @@ export const useAppFlow = () => {
 
     return {
         activeTab,
+        clearFocusedVehicle,
         clearFocusedStop,
         focusEcoParkBounds,
         focusEcoParkToken,
         focusStopCoordinate,
         focusStopId,
+        focusVehicleCoordinate,
+        focusVehicleId,
         focusedEcoParkId,
         handleClearFocusedEcoPark,
         handleFocusStop,
+        handleFocusVehicle,
         handleShowEcoParkOnMap,
         mapExperienceMode,
         mapFiltersVisible,

@@ -9,6 +9,8 @@ export type OpenedNotification = {
     body: string;
     favoriteId: string | null;
     canShowRoute: boolean;
+    canRemindAgain: boolean;
+    reminderData: Record<string, unknown> | null;
 };
 
 export type HomeActionButton = {

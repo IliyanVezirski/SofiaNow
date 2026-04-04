@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
-    ActivityIndicator, BackHandler, ScrollView, StyleSheet,
+    ActivityIndicator, Alert, BackHandler, ScrollView, StyleSheet,
     Text, TouchableOpacity, View
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,11 +9,13 @@ import { fetchAllStops, Stop } from '../services/stopsApi';
 import { haversineDistanceMeters, resolveDisplayLineType, getVehicleAccentColor, getVehicleIconName, formatUnixTime, VehicleType } from '../services/transitUtils';
 import { fetchStopEtas, StopEta } from '../services/cgmApi';
 import { fetchFullStopSchedule } from '../services/cgmApi/stopEtas';
+import { fetchVehiclesNearby } from '../services/cgmApi/vehiclePositions';
 import { getEtaScheduleInfo } from '../services/cgmApi/schedules';
 import { formatMinSinceMidnight } from '../features/map/constants';
 import { ArrivalReminderControl } from '../features/notifications/components/ArrivalReminderControl';
 import { useFavorites } from '../features/favorites/hooks/useFavorites';
 import { openExternalWalkingNavigation } from '../services/externalNavigation';
+import { findBestLiveVehicleForEta } from '../features/vehicles/utils/liveVehicleMatching';
 
 // ── Walking‑radius config ──
 const RADIUS_BUCKETS = [
@@ -70,12 +72,13 @@ const StopTypeBadge = ({ stop }: { stop: Stop }) => {
 interface NearbyScreenProps {
     onClose?: () => void;
     onFocusStop?: (stopId: string, latitude: number, longitude: number) => void;
+    onFocusVehicle?: (vehicleId: string, latitude: number, longitude: number) => void;
     onBuildRoute?: (dstLat: number, dstLon: number, curLat?: number, curLon?: number) => void;
 }
 
 type BucketedStop = Stop & { distanceMeters: number };
 
-export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: NearbyScreenProps) {
+export default function NearbyScreen({ onClose, onFocusStop, onFocusVehicle, onBuildRoute }: NearbyScreenProps) {
     const { location } = useUserLocation();
     const favorites = useFavorites();
     const [allStops, setAllStops] = useState<Stop[]>([]);
@@ -200,8 +203,29 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                 selectedStopName: stop.name,
                 selectedLines,
             });
+            Alert.alert('Добавено', 'Спирката е добавена в Места.');
         })();
     }, [favorites]);
+
+    const handleEtaVehicleFocus = useCallback(async (stop: Stop, eta: StopEta) => {
+        if (!location || !onFocusVehicle) {
+            return;
+        }
+
+        try {
+            const nearbyVehicles = await fetchVehiclesNearby(stop.latitude, stop.longitude);
+            const matchingVehicle = findBestLiveVehicleForEta(eta, stop, nearbyVehicles);
+            if (!matchingVehicle) {
+                Alert.alert('Няма данни', 'В момента няма налично live превозно средство за това пристигане.');
+                return;
+            }
+
+            onFocusVehicle(matchingVehicle.id, matchingVehicle.latitude, matchingVehicle.longitude);
+            onClose?.();
+        } catch {
+            Alert.alert('Грешка', 'Неуспешно зареждане на live превозните средства.');
+        }
+    }, [location, onClose, onFocusVehicle]);
 
     // ── Render ──
     if (loading || !location) {
@@ -332,7 +356,21 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                                             <Text style={st.etaClock}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
                                                                         </View>
 
-                                                                        <ArrivalReminderControl stopName={stop.name} eta={eta} compact />
+                                                                        <View style={st.etaActions}>
+                                                                            <View style={st.etaActionCell}>
+                                                                                <ArrivalReminderControl stopName={stop.name} eta={eta} compact />
+                                                                            </View>
+                                                                            {onFocusVehicle ? (
+                                                                                <View style={st.etaActionCell}>
+                                                                                    <TouchableOpacity
+                                                                                        style={st.etaVehicleBtn}
+                                                                                        onPress={() => { void handleEtaVehicleFocus(stop, eta); }}
+                                                                                    >
+                                                                                        <Ionicons name="bus-outline" size={13} color="#64748B" />
+                                                                                    </TouchableOpacity>
+                                                                                </View>
+                                                                            ) : null}
+                                                                        </View>
                                                                     </View>
                                                                 );
                                                             })
@@ -458,6 +496,26 @@ const st = StyleSheet.create({
     etaTimeWrap: { minWidth: 64, alignItems: 'flex-end', marginLeft: 2, flexShrink: 0 },
     etaTime: { color: '#1D4ED8', fontSize: 13, fontWeight: '800' },
     etaClock: { color: '#94A3B8', fontSize: 11, marginTop: 1, textAlign: 'right' },
+    etaActions: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+    },
+    etaActionCell: {
+        width: 34,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    etaVehicleBtn: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(248,250,252,0.72)',
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
+    },
 
     emptyText: { color: '#94A3B8', fontSize: 12, fontStyle: 'italic', padding: 8 },
 });

@@ -16,6 +16,9 @@ interface Props {
     onOpenSchedule: (stopId: string, stopName: string) => void;
     onOpenSavedTripRoute?: (routeId: string) => void | Promise<void>;
     onPlaceAction?: () => void;
+    onNavigateAction?: () => void;
+    onEtaVehicleAction?: (eta: StopEta) => void;
+    hasLiveVehicleForEta?: (eta: StopEta) => boolean;
     placeSaved?: boolean;
     placeSubmitting?: boolean;
 }
@@ -27,6 +30,9 @@ export const StopInfoPanel: React.FC<Props> = ({
     onOpenSchedule,
     onOpenSavedTripRoute,
     onPlaceAction,
+    onNavigateAction,
+    onEtaVehicleAction,
+    hasLiveVehicleForEta,
     placeSaved = false,
     placeSubmitting = false,
 }) => {
@@ -55,9 +61,17 @@ export const StopInfoPanel: React.FC<Props> = ({
                     <View style={styles.header}>
                         <Ionicons name="flag-outline" size={16} color="#0F172A" style={{ marginRight: 4 }} />
                         <Text style={styles.title}>{stop.name}</Text>
+                        {onNavigateAction ? (
+                            <TouchableOpacity
+                                style={styles.iconBtn}
+                                onPress={onNavigateAction}
+                            >
+                                <Ionicons name="navigate-outline" size={15} color="#64748B" />
+                            </TouchableOpacity>
+                        ) : null}
                         {onPlaceAction ? (
                             <TouchableOpacity
-                                style={[styles.placeIconBtn, placeSaved && styles.placeIconBtnSaved]}
+                                style={[styles.iconBtn, placeSaved && styles.placeIconBtnSaved]}
                                 onPress={onPlaceAction}
                                 disabled={placeSubmitting}
                             >
@@ -110,7 +124,21 @@ export const StopInfoPanel: React.FC<Props> = ({
                                         <View style={styles.etaSideWrap}>
                                             <Text style={styles.etaMinutesText}>{eta.minutesAway} мин</Text>
                                             <Text style={styles.etaClockText}>{formatUnixTime(eta.arrivalTimestamp)}</Text>
-                                            <ArrivalReminderControl stopName={stop.name} eta={eta} compact />
+                                            <View style={styles.etaActionRow}>
+                                                {onEtaVehicleAction ? (
+                                                    <TouchableOpacity
+                                                        style={styles.etaVehicleBtn}
+                                                        onPress={() => onEtaVehicleAction(eta)}
+                                                    >
+                                                        <Ionicons
+                                                            name="bus-outline"
+                                                            size={13}
+                                                            color="#64748B"
+                                                        />
+                                                    </TouchableOpacity>
+                                                ) : null}
+                                                <ArrivalReminderControl stopName={stop.name} eta={eta} compact />
+                                            </View>
                                         </View>
                                     </View>
                                 </View>
@@ -160,7 +188,7 @@ const styles = StyleSheet.create({
     },
     header: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 4 },
     title: { flex: 1, minWidth: 0, fontSize: 16, fontWeight: '700', color: '#0F172A' },
-    placeIconBtn: {
+    iconBtn: {
         width: 30,
         height: 30,
         borderRadius: 15,
@@ -223,6 +251,12 @@ const styles = StyleSheet.create({
         alignItems: 'flex-end',
         flexShrink: 0,
     },
+    etaActionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: 6,
+    },
     etaMinutesText: {
         fontSize: 13,
         fontWeight: '800',
@@ -230,9 +264,19 @@ const styles = StyleSheet.create({
     },
     etaClockText: {
         marginTop: 2,
-        marginBottom: 6,
+        marginBottom: 4,
         fontSize: 11,
         color: '#94A3B8',
+    },
+    etaVehicleBtn: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(248,250,252,0.72)',
+        borderWidth: 1,
+        borderColor: 'rgba(226,232,240,0.72)',
     },
     delayLateText: {
         color: '#DC2626',

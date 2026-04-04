@@ -1,8 +1,12 @@
-import { Alert } from 'react-native';
+import { Alert, InteractionManager } from 'react-native';
 import { useCallback, useMemo, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import { fetchTripDelay } from '../../../services/cgmApi/delays';
+import { fetchVehiclesNearby } from '../../../services/cgmApi/vehiclePositions';
+import { openExternalWalkingNavigation } from '../../../services/externalNavigation';
+import { findBestLiveVehicleForEta } from '../../vehicles/utils/liveVehicleMatching';
 import type { Vehicle } from '../../../types/vehicles';
+import type { StopEta } from '../../../types/vehicles';
 
 type FavoritePlaceLike = {
     id?: string | null;
@@ -21,6 +25,11 @@ type SelectedStopLike = {
 };
 
 type Params = {
+    focusOnCoordinate?: (latitude: number, longitude: number) => void;
+    currentLocation?: {
+        latitude: number;
+        longitude: number;
+    } | null;
     favorites: {
         favoritePlaces: FavoritePlaceLike[];
         removeFavorite: (favoriteId: string) => Promise<unknown>;
@@ -33,6 +42,8 @@ type Params = {
             selectedLines?: Array<{ line: string; enabled: boolean; notificationsEnabled: boolean }>;
         }) => Promise<unknown>;
     };
+    onBuildRouteFromCoordinate?: (dstLat: number, dstLon: number, curLat?: number, curLon?: number) => void;
+    renderedDisplayVehicles: Vehicle[];
     selectedStop: {
         selectedStop: SelectedStopLike | null;
         closeSelectedStop: () => void;
@@ -48,7 +59,11 @@ type Params = {
 };
 
 export const useMapStopVehicleActions = ({
+    focusOnCoordinate,
+    currentLocation,
     favorites,
+    onBuildRouteFromCoordinate,
+    renderedDisplayVehicles,
     selectedStop,
     selectedVehicle,
     selectedVehicleIdRef,
@@ -100,6 +115,29 @@ export const useMapStopVehicleActions = ({
 
     const [selectedStopPlaceSubmitting, setSelectedStopPlaceSubmitting] = useState(false);
 
+    const resolveLiveVehicleForEta = useCallback((eta: StopEta) => {
+        const stop = selectedStop.selectedStop;
+        return findBestLiveVehicleForEta(eta, stop, renderedDisplayVehicles);
+    }, [renderedDisplayVehicles, selectedStop.selectedStop]);
+
+    const selectVehicle = useCallback((vehicle: Vehicle, closeSelectedStop = false) => {
+        const runSelection = () => {
+            selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+            selectedVehicleIdRef.current = vehicle.id;
+            setSelectedVehicleId(vehicle.id);
+            focusOnCoordinate?.(vehicle.latitude, vehicle.longitude);
+            void fetchTripDelay(vehicle.tripId).then((delay) => {
+                setVehicleDelays((previous) => ({ ...previous, [vehicle.id]: delay }));
+            });
+        };
+
+        if (closeSelectedStop) {
+            selectedStop.closeSelectedStop();
+        }
+
+        InteractionManager.runAfterInteractions(runSelection);
+    }, [focusOnCoordinate, selectedStop, selectedVehicleIdRef, setSelectedVehicleId, setVehicleDelays]);
+
     const handleSelectedStopPlaceAction = useCallback(() => {
         const stop = selectedStop.selectedStop;
         if (!stop || selectedStopPlaceSubmitting) {
@@ -142,24 +180,72 @@ export const useMapStopVehicleActions = ({
         })();
     }, [favorites, selectedStop, selectedStopMatchingFavorite, selectedStopPlaceSubmitting]);
 
+    const handleSelectedStopNavigateAction = useCallback(() => {
+        const stop = selectedStop.selectedStop;
+        if (!stop) {
+            return;
+        }
+
+        if (onBuildRouteFromCoordinate) {
+            onBuildRouteFromCoordinate(
+                stop.latitude,
+                stop.longitude,
+                currentLocation?.latitude,
+                currentLocation?.longitude,
+            );
+            selectedStop.closeSelectedStop();
+            return;
+        }
+
+        void (async () => {
+            const opened = await openExternalWalkingNavigation(stop.latitude, stop.longitude);
+            if (!opened) {
+                Alert.alert('Грешка', 'Неуспешно отваряне на навигацията.');
+            }
+        })();
+    }, [currentLocation?.latitude, currentLocation?.longitude, onBuildRouteFromCoordinate, selectedStop.selectedStop]);
+
+    const hasLiveVehicleForEta = useCallback((eta: StopEta) => (
+        !!resolveLiveVehicleForEta(eta) || !!selectedStop.selectedStop
+    ), [resolveLiveVehicleForEta, selectedStop.selectedStop]);
+
+    const handleSelectedStopEtaVehicleAction = useCallback((eta: StopEta) => {
+        const stop = selectedStop.selectedStop;
+        const matchingVehicle = resolveLiveVehicleForEta(eta);
+        if (matchingVehicle) {
+            selectVehicle(matchingVehicle, true);
+            return;
+        }
+
+        if (!stop) {
+            Alert.alert('Няма данни', 'В момента няма налично live превозно средство за това пристигане.');
+            return;
+        }
+
+        void (async () => {
+            try {
+                const nearbyVehicles = await fetchVehiclesNearby(stop.latitude, stop.longitude);
+                const fallbackVehicle = findBestLiveVehicleForEta(eta, stop, nearbyVehicles);
+
+                if (!fallbackVehicle) {
+                    Alert.alert('Няма данни', 'В момента няма налично live превозно средство за това пристигане.');
+                    return;
+                }
+
+                selectVehicle(fallbackVehicle, true);
+            } catch {
+                Alert.alert('Грешка', 'Неуспешно зареждане на live превозните средства.');
+            }
+        })();
+    }, [resolveLiveVehicleForEta, selectVehicle, selectedStop.selectedStop]);
+
     const handleTrackedVehicleSelect = useCallback((vehicle: Vehicle) => {
-        selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
-        selectedVehicleIdRef.current = vehicle.id;
-        setSelectedVehicleId(vehicle.id);
-        selectedStop.closeSelectedStop();
-        void fetchTripDelay(vehicle.tripId).then((delay) => {
-            setVehicleDelays((previous) => ({ ...previous, [vehicle.id]: delay }));
-        });
-    }, [selectedStop, selectedVehicleIdRef, setSelectedVehicleId, setVehicleDelays]);
+        selectVehicle(vehicle, true);
+    }, [selectVehicle]);
 
     const handleVehicleSelect = useCallback((vehicle: Vehicle) => {
-        selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
-        selectedVehicleIdRef.current = vehicle.id;
-        setSelectedVehicleId(vehicle.id);
-        void fetchTripDelay(vehicle.tripId).then((delay) => {
-            setVehicleDelays((previous) => ({ ...previous, [vehicle.id]: delay }));
-        });
-    }, [selectedStop, selectedVehicleIdRef, setSelectedVehicleId, setVehicleDelays]);
+        selectVehicle(vehicle);
+    }, [selectVehicle]);
 
     const handleVehicleDeselect = useCallback((vehicleId: string) => {
         if (selectedVehicleIdRef.current !== vehicleId) {
@@ -185,11 +271,14 @@ export const useMapStopVehicleActions = ({
 
     return {
         handleSelectedStopPlaceAction,
+        handleSelectedStopNavigateAction,
+        handleSelectedStopEtaVehicleAction,
         handleTrackedVehicleSelect,
         handleVehicleDeselect,
         handleVehiclePanelClose,
         handleVehiclePanelLoadRoute,
         handleVehicleSelect,
+        hasLiveVehicleForEta,
         selectedStopMatchingFavorite,
         selectedStopPlaceSubmitting,
     };

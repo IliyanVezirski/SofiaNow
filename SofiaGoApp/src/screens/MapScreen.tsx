@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Platform, StatusBar, StyleSheet, View, TouchableOpacity, LogBox, useWindowDimensions } from 'react-native';
 import GoogleMapView, { Region } from 'react-native-maps';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 import { RouteSelection } from '../types/routes';
 import { type Stop, fetchStopById, getVehicleAccentColor, getVehicleIcon, type TripLocation } from '../services/transit';
 import { fetchVehiclesInBounds } from '../services/cgmApi/vehiclePositions';
 import { fetchStopEtas } from '../services/cgmApi/stopEtas';
+import { fetchTripDelay } from '../services/cgmApi/delays';
 import { getEtaScheduleInfo } from '../services/cgmApi/schedules';
 import { TripRouteGeoJSON, TripRouteStop } from '../features/tripPlanner/utils/routeGeoJson';
 
@@ -88,6 +90,7 @@ import { INITIAL_ZOOM_LEVEL, MAP_STYLE, MAX_RENDERED_STOPS, MAX_RENDERED_VEHICLE
 const SUPPORT_REVOLUT_URL = 'https://buymeacoffee.com/iliqnski90c';
 const GOOGLE_FIT_EDGE_PADDING = { top: 60, right: 60, bottom: 80, left: 60 };
 const USER_LOCATION_REGION_DELTA = DEFAULT_BOUNDS_DELTA / 5;
+const MAP_FOLLOW_KEEP_AWAKE_TAG = 'map-user-follow';
 
 interface MapScreenProps {
     parkingLots?: ParkingLot[];
@@ -107,6 +110,9 @@ interface MapScreenProps {
     focusStopCoordinate?: { latitude: number; longitude: number } | null;
     focusStopId?: string | null;
     onFocusStopHandled?: () => void;
+    focusVehicleCoordinate?: { latitude: number; longitude: number } | null;
+    focusVehicleId?: string | null;
+    onFocusVehicleHandled?: () => void;
     focusedEcoParkId?: string | null;
     focusEcoParkBounds?: { ne: [number, number]; sw: [number, number] } | null;
     focusEcoParkToken?: number;
@@ -143,6 +149,9 @@ export default function MapScreen({
     focusStopCoordinate,
     focusStopId,
     onFocusStopHandled,
+    focusVehicleCoordinate,
+    focusVehicleId,
+    onFocusVehicleHandled,
     focusedEcoParkId,
     focusEcoParkBounds,
     focusEcoParkToken,
@@ -312,6 +321,19 @@ export default function MapScreen({
     const [displayMarkerKindsByStopId, setDisplayMarkerKindsByStopId] = useState<Record<string, RenderedStopMarkerKind[]>>({});
 
     useEffect(() => {
+        if (!isUserFollowLocked) {
+            void deactivateKeepAwake(MAP_FOLLOW_KEEP_AWAKE_TAG).catch(() => {});
+            return;
+        }
+
+        void activateKeepAwakeAsync(MAP_FOLLOW_KEEP_AWAKE_TAG).catch(() => {});
+
+        return () => {
+            void deactivateKeepAwake(MAP_FOLLOW_KEEP_AWAKE_TAG).catch(() => {});
+        };
+    }, [isUserFollowLocked]);
+
+    useEffect(() => {
         if (hasTripRoute && !previousHasTripRouteRef.current) {
             tripRouteViewportSnapshotRef.current = {
                 bounds: bounds.mapBounds ? { ...bounds.mapBounds } : null,
@@ -392,6 +414,46 @@ export default function MapScreen({
         [selectedVehicle, stopsHook.searchableStopNameByIdMap, stopsHook.stopNameByIdMap],
     );
 
+    useEffect(() => {
+        if (!focusVehicleCoordinate) {
+            return;
+        }
+
+        camera.focusOnCoordinate(focusVehicleCoordinate.latitude, focusVehicleCoordinate.longitude);
+        bounds.setMapBounds(createFallbackBounds(focusVehicleCoordinate.latitude, focusVehicleCoordinate.longitude));
+    }, [bounds, camera, focusVehicleCoordinate]);
+
+    useEffect(() => {
+        if (!focusVehicleCoordinate || !focusVehicleId) {
+            return;
+        }
+
+        onFocusVehicleHandled?.();
+        selectedStop.closeSelectedStop();
+        selectedStop.selectedStopIdRef.current = null;
+        selectedVehicleIdRef.current = focusVehicleId;
+        setSelectedVehicleId(focusVehicleId);
+        setDroppedPin(null);
+        selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+    }, [
+        focusVehicleCoordinate,
+        focusVehicleId,
+        onFocusVehicleHandled,
+        selectedStop,
+        selectedVehicleIdRef,
+        setDroppedPin,
+    ]);
+
+    useEffect(() => {
+        if (!selectedVehicle?.id || vehicleDelays[selectedVehicle.id] !== undefined) {
+            return;
+        }
+
+        void fetchTripDelay(selectedVehicle.tripId).then((delay) => {
+            setVehicleDelays((previous) => ({ ...previous, [selectedVehicle.id]: delay }));
+        });
+    }, [selectedVehicle?.id, selectedVehicle?.tripId, vehicleDelays, setVehicleDelays]);
+
     // ── Google Maps vehicle marker pool (prevents ghost markers on Android) ──
     const googleVehicleSlotMapRef = useRef(new Map<string, number>());
     const googleVehicleSlotReverseRef = useRef(new Map<number, string>());
@@ -470,7 +532,14 @@ export default function MapScreen({
     const droppedPinAlreadySaved = droppedPinFavoriteState.alreadySaved;
     const droppedPinMatchingFavoriteId = droppedPinFavoriteState.matchingFavoriteId;
     const stopVehicleActions = useMapStopVehicleActions({
+        focusOnCoordinate: camera.focusOnCoordinate,
+        currentLocation: location ? {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+        } : null,
         favorites,
+        onBuildRouteFromCoordinate,
+        renderedDisplayVehicles: animation.renderedDisplayVehicles,
         selectedStop,
         selectedVehicle,
         selectedVehicleIdRef,
@@ -1117,7 +1186,10 @@ export default function MapScreen({
                     onShowFavoriteRouteOnMap={(route) => {
                         onShowTripRoute?.(route, 'favorites');
                     }}
+                    hasLiveVehicleForEta={stopVehicleActions.hasLiveVehicleForEta}
+                    onSelectedStopEtaVehicleAction={stopVehicleActions.handleSelectedStopEtaVehicleAction}
                     onSelectedStopPlaceAction={stopVehicleActions.handleSelectedStopPlaceAction}
+                    onSelectedStopNavigateAction={stopVehicleActions.handleSelectedStopNavigateAction}
                     onSelectedVehicleClose={stopVehicleActions.handleVehiclePanelClose}
                     onSelectedVehicleLoadRoute={stopVehicleActions.handleVehiclePanelLoadRoute}
                     onOpenSavedTripRoute={onOpenSavedTripRoute}

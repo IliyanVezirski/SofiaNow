@@ -144,7 +144,7 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
         }
 
         if (state === 'expired') {
-            return 'Изтекло';
+            return 'Изключено';
         }
 
         return 'Активно';
@@ -498,7 +498,7 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
                                 );
                             })}
 
-                            {historyReminders.length ? <Text style={styles.sectionTitle}>История</Text> : null}
+                            {historyReminders.length ? <Text style={styles.sectionTitle}>Изключени / История</Text> : null}
                             {historyReminders.map((entry) => {
                                 const isSubmitting = submittingHistoryId === entry.historyId;
                                 const isDeleting = deletingHistoryId === entry.historyId;

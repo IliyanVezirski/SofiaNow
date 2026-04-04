@@ -54,6 +54,7 @@ import {
 
 let notificationsInitialized = false;
 const DEFAULT_NOTIFICATION_SOUND = Platform.OS === 'ios' ? 'default' : undefined;
+const REMIND_AGAIN_DEFAULT_MINUTES = 2;
 
 let refreshTransitArrivalRemindersPromise: Promise<TransitArrivalReminderRefreshResult> | null = null;
 
@@ -363,13 +364,15 @@ export const handleRemindAgainFromNotification = async (
     }
 
     const nowUnix = Math.floor(Date.now() / 1000);
-    const remindAtUnix = nowUnix + 60;
-    const remainingMinutes = Math.max(1, Math.round((matchingEta.arrivalTimestamp - remindAtUnix) / 60));
+    const secondsUntilArrival = matchingEta.arrivalTimestamp - nowUnix;
+    const remindAgainMinutes = secondsUntilArrival <= 90
+        ? 1
+        : REMIND_AGAIN_DEFAULT_MINUTES;
 
     return scheduleTransitArrivalReminder({
         stopName: stopName || matchingEta.stopId,
         eta: matchingEta,
-        minutesBefore: remainingMinutes,
+        minutesBefore: remindAgainMinutes,
         delayFollowUpEnabled: false,
     });
 };
@@ -552,10 +555,12 @@ export const refreshTransitArrivalReminders = async (): Promise<TransitArrivalRe
         for (const reminder of reminders) {
             const primaryAlreadyDue = reminder.remindAtTimestamp <= nowUnix;
             if (primaryAlreadyDue) {
-                nextReminders.push({
-                    ...reminder,
-                    lastRefreshUnix: nowUnix,
-                });
+                await Notifications.cancelScheduledNotificationAsync(reminder.notificationId);
+                if (reminder.followUpNotificationId) {
+                    await Notifications.cancelScheduledNotificationAsync(reminder.followUpNotificationId);
+                }
+                await syncReminderHistoryEntry(reminder, 'expired');
+                removedCount += 1;
                 continue;
             }
 

@@ -5,6 +5,7 @@ import {
     loadParkingCars,
     removeParkingCar as removeParkingCarEntry,
     setDefaultParkingCar as setDefaultParkingCarEntry,
+    subscribeToParkingCarChanges,
     updateParkingCar as updateParkingCarEntry,
     type ParkingCar,
     type ParkingCarPlateKind,
@@ -22,6 +23,10 @@ export function useParkingCars() {
 
     useEffect(() => {
         void refresh().finally(() => setLoading(false));
+        const unsubscribe = subscribeToParkingCarChanges(() => {
+            void refresh();
+        });
+        return unsubscribe;
     }, [refresh]);
 
     const addCar = useCallback(async (value: string, name?: string, plateKind: ParkingCarPlateKind = 'bg') => {

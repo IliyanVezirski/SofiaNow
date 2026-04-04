@@ -37,6 +37,7 @@ export const useAppNotifications = ({
         const { title, body } = response.notification.request.content;
         const data = response.notification.request.content.data as { favoriteId?: unknown; type?: unknown } | undefined;
         const favoriteId = data?.type === 'favorite-commute-route' ? String(data.favoriteId || '').trim() : '';
+        const canRemindAgain = data?.type === 'transit-arrival-reminder';
 
         setOpenedNotification({
             id: identifier,
@@ -44,6 +45,8 @@ export const useAppNotifications = ({
             body: String(body || 'Няма допълнителна информация.'),
             favoriteId: favoriteId || null,
             canShowRoute: !!favoriteId,
+            canRemindAgain,
+            reminderData: canRemindAgain ? { ...(data ?? {}) } : null,
         });
     }, [setOpenedNotification]);
 

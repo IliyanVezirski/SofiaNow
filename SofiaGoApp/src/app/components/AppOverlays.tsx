@@ -28,6 +28,7 @@ type AppOverlaysProps = {
     onClosePlanner: () => void;
     onCloseSchedules: () => void;
     onFocusStop: (stopId: string, latitude: number, longitude: number) => void;
+    onFocusVehicle: (vehicleId: string, latitude: number, longitude: number) => void;
     onOpenManageCars: () => void;
     onOpenPlannerWithCoordinates: (
         destinationLatitude: number,
@@ -74,6 +75,7 @@ export const AppOverlays = ({
     onClosePlanner,
     onCloseSchedules,
     onFocusStop,
+    onFocusVehicle,
     onOpenManageCars,
     onOpenPlannerWithCoordinates,
     onOpenRoute,
@@ -131,6 +133,7 @@ export const AppOverlays = ({
             <NearbyScreen
                 onClose={onCloseNearby}
                 onFocusStop={onFocusStop}
+                onFocusVehicle={onFocusVehicle}
                 onBuildRoute={onOpenPlannerWithCoordinates}
             />
         </AppOverlayCard>

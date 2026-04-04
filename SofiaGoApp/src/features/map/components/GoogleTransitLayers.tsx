@@ -96,6 +96,12 @@ export const GoogleTransitLayers: React.FC<GoogleTransitLayersProps> = ({
         () => getLiveVehicleRouteCoordinates(vehicleRouteCoords, trackedVehicle),
         [trackedVehicle, vehicleRouteCoords],
     );
+    const shouldShowLineRouteVehicles = showVehicles
+        && shouldRenderTransitViewportData
+        && (
+            !hasActiveRouteOverlay
+            || (!!routeGeometry && !hasTripRoute && !vehicleRouteHasRoute && vehicleRouteStops.length === 0)
+        );
 
     if (!isTransitMode) {
         return (
@@ -258,7 +264,7 @@ export const GoogleTransitLayers: React.FC<GoogleTransitLayersProps> = ({
                 </Marker>
             ) : null}
 
-            {!hasActiveRouteOverlay && showVehicles && shouldRenderTransitViewportData && googleVehiclePool.map((vehicle, slotIndex) => (
+            {shouldShowLineRouteVehicles && googleVehiclePool.map((vehicle, slotIndex) => (
                 <Marker
                     key={`vpool-${slotIndex}-${vehicle?.renderId ?? 'empty'}`}
                     identifier={`vpool-${slotIndex}`}

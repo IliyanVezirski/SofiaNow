@@ -94,6 +94,12 @@ export const MapboxTransitLayers: React.FC<MapboxTransitLayersProps> = ({
         () => getLiveVehicleRouteCoordinates(vehicleRouteCoords, trackedVehicle),
         [trackedVehicle, vehicleRouteCoords],
     );
+    const shouldShowLineRouteVehicles = showVehicles
+        && shouldRenderTransitViewportData
+        && (
+            !hasActiveRouteOverlay
+            || (!!routeGeometry && !hasTripRoute && !vehicleRouteHasRoute && vehicleRouteStops.length === 0)
+        );
 
     if (!isTransitMode) {
         return (
@@ -293,7 +299,7 @@ export const MapboxTransitLayers: React.FC<MapboxTransitLayersProps> = ({
                 </MapboxGL.PointAnnotation>
             ) : null}
 
-            {!hasActiveRouteOverlay && showVehicles && shouldRenderTransitViewportData && renderedDisplayVehicles.map((vehicle) => (
+            {shouldShowLineRouteVehicles && renderedDisplayVehicles.map((vehicle) => (
                 <MapboxGL.PointAnnotation
                     key={vehicle.renderId}
                     id={vehicle.renderId}

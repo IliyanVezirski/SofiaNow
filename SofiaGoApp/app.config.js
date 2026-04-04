@@ -7,7 +7,7 @@ export default {
     owner: 'iliaynski90',
     name: IS_DEV ? 'SofiaNow (Dev)' : 'SofiaNow',
     slug: 'SofiaGoApp',
-    version: '1.1.4',
+    version: '1.1.5',
     orientation: 'portrait',
     icon: './assets/app-icon-new.png',
     userInterfaceStyle: 'light',
@@ -37,7 +37,7 @@ export default {
         color: '#0F766E',
       },
       package: 'com.iliyanvezirski.SofiaGoApp',
-      versionCode: 7,
+      versionCode: 8,
     },
     web: {
       favicon: './assets/app-icon-new.png',

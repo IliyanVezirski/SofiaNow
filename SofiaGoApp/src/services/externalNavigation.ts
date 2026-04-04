@@ -1,13 +1,6 @@
-import { Alert, Linking, Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 
 export type ExternalNavigationMode = 'driving' | 'walking';
-
-type NavigationChoice = {
-    key: 'google' | 'waze';
-    label: string;
-    appUrl: string | null;
-    fallbackUrl: string;
-};
 
 const buildGoogleMapsWebUrl = (
     latitude: number,
@@ -15,33 +8,42 @@ const buildGoogleMapsWebUrl = (
     mode: ExternalNavigationMode,
 ) => `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&travelmode=${mode}`;
 
-const buildGoogleMapsAppUrl = (
+const buildAppleMapsUrl = (
     latitude: number,
     longitude: number,
     mode: ExternalNavigationMode,
-) => Platform.select({
-    ios: `comgooglemaps://?daddr=${latitude},${longitude}&directionsmode=${mode}`,
-    android: `google.navigation:q=${latitude},${longitude}&mode=${mode === 'walking' ? 'w' : 'd'}`,
-    default: null,
-});
+) => `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=${mode === 'walking' ? 'w' : 'd'}`;
 
-const buildWazeWebUrl = (latitude: number, longitude: number) =>
-    `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`;
+const buildAndroidSystemNavigationUrl = (
+    latitude: number,
+    longitude: number,
+) => `geo:0,0?q=${latitude},${longitude}`;
 
-const buildWazeAppUrl = (latitude: number, longitude: number) =>
-    `waze://?ll=${latitude},${longitude}&navigate=yes`;
+const buildSystemNavigationUrl = (
+    latitude: number,
+    longitude: number,
+    mode: ExternalNavigationMode,
+) => {
+    if (Platform.OS === 'android') {
+        return buildAndroidSystemNavigationUrl(latitude, longitude);
+    }
 
-const openNavigationChoice = async ({ appUrl, fallbackUrl }: NavigationChoice): Promise<boolean> => {
-    if (appUrl) {
-        try {
-            const supported = await Linking.canOpenURL(appUrl);
-            if (supported) {
-                await Linking.openURL(appUrl);
-                return true;
-            }
-        } catch {
-            // Fall through to the universal fallback URL below.
+    if (Platform.OS === 'ios') {
+        return buildAppleMapsUrl(latitude, longitude, mode);
+    }
+
+    return buildGoogleMapsWebUrl(latitude, longitude, mode);
+};
+
+const openUrlWithFallback = async (primaryUrl: string, fallbackUrl: string): Promise<boolean> => {
+    try {
+        const supported = await Linking.canOpenURL(primaryUrl);
+        if (supported) {
+            await Linking.openURL(primaryUrl);
+            return true;
         }
+    } catch {
+        // Fall through to fallback.
     }
 
     try {
@@ -52,75 +54,15 @@ const openNavigationChoice = async ({ appUrl, fallbackUrl }: NavigationChoice): 
     }
 };
 
-const buildNavigationChoices = (
-    latitude: number,
-    longitude: number,
-    mode: ExternalNavigationMode,
-): NavigationChoice[] => [
-    {
-        key: 'google',
-        label: mode === 'walking' ? 'Google Maps' : 'Google Maps',
-        appUrl: buildGoogleMapsAppUrl(latitude, longitude, mode),
-        fallbackUrl: buildGoogleMapsWebUrl(latitude, longitude, mode),
-    },
-    {
-        key: 'waze',
-        label: mode === 'walking' ? 'Waze (кола)' : 'Waze',
-        appUrl: buildWazeAppUrl(latitude, longitude),
-        fallbackUrl: buildWazeWebUrl(latitude, longitude),
-    },
-];
-
-const getNavigationPromptMessage = (mode: ExternalNavigationMode) => (
-    mode === 'walking'
-        ? 'Google Maps ще отвори пешеходен маршрут, а Waze ще отвори автомобилна навигация.'
-        : 'Избери приложение за навигация.'
-);
-
 export const openExternalNavigation = async (
     latitude: number,
     longitude: number,
     mode: ExternalNavigationMode = 'driving',
 ): Promise<boolean> => {
-    const choices = buildNavigationChoices(latitude, longitude, mode);
+    const systemUrl = buildSystemNavigationUrl(latitude, longitude, mode);
+    const fallbackUrl = buildGoogleMapsWebUrl(latitude, longitude, mode);
 
-    if (Platform.OS === 'web') {
-        return openNavigationChoice(choices[0]);
-    }
-
-    return new Promise<boolean>((resolve) => {
-        let settled = false;
-        const resolveOnce = (value: boolean) => {
-            if (settled) {
-                return;
-            }
-
-            settled = true;
-            resolve(value);
-        };
-
-        Alert.alert(
-            'Навигация',
-            getNavigationPromptMessage(mode),
-            [
-                ...choices.map((choice) => ({
-                    text: choice.label,
-                    onPress: () => {
-                        void openNavigationChoice(choice).then(resolveOnce);
-                    },
-                })),
-                {
-                    text: 'Отказ',
-                    style: 'cancel' as const,
-                    onPress: () => resolveOnce(false),
-                },
-            ],
-            {
-                cancelable: true,
-                onDismiss: () => resolveOnce(false),
-            },
-        );
-    });
+    return openUrlWithFallback(systemUrl, fallbackUrl);
 };
 
 export const openExternalDrivingNavigation = async (latitude: number, longitude: number): Promise<boolean> => (

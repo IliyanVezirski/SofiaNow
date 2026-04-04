@@ -123,9 +123,9 @@ export const ensureReminderHistoryCoverage = async (reminders: StoredTransitArri
 export const pruneExpiredReminders = async () => {
     const nowUnix = Math.floor(Date.now() / 1000);
     const reminders = await ensureReminderHistoryCoverage(await readStoredReminders());
-    const activeReminders = reminders.filter((item) => item.arrivalTimestamp > nowUnix);
+    const activeReminders = reminders.filter((item) => item.remindAtTimestamp > nowUnix);
     if (activeReminders.length !== reminders.length) {
-        await Promise.all(reminders.filter((item) => item.arrivalTimestamp <= nowUnix).map(async (item) => {
+        await Promise.all(reminders.filter((item) => item.remindAtTimestamp <= nowUnix).map(async (item) => {
             if (item.followUpNotificationId) {
                 await Notifications.cancelScheduledNotificationAsync(item.followUpNotificationId);
             }
