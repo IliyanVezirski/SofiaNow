@@ -36,7 +36,7 @@ const parseArgs = () => {
 const fetchJson = async (url) => {
     const response = await fetch(url, {
         headers: {
-            'User-Agent': 'SofiaGo parking zone generator',
+            'User-Agent': 'SofiaNow parking zone generator',
             Accept: 'application/json,text/plain,*/*',
         },
     });

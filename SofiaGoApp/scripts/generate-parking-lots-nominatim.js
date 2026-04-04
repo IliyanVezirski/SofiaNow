@@ -17,7 +17,7 @@ async function nominatimSearch(query, limit = 50) {
         `&viewbox=23.20,42.79,23.50,42.60&bounded=1&extratags=1`;
     console.log(`Searching: "${query}"...`);
     const resp = await fetch(url, {
-        headers: { 'User-Agent': 'SofiaGoApp/1.0 parking-data-gen' }
+        headers: { 'User-Agent': 'SofiaNow/1.0 parking-data-gen' }
     });
     if (!resp.ok) throw new Error(`Nominatim error: ${resp.status}`);
     return resp.json();

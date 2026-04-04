@@ -169,5 +169,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`SofiaGo web server running at http://localhost:${PORT}`);
+  console.log(`SofiaNow web server running at http://localhost:${PORT}`);
 });

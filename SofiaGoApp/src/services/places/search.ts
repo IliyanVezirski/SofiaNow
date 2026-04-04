@@ -102,7 +102,7 @@ const searchNominatimLocations = async (query: string, limit: number): Promise<P
     });
 
     const response = await fetch(`${NOMINATIM_SEARCH_URL}?${params.toString()}`, {
-        headers: { 'User-Agent': 'SofiaNow/1.0 (transit app for Sofia; https://github.com/nickkostov/SofiaGo)' },
+        headers: { 'User-Agent': 'SofiaNow/1.0 (transit app for Sofia)' },
     });
     if (!response.ok) {
         throw new Error(`Location search failed with status ${response.status}`);
