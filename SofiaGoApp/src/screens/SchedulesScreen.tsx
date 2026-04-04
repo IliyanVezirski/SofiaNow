@@ -56,6 +56,52 @@ const getDirectionDisplayLabel = (direction: LineRouteGeometry['directions'][num
     return direction.name || `Посока ${fallbackIndex + 1}`;
 };
 
+const splitStopIdParts = (value: string | null | undefined) => (
+    String(value || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+);
+
+const applyCanonicalStopCoordinates = (
+    geometry: LineRouteGeometry | null,
+    allStops: Stop[],
+): LineRouteGeometry | null => {
+    if (!geometry || !allStops.length) {
+        return geometry;
+    }
+
+    const stopByExactId = new Map(allStops.map((stop) => [stop.id, stop]));
+    const stopByPartId = new Map<string, Stop>();
+    allStops.forEach((stop) => {
+        splitStopIdParts(stop.id).forEach((part) => {
+            if (!stopByPartId.has(part)) {
+                stopByPartId.set(part, stop);
+            }
+        });
+    });
+
+    return {
+        ...geometry,
+        directions: geometry.directions.map((direction) => ({
+            ...direction,
+            stops: direction.stops.map((stop) => {
+                const canonicalStop = stopByExactId.get(stop.id) || stopByPartId.get(stop.id);
+                if (!canonicalStop) {
+                    return stop;
+                }
+
+                return {
+                    ...stop,
+                    name: canonicalStop.name || stop.name,
+                    latitude: canonicalStop.latitude,
+                    longitude: canonicalStop.longitude,
+                };
+            }),
+        })),
+    };
+};
+
 interface SchedulesScreenProps {
     onOpenRoute?: (route: RouteSelection) => void;
     onClose?: () => void;
@@ -207,6 +253,19 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
             .filter((s) => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q))
             .slice(0, 30);
     }, [allStops, stopSearch, selectedLine]);
+
+    const canonicalStopById = useMemo(() => {
+        const result = new Map<string, Stop>();
+        allStops.forEach((stop) => {
+            result.set(stop.id, stop);
+            splitStopIdParts(stop.id).forEach((part) => {
+                if (!result.has(part)) {
+                    result.set(part, stop);
+                }
+            });
+        });
+        return result;
+    }, [allStops]);
 
     const handleStopPress = (
         stopId: string,
@@ -384,13 +443,13 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                 }
             }
             if (!cancelled) {
-                setRouteGeometry(route);
+                setRouteGeometry(applyCanonicalStopCoordinates(route, allStops));
                 setRouteLoading(false);
             }
         })();
 
         return () => { cancelled = true; };
-    }, [selectedLine]);
+    }, [allStops, selectedLine]);
 
     if (loading) {
         return (
@@ -597,7 +656,12 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                                                                     {onFocusStop && (
                                                                         <TouchableOpacity
                                                                             style={styles.stopMapBtn}
-                                                                            onPress={() => onFocusStop(stop.id, stop.latitude, stop.longitude)}
+                                                                            onPress={() => {
+                                                                                const canonicalStop = canonicalStopById.get(stop.id);
+                                                                                const latitude = canonicalStop?.latitude ?? stop.latitude;
+                                                                                const longitude = canonicalStop?.longitude ?? stop.longitude;
+                                                                                onFocusStop(stop.id, latitude, longitude);
+                                                                            }}
                                                                         >
                                                                                 <Ionicons name="locate-outline" size={14} color="#475569" />
                                                                         </TouchableOpacity>

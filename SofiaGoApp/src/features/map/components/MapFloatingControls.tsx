@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 import { ReminderCenterButton } from '../../notifications/components/ReminderCenterButton';
-import { ScheduledSmsBadge } from '../../parkingZones/components/ScheduledSmsBadge';
 import { MapModeSwitcher, type MapExperienceMode } from './MapModeSwitcher';
 
 type Props = {
@@ -20,15 +19,18 @@ type Props = {
     onOpenSavedTripRoute?: (routeId: string) => void | Promise<void>;
     onRecenterLongPress: () => void;
     onRecenterPress: () => void;
-    onScheduledSmsPress: () => void;
     onSupportProject: () => void;
     onToggleGoogleTraffic: () => void;
     onToggleSettings: () => void;
+    onToggleStops: () => void;
+    onToggleVehicles: () => void;
     settingsExpanded: boolean;
     settingsSlideAnim: Animated.Value;
     showMapLayerToggle: boolean;
     showReminderButton: boolean;
     showRecenterButton: boolean;
+    showStops: boolean;
+    showVehicles: boolean;
     userFollowLocked: boolean;
 };
 
@@ -47,26 +49,34 @@ export function MapFloatingControls({
     onOpenSavedTripRoute,
     onRecenterLongPress,
     onRecenterPress,
-    onScheduledSmsPress,
     onSupportProject,
     onToggleGoogleTraffic,
     onToggleSettings,
+    onToggleStops,
+    onToggleVehicles,
     settingsExpanded,
     settingsSlideAnim,
     showMapLayerToggle,
     showReminderButton,
     showRecenterButton,
+    showStops,
+    showVehicles,
     userFollowLocked,
 }: Props) {
+    const mapLayerOptionCount = isTransitMode ? 3 : 1;
+    const mapLayerPillWidth = 36 + (mapLayerOptionCount * 34);
+    const mapLayerHiddenOffset = -(mapLayerPillWidth - 18);
+    const mapLayerTouchAreaWidth = mapLayerPillWidth - 10;
+
     return (
         <>
             <MapModeSwitcher activeMode={mapExperienceMode} onSelectMode={onMapExperienceModeChange} />
 
             {showMapLayerToggle ? (
-                <View style={[styles.mapLayerPillWrap, { bottom: bottomOffset + 58 }]}>
+                <View style={[styles.mapLayerPillWrap, { bottom: bottomOffset + 58, width: mapLayerPillWidth }]}>
                     <View
                         pointerEvents={mapLayerPillExpanded ? 'none' : 'auto'}
-                        style={styles.mapLayerCollapsedTouchAreaWrap}
+                        style={[styles.mapLayerCollapsedTouchAreaWrap, { width: mapLayerTouchAreaWidth }]}
                     >
                         <TouchableOpacity
                             activeOpacity={1}
@@ -78,8 +88,9 @@ export function MapFloatingControls({
                     <Animated.View
                         style={[
                             styles.mapLayerCombinedPill,
+                            { width: mapLayerPillWidth },
                             {
-                                transform: [{ translateX: mapLayerPillAnim.interpolate({ inputRange: [0, 1], outputRange: [-52, 0] }) }],
+                                transform: [{ translateX: mapLayerPillAnim.interpolate({ inputRange: [0, 1], outputRange: [mapLayerHiddenOffset, 0] }) }],
                             },
                         ]}
                     >
@@ -92,6 +103,30 @@ export function MapFloatingControls({
                                 },
                             ]}
                         >
+                            {isTransitMode ? (
+                                <TouchableOpacity
+                                    activeOpacity={0.82}
+                                    disabled={!mapLayerPillExpanded}
+                                    onPress={onToggleStops}
+                                    style={styles.mapLayerSlotButton}
+                                >
+                                    <View style={[styles.mapLayerOptionIconBadge, showStops && styles.mapLayerOptionIconBadgeActive]}>
+                                        <Ionicons name="flag-outline" size={17} color={showStops ? '#FFFFFF' : '#0F172A'} />
+                                    </View>
+                                </TouchableOpacity>
+                            ) : null}
+                            {isTransitMode ? (
+                                <TouchableOpacity
+                                    activeOpacity={0.82}
+                                    disabled={!mapLayerPillExpanded}
+                                    onPress={onToggleVehicles}
+                                    style={styles.mapLayerSlotButton}
+                                >
+                                    <View style={[styles.mapLayerOptionIconBadge, showVehicles && styles.mapLayerOptionIconBadgeActive]}>
+                                        <Ionicons name="bus-outline" size={17} color={showVehicles ? '#FFFFFF' : '#0F172A'} />
+                                    </View>
+                                </TouchableOpacity>
+                            ) : null}
                             <TouchableOpacity
                                 activeOpacity={0.82}
                                 disabled={!mapLayerPillExpanded}
@@ -141,10 +176,11 @@ export function MapFloatingControls({
                     style={[
                         styles.settingsCombinedPill,
                         {
-                            transform: [{ translateX: settingsSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [-76, 0] }) }],
+                            transform: [{ translateX: settingsSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [-42, 0] }) }],
                         },
                     ]}
                 >
+                    {/* TODO: временно скрит бутон за подкрепа
                     <Animated.View
                         pointerEvents={settingsExpanded ? 'auto' : 'none'}
                         style={[
@@ -166,6 +202,7 @@ export function MapFloatingControls({
                             </View>
                         </TouchableOpacity>
                     </Animated.View>
+                    */}
 
                     <TouchableOpacity
                         activeOpacity={0.82}
@@ -204,9 +241,6 @@ export function MapFloatingControls({
                 {isTransitMode && showReminderButton ? (
                     <ReminderCenterButton inline transparent opaque={filterPanelOpaque} onOpenSavedTripRoute={onOpenSavedTripRoute} />
                 ) : null}
-                {isParkingMode ? (
-                    <ScheduledSmsBadge transparent onPress={onScheduledSmsPress} />
-                ) : null}
                 {isActive && showRecenterButton ? (
                     <TouchableOpacity
                         style={[styles.recenterFloatingButton, userFollowLocked && styles.recenterFloatingButtonLocked]}
@@ -228,7 +262,7 @@ const styles = StyleSheet.create({
     settingsPillWrap: {
         position: 'absolute',
         left: 0,
-        width: 94,
+        width: 60,
         height: 48,
         zIndex: 2,
         elevation: 2,
@@ -247,7 +281,7 @@ const styles = StyleSheet.create({
         height: '100%',
     },
     settingsCombinedPill: {
-        width: 94,
+        width: 60,
         height: 48,
         borderTopRightRadius: 24,
         borderBottomRightRadius: 24,
@@ -348,7 +382,6 @@ const styles = StyleSheet.create({
     mapLayerPillWrap: {
         position: 'absolute',
         left: 0,
-        width: 70,
         height: 48,
         zIndex: 2,
         elevation: 2,
@@ -357,7 +390,6 @@ const styles = StyleSheet.create({
         position: 'absolute',
         left: 0,
         top: -10,
-        width: 128,
         height: 68,
         zIndex: 3,
         elevation: 3,
@@ -367,7 +399,6 @@ const styles = StyleSheet.create({
         height: '100%',
     },
     mapLayerCombinedPill: {
-        width: 70,
         height: 48,
         borderTopRightRadius: 24,
         borderBottomRightRadius: 24,

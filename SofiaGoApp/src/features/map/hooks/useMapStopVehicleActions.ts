@@ -6,6 +6,9 @@ import type { Vehicle } from '../../../types/vehicles';
 
 type FavoritePlaceLike = {
     id?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    name?: string | null;
     selectedStopId?: string | null;
 };
 
@@ -53,13 +56,46 @@ export const useMapStopVehicleActions = ({
     setVehicleDelays,
     vehicleRoute,
 }: Params) => {
+    const parseStopIdParts = (value?: string | null) => (
+        String(value || '')
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean)
+    );
+
+    const stopIdsMatch = (left?: string | null, right?: string | null) => {
+        const leftParts = parseStopIdParts(left);
+        const rightParts = parseStopIdParts(right);
+
+        if (!leftParts.length || !rightParts.length) {
+            return false;
+        }
+
+        const rightSet = new Set(rightParts);
+        return leftParts.some((part) => rightSet.has(part));
+    };
+
+    const stopCoordinatesMatch = (
+        favorite: FavoritePlaceLike,
+        stop: SelectedStopLike,
+        epsilon = 0.00001,
+    ) => (
+        Number.isFinite(favorite.latitude)
+        && Number.isFinite(favorite.longitude)
+        && Math.abs(Number(favorite.latitude) - stop.latitude) <= epsilon
+        && Math.abs(Number(favorite.longitude) - stop.longitude) <= epsilon
+    );
+
     const selectedStopMatchingFavorite = useMemo(() => {
         const stop = selectedStop.selectedStop;
         if (!stop) {
             return null;
         }
 
-        return favorites.favoritePlaces.find((favorite) => favorite.selectedStopId === stop.id) ?? null;
+        return favorites.favoritePlaces.find((favorite) => (
+            stopIdsMatch(favorite.selectedStopId, stop.id)
+            || stopCoordinatesMatch(favorite, stop)
+        )) ?? null;
     }, [favorites.favoritePlaces, selectedStop.selectedStop]);
 
     const [selectedStopPlaceSubmitting, setSelectedStopPlaceSubmitting] = useState(false);

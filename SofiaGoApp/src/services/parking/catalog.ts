@@ -94,7 +94,7 @@ async function fetchCatalogResponse(url: string) {
         return await fetch(url, {
             headers: {
                 Accept: 'application/json',
-                'User-Agent': 'SofiaGo/1.0 (parking catalog sync; https://github.com/IliyanVezirski/SofiaGo)',
+                'User-Agent': 'SofiaNow/1.0 (parking catalog sync; https://github.com/IliyanVezirski/SofiaGo)',
             },
             cache: 'no-store',
             signal: controller?.signal,

@@ -185,7 +185,7 @@ const getVehicleSvgIcon = (type: VehicleType) => {
 };
 
 const createVehicleMarkerIcon = (vehicle: Vehicle) => L.divIcon({
-    className: 'sofiago-vehicle-marker',
+    className: 'sofianow-vehicle-marker',
     html: `
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:78px;height:80px;">
             <div style="margin-bottom:2px;color:#111827;font-size:15px;font-weight:900;line-height:15px;text-shadow:-1px -1px 0 rgba(255,255,255,0.96), 1px -1px 0 rgba(255,255,255,0.96), -1px 1px 0 rgba(255,255,255,0.96), 1px 1px 0 rgba(255,255,255,0.96);">${vehicle.line}</div>
@@ -237,7 +237,7 @@ const createStopMarkerIcon = (stop: Stop, selected = false) => {
         : '<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:8px;background:#A7CFB3;border:1px solid rgba(255,255,255,0.95);box-shadow:0 2px 8px rgba(15,23,42,0.14);"></div>';
 
     return L.divIcon({
-        className: 'sofiago-stop-marker',
+        className: 'sofianow-stop-marker',
         html: `
             <div title="${stop.name} | ${summarizeStopDirections(stop, 1).replace('Посока: ', '')}" style="position:relative;display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:12px;background:transparent;">
                 ${selectionHalo}
@@ -250,7 +250,7 @@ const createStopMarkerIcon = (stop: Stop, selected = false) => {
 };
 
 const createRouteStopMarkerIcon = (name: string, index: number, accentColor: string) => L.divIcon({
-    className: 'sofiago-route-stop-marker',
+    className: 'sofianow-route-stop-marker',
     html: `
         <div title="${name}" style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:13px;border:2.5px solid ${accentColor};background:${accentColor};box-shadow:0 2px 8px rgba(17,24,39,0.28);font-size:11px;font-weight:700;line-height:11px;color:#FFFFFF;">
             ${index + 1}
@@ -293,7 +293,7 @@ const getDirectionArrowSamples = (coordinates: [number, number][], maxArrows = 1
 };
 
 const createDirectionArrowIcon = (accentColor: string, headingDegrees: number) => L.divIcon({
-    className: 'sofiago-direction-arrow',
+    className: 'sofianow-direction-arrow',
     html: `
         <div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;transform:rotate(${headingDegrees}deg);">
             <div style="font-size:18px;line-height:18px;color:${accentColor};font-weight:900;text-shadow:-1px -1px 0 rgba(255,255,255,0.95), 1px -1px 0 rgba(255,255,255,0.95), -1px 1px 0 rgba(255,255,255,0.95), 1px 1px 0 rgba(255,255,255,0.95);">▲</div>
@@ -304,7 +304,7 @@ const createDirectionArrowIcon = (accentColor: string, headingDegrees: number) =
 });
 
 const createSavedPinIcon = () => L.divIcon({
-    className: 'sofiago-saved-pin',
+    className: 'sofianow-saved-pin',
     html: `
         <div style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:17px;background:#FFFFFF;border:2px solid #DC2626;box-shadow:0 2px 8px rgba(220,38,38,0.35);font-size:18px;line-height:18px;">📍</div>
     `,
@@ -319,6 +319,7 @@ interface MapScreenProps {
     searchRequestToken?: number;
     favoritesRequestToken?: number;
     dismissTransientPanelsToken?: number;
+    onFocusStopHandled?: () => void;
     onBuildRouteFromCoordinate?: (dstLat: number, dstLon: number, curLat?: number, curLon?: number) => void;
 }
 

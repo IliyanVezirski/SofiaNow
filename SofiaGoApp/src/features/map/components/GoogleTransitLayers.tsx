@@ -12,6 +12,7 @@ import { getLiveVehicleRouteCoordinates } from '../utils/liveVehicleRoute';
 import { toMapCoordinate } from '../utils/mapScreen';
 import { mapLayerStyles } from './mapLayerStyles';
 import type { TripStopInfo, Vehicle } from '../../../types/vehicles';
+import type { RenderedStopMarker } from '../utils/derived';
 
 interface RenderedVehicle extends Vehicle {
     renderId: string;
@@ -33,7 +34,7 @@ interface RouteStopPreview {
 interface GoogleTransitLayersProps {
     currentLocation: { latitude: number; longitude: number } | null;
     droppedPin: { latitude: number; longitude: number } | null;
-    googleStopPool: Array<Stop | null>;
+    googleStopPool: Array<RenderedStopMarker | null>;
     googleVehiclePool: Array<RenderedVehicle | null>;
     googleWalkingRadiusLabels: GoogleWalkingRadiusLabel[];
     hasActiveRouteOverlay: boolean;
@@ -44,13 +45,15 @@ interface GoogleTransitLayersProps {
     routeGeometryVersion: number;
     selectedStopAnnotationId: string | null;
     shouldRenderTransitViewportData: boolean;
+    showStops: boolean;
+    showVehicles: boolean;
     tripPlannerRoute?: TripRouteGeoJSON | null;
     vehicleRouteCoords: [number, number][];
     vehicleRouteHasRoute: boolean;
     vehicleRouteStops: TripStopInfo[];
     vehicleRouteVehicleId: string | null;
     onRouteStopPress: (stop: RouteStopPreview, directionName: string, annotationId: string) => void | Promise<void>;
-    onStopPress: (stop: Stop) => void | Promise<void>;
+    onStopPress: (stop: RenderedStopMarker) => void | Promise<void>;
     onTrackedVehiclePress: (vehicle: RenderedVehicle) => void;
     onTripPlannerStopPress: (stop: TripRouteStop, index: number) => void | Promise<void>;
     onVehiclePress: (vehicle: RenderedVehicle) => void;
@@ -71,6 +74,8 @@ export const GoogleTransitLayers: React.FC<GoogleTransitLayersProps> = ({
     routeGeometryVersion,
     selectedStopAnnotationId,
     shouldRenderTransitViewportData,
+    showStops,
+    showVehicles,
     tripPlannerRoute,
     vehicleRouteCoords,
     vehicleRouteHasRoute,
@@ -110,7 +115,7 @@ export const GoogleTransitLayers: React.FC<GoogleTransitLayersProps> = ({
 
     return (
         <>
-            {!hasActiveRouteOverlay && shouldRenderTransitViewportData && currentLocation && [208, 416, 625].map((radiusMeters, index) => (
+            {!hasActiveRouteOverlay && showStops && shouldRenderTransitViewportData && currentLocation && [208, 416, 625].map((radiusMeters, index) => (
                 <GoogleCircle
                     key={`walk-radius-${radiusMeters}`}
                     center={currentLocation}
@@ -121,7 +126,7 @@ export const GoogleTransitLayers: React.FC<GoogleTransitLayersProps> = ({
                 />
             ))}
 
-            {!hasActiveRouteOverlay && shouldRenderTransitViewportData && googleWalkingRadiusLabels.map((item) => (
+            {!hasActiveRouteOverlay && showStops && shouldRenderTransitViewportData && googleWalkingRadiusLabels.map((item) => (
                 <Marker
                     key={item.key}
                     coordinate={item.coordinate}
@@ -134,25 +139,38 @@ export const GoogleTransitLayers: React.FC<GoogleTransitLayersProps> = ({
                 </Marker>
             ))}
 
-            {!hasActiveRouteOverlay && shouldRenderTransitViewportData && googleStopPool.map((stop, slotIndex) => (
-                <Marker
-                    key={`spool-${slotIndex}`}
-                    identifier={`spool-${slotIndex}`}
-                    coordinate={stop
-                        ? { latitude: stop.latitude, longitude: stop.longitude }
-                        : { latitude: 0, longitude: 0 }}
-                    anchor={{ x: 0.5, y: 0.5 }}
-                    opacity={stop ? 1 : 0}
-                    tracksViewChanges
-                    onPress={stop ? () => { void onStopPress(stop); } : undefined}
-                >
-                    {stop ? (
-                        <StopDot stop={stop} selected={selectedStopAnnotationId === `stop-${stop.id}`} />
-                    ) : (
-                        <View style={{ width: 1, height: 1 }} />
-                    )}
-                </Marker>
-            ))}
+            {!hasActiveRouteOverlay && showStops && shouldRenderTransitViewportData && googleStopPool.map((stop, slotIndex) => {
+                const isSelected = !!stop && (
+                    selectedStopAnnotationId === stop.id
+                    || selectedStopAnnotationId === `stop-${stop.sourceStop.id}`
+                );
+
+                return (
+                    <Marker
+                        key={`spool-${slotIndex}`}
+                        identifier={`spool-${slotIndex}`}
+                        coordinate={stop
+                            ? { latitude: stop.latitude, longitude: stop.longitude }
+                            : { latitude: 0, longitude: 0 }}
+                        anchor={{ x: 0.5, y: 0.5 }}
+                        opacity={stop ? 1 : 0}
+                        tracksViewChanges={false}
+                        onPress={stop ? () => { void onStopPress(stop); } : undefined}
+                    >
+                        {stop ? (
+                            <View collapsable={false} key={`${stop.id}-${isSelected ? 'selected' : 'idle'}`}>
+                                <StopDot stop={stop.sourceStop} markerKinds={stop.markerKinds} selected={isSelected} />
+                            </View>
+                        ) : (
+                            <View
+                                collapsable={false}
+                                pointerEvents="none"
+                                style={{ width: 2, height: 2, opacity: 0, backgroundColor: 'transparent' }}
+                            />
+                        )}
+                    </Marker>
+                );
+            })}
 
             {!hasTripRoute && routeGeometry?.directions.map((direction, index) => (
                 <React.Fragment key={`route-google-${routeGeometry.line}-${index}`}>
@@ -240,16 +258,16 @@ export const GoogleTransitLayers: React.FC<GoogleTransitLayersProps> = ({
                 </Marker>
             ) : null}
 
-            {!hasActiveRouteOverlay && shouldRenderTransitViewportData && googleVehiclePool.map((vehicle, slotIndex) => (
+            {!hasActiveRouteOverlay && showVehicles && shouldRenderTransitViewportData && googleVehiclePool.map((vehicle, slotIndex) => (
                 <Marker
-                    key={`vpool-${slotIndex}`}
+                    key={`vpool-${slotIndex}-${vehicle?.renderId ?? 'empty'}`}
                     identifier={`vpool-${slotIndex}`}
                     coordinate={vehicle
                         ? { latitude: vehicle.latitude, longitude: vehicle.longitude }
                         : { latitude: 0, longitude: 0 }}
                     anchor={{ x: 0.5, y: 0.5 }}
                     opacity={vehicle ? 1 : 0}
-                    tracksViewChanges
+                    tracksViewChanges={false}
                     onPress={vehicle ? () => { onVehiclePress(vehicle); } : undefined}
                 >
                     {vehicle ? (

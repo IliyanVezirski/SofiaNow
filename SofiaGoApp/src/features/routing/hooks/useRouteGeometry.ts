@@ -1,6 +1,127 @@
 import { useState, useEffect, useMemo } from 'react';
 import { LineRouteGeometry, fetchLineRouteGeometry, fetchLineRouteGeometryByRouteId } from '../../../services/stopsApi';
+import { getScheduleBasedDirections, resolveScheduleRouteId } from '../../../services/cgmApi';
+import { convertTripApiScheduleToRouteGeometry, fetchTripApiLineSchedule } from '../../../services/cgmApi/tripScheduleApi';
 import { RouteSelection } from '../../../types/routes';
+
+const applyTripApiStopCoordinates = (
+    geometry: LineRouteGeometry,
+    tripApiGeometry: LineRouteGeometry | null,
+): LineRouteGeometry => {
+    if (!tripApiGeometry?.directions.length) {
+        return geometry;
+    }
+
+    const stopCoordinateById = new Map<string, { latitude: number; longitude: number }>();
+    tripApiGeometry.directions.forEach((direction) => {
+        direction.stops.forEach((stop) => {
+            stopCoordinateById.set(stop.id, {
+                latitude: stop.latitude,
+                longitude: stop.longitude,
+            });
+        });
+    });
+
+    if (!stopCoordinateById.size) {
+        return geometry;
+    }
+
+    return {
+        ...geometry,
+        directions: geometry.directions.map((direction) => ({
+            ...direction,
+            stops: direction.stops.map((stop) => {
+                const tripApiCoordinates = stopCoordinateById.get(stop.id);
+                return tripApiCoordinates
+                    ? {
+                        ...stop,
+                        latitude: tripApiCoordinates.latitude,
+                        longitude: tripApiCoordinates.longitude,
+                    }
+                    : stop;
+            }),
+        })),
+    };
+};
+
+const getRouteGeometryWithFallback = async (
+    highlightedRoute: RouteSelection,
+): Promise<LineRouteGeometry | null> => {
+    let geometry = highlightedRoute.routeId
+        ? await fetchLineRouteGeometryByRouteId(highlightedRoute.routeId)
+        : await fetchLineRouteGeometry(highlightedRoute.line, highlightedRoute.type, highlightedRoute.isNight);
+
+    const effectiveScheduleRouteId = resolveScheduleRouteId(
+        highlightedRoute.line,
+        highlightedRoute.type,
+        highlightedRoute.routeId || '',
+    );
+    const scheduleDirections = effectiveScheduleRouteId
+        ? getScheduleBasedDirections(effectiveScheduleRouteId)
+        : [];
+    const tripApiSchedule = highlightedRoute.routeId
+        ? await fetchTripApiLineSchedule({
+            line: highlightedRoute.line,
+            routeId: highlightedRoute.routeId,
+            type: highlightedRoute.type,
+            isNight: highlightedRoute.isNight,
+        }).catch(() => null)
+        : null;
+    const tripApiGeometry = tripApiSchedule?.directions.length
+        ? convertTripApiScheduleToRouteGeometry(tripApiSchedule)
+        : null;
+
+    if (geometry && tripApiGeometry) {
+        geometry = applyTripApiStopCoordinates(geometry, tripApiGeometry);
+    }
+
+    let needsFallback = !geometry || geometry.directions.every((direction) => direction.stops.length === 0);
+    if (!needsFallback && geometry && scheduleDirections.length > 0) {
+        const scheduleStopIds = new Set(
+            scheduleDirections.flatMap((direction) => direction.stops.map((stop) => stop.id)),
+        );
+        const sampledStops = geometry.directions.flatMap((direction) => direction.stops.slice(0, 8));
+        const matchedStops = sampledStops.filter((stop) => scheduleStopIds.has(stop.id)).length;
+        const coverageRatio = sampledStops.length > 0 ? (matchedStops / sampledStops.length) : 0;
+        const anyDirectionMissingCoverage = geometry.directions.some((direction) => (
+            direction.stops.slice(0, 5).every((stop) => !scheduleStopIds.has(stop.id))
+        ));
+
+        if (anyDirectionMissingCoverage || (sampledStops.length > 0 && coverageRatio < 0.35)) {
+            needsFallback = true;
+        }
+    }
+
+    if (!needsFallback) {
+        return geometry;
+    }
+
+    if (tripApiGeometry?.directions.length) {
+        return tripApiGeometry;
+    }
+
+    if (scheduleDirections.length > 0) {
+        return {
+            line: highlightedRoute.line,
+            type: highlightedRoute.type,
+            isNight: highlightedRoute.isNight,
+            directions: scheduleDirections.map((direction) => ({
+                id: direction.name,
+                name: direction.name,
+                mergedDirectionNames: direction.mergedDirectionNames,
+                coordinates: direction.stops.map((stop) => [stop.longitude, stop.latitude] as [number, number]),
+                stops: direction.stops.map((stop) => ({
+                    id: stop.id,
+                    name: stop.name,
+                    latitude: stop.latitude,
+                    longitude: stop.longitude,
+                })),
+            })),
+        };
+    }
+
+    return geometry;
+};
 
 export const useRouteGeometry = (
     highlightedRoute: RouteSelection | null | undefined,
@@ -22,9 +143,7 @@ export const useRouteGeometry = (
         }
 
         (async () => {
-            const geometry = highlightedRoute.routeId
-                ? await fetchLineRouteGeometryByRouteId(highlightedRoute.routeId)
-                : await fetchLineRouteGeometry(highlightedRoute.line, highlightedRoute.type, highlightedRoute.isNight);
+            const geometry = await getRouteGeometryWithFallback(highlightedRoute);
             if (!isMounted) return;
             setRouteGeometryVersion((v) => v + 1);
             setRouteGeometry(geometry);

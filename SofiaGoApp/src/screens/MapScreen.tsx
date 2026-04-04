@@ -57,6 +57,8 @@ import {
 } from '../features/map/utils/mapScreen';
 import {
     getGoogleInitialRegion,
+    buildRenderedStopMarkers,
+    type RenderedStopMarkerKind,
     createParkingLotsGeoJSON,
     createUserLocationGeoJSON,
     createWalkingRadiiGeoJSON,
@@ -101,6 +103,7 @@ interface MapScreenProps {
     onFilterCountChange?: (count: number) => void;
     focusStopCoordinate?: { latitude: number; longitude: number } | null;
     focusStopId?: string | null;
+    onFocusStopHandled?: () => void;
     focusedParkingZoneFeatureId?: string | null;
     focusParkingZoneBounds?: { ne: [number, number]; sw: [number, number] } | null;
     focusParkingZoneToken?: number;
@@ -132,6 +135,7 @@ export default function MapScreen({
     onFilterCountChange,
     focusStopCoordinate,
     focusStopId,
+    onFocusStopHandled,
     focusedParkingZoneFeatureId,
     focusParkingZoneBounds,
     focusParkingZoneToken,
@@ -230,11 +234,11 @@ export default function MapScreen({
     const hasTripRoute = !!(tripPlannerRoute && tripPlannerRoute.features.length > 0);
 
     // ── Stops & ETAs (needed by trip overlay) ──
+    const etasHook = useStopEtas();
     const stopsHook = useStops(
         bounds.mapBounds, hasTripRoute, filters.selectedLines, filters.selectedVehicleTypes,
-        filters.isRouteMode, camera.mapCenterCoordinate,
+        filters.isRouteMode, camera.mapCenterCoordinate, etasHook.resolvedVehicleTypesByStopId,
     );
-    const etasHook = useStopEtas();
     const schedule = useStopSchedule();
     const selectedStop = useSelectedStop();
 
@@ -290,6 +294,7 @@ export default function MapScreen({
     const liveParking = useLiveParkingAvailability(isParkingMode);
     const parkingCars = useParkingCars();
     const [googleMapReady, setGoogleMapReady] = useState(false);
+    const [displayMarkerKindsByStopId, setDisplayMarkerKindsByStopId] = useState<Record<string, RenderedStopMarkerKind[]>>({});
 
     useEffect(() => {
         if (hasTripRoute && !previousHasTripRouteRef.current) {
@@ -379,18 +384,58 @@ export default function MapScreen({
     }, [animation.renderedDisplayVehicles]);
 
     // ── Google Maps stop marker pool (prevents ghost stop markers on Android) ──
+    const shouldPrepareStopMarkers = isTransitMode && floatingControls.showStops;
+    const renderedStopIdsKey = useMemo(
+        () => stopsHook.renderedStops.map((stop) => stop.id).join('|'),
+        [stopsHook.renderedStops],
+    );
+
+    useEffect(() => {
+        if (!shouldPrepareStopMarkers || !stopsHook.renderedStops.length) {
+            return;
+        }
+
+        setDisplayMarkerKindsByStopId((previous) => {
+            let changed = false;
+            const next = { ...previous };
+
+            stopsHook.renderedStops.forEach((stop) => {
+                if (next[stop.id]?.length) {
+                    return;
+                }
+
+                const resolvedKinds = etasHook.stableMarkerKindsByStopId[stop.id];
+                const fallbackKinds = (stop.vehicleTypes?.length
+                    ? stop.vehicleTypes
+                    : ['bus']) as RenderedStopMarkerKind[];
+
+                next[stop.id] = resolvedKinds?.length ? resolvedKinds : fallbackKinds;
+                changed = true;
+            });
+
+            return changed ? next : previous;
+        });
+    }, [etasHook.stableMarkerKindsByStopId, renderedStopIdsKey, shouldPrepareStopMarkers, stopsHook.renderedStops]);
+
+    const renderedStopMarkers = useMemo(
+        () => (shouldPrepareStopMarkers
+            ? buildRenderedStopMarkers(stopsHook.renderedStops, displayMarkerKindsByStopId)
+            : []),
+        [displayMarkerKindsByStopId, shouldPrepareStopMarkers, stopsHook.renderedStops],
+    );
+
     const googleStopSlotMapRef = useRef(new Map<string, number>());
     const googleStopSlotReverseRef = useRef(new Map<number, string>());
 
-    const googleStopPool = useMemo((): Array<Stop | null> => {
+    const googleStopPool = useMemo(() => {
         if (Platform.OS !== 'android') return [];
         return buildStableMarkerPool(
-            stopsHook.renderedStops,
+            renderedStopMarkers,
             googleStopSlotMapRef.current,
             googleStopSlotReverseRef.current,
-            MAX_RENDERED_STOPS,
+            Math.max(MAX_RENDERED_STOPS, renderedStopMarkers.length),
         );
-    }, [stopsHook.renderedStops]);
+    }, [renderedStopMarkers]);
 
     // ── Search, Favorites, Routing, Reporting ──
     const search = useSearch(stopsHook.searchableStops, filters.staticLines);
@@ -488,9 +533,9 @@ export default function MapScreen({
 
     // ── Refresh ETAs alongside vehicles ──
     useEffect(() => {
-        if (!vehicles.length) return;
-        void etasHook.refreshEtasForStops(stopsHook.stops.slice(0, MAX_RENDERED_STOPS));
-    }, [vehicles]);
+        if (!shouldPrepareStopMarkers || !vehicles.length) return;
+        void etasHook.refreshEtasForStops(stopsHook.renderedStops);
+    }, [etasHook, renderedStopIdsKey, lastUpdated, shouldPrepareStopMarkers]);
 
     useEffect(() => {
         const previousAnnotationId = previousSelectedStopAnnotationIdRef.current;
@@ -710,6 +755,7 @@ export default function MapScreen({
         focusParkingZoneToken,
         focusStopCoordinate,
         focusStopId,
+        onFocusStopHandled,
         googleInitialRegion,
         googleMapReady,
         googleMapRef,
@@ -736,11 +782,11 @@ export default function MapScreen({
         userLocationRegionDelta: USER_LOCATION_REGION_DELTA,
     });
 
-    const handleStopPress = useCallback(async (stop: Stop) => {
-        selectedStop.selectedStopIdRef.current = stop.id;
-        selectedStop.setSelectedStopAnnotationId(`stop-${stop.id}`);
-        await selectedStop.openStopDetails(stop);
-        await etasHook.refreshEtasForStop(stop.id);
+    const handleStopPress = useCallback(async (marker: { id: string; sourceStop: Stop }) => {
+        selectedStop.selectedStopIdRef.current = marker.sourceStop.id;
+        selectedStop.setSelectedStopAnnotationId(marker.id);
+        await selectedStop.openStopDetails(marker.sourceStop);
+        await etasHook.refreshEtasForStop(marker.sourceStop.id);
     }, [etasHook, selectedStop]);
 
     const handleRouteStopPress = useCallback(async (stop: {
@@ -853,6 +899,8 @@ export default function MapScreen({
                             routeGeometryVersion={routing.routeGeometryVersion}
                             selectedStopAnnotationId={selectedStop.selectedStopAnnotationId}
                             shouldRenderTransitViewportData={shouldRenderTransitViewportData}
+                            showStops={floatingControls.showStops}
+                            showVehicles={floatingControls.showVehicles}
                             tripPlannerRoute={tripPlannerRoute}
                             vehicleRouteCoords={vehicleRoute.vehicleRouteCoords}
                             vehicleRouteHasRoute={vehicleRoute.hasVehicleRoute}
@@ -898,8 +946,10 @@ export default function MapScreen({
                         selectedStopAnnotationId={selectedStop.selectedStopAnnotationId}
                         selectedStopIdRef={selectedStop.selectedStopIdRef}
                         shouldRenderTransitViewportData={shouldRenderTransitViewportData}
-                        stopAnnotationRefs={stopAnnotationRefs}
-                        stops={stopsHook.renderedStops}
+                        showStops={floatingControls.showStops}
+                            showVehicles={floatingControls.showVehicles}
+                            stopAnnotationRefs={stopAnnotationRefs}
+                            stops={renderedStopMarkers}
                         tripPlannerRoute={tripPlannerRoute}
                         vehicleRouteCoords={vehicleRoute.vehicleRouteCoords}
                         vehicleRouteHasRoute={vehicleRoute.hasVehicleRoute}
@@ -949,16 +999,19 @@ export default function MapScreen({
 
                         void recenterToUserLocation();
                     }}
-                    onScheduledSmsPress={pinParkingActions.openParkingPaymentPanel}
                     onSupportProject={floatingControls.handleSupportProject}
                     onToggleGoogleTraffic={floatingControls.handleGoogleTrafficPress}
                     onToggleSettings={floatingControls.handleSettingsToggle}
+                    onToggleStops={floatingControls.handleToggleStops}
+                    onToggleVehicles={floatingControls.handleToggleVehicles}
                     settingsExpanded={floatingControls.settingsExpanded}
                     settingsSlideAnim={floatingControls.settingsSlideAnim}
                     showMapLayerToggle={Platform.OS === 'android'}
                     onOpenSavedTripRoute={onOpenSavedTripRoute}
                     showReminderButton={!favorites.favoritesVisible}
                     showRecenterButton={!!location}
+                    showStops={floatingControls.showStops}
+                    showVehicles={floatingControls.showVehicles}
                     userFollowLocked={isUserFollowLocked}
                 />
 

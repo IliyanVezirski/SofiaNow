@@ -28,6 +28,11 @@ export const useAppFlow = () => {
         setActiveTab('map');
     }, []);
 
+    const clearFocusedStop = useCallback(() => {
+        setFocusStopId(null);
+        setFocusStopCoordinate(null);
+    }, []);
+
     const tripRouting = useTripRouting({
         favoritesVisible: transientPanels.favoritesVisible,
         onActivateMap: () => setActiveTab('map'),
@@ -41,6 +46,7 @@ export const useAppFlow = () => {
 
     return {
         activeTab,
+        clearFocusedStop,
         focusStopCoordinate,
         focusStopId,
         handleFocusStop,

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
     ActivityIndicator, BackHandler, ScrollView, StyleSheet,
-    Text, TouchableOpacity, View, Linking, Platform
+    Text, TouchableOpacity, View
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useUserLocation } from '../features/map/hooks/useUserLocation';
@@ -13,6 +13,7 @@ import { getEtaScheduleInfo } from '../services/cgmApi/schedules';
 import { formatMinSinceMidnight } from '../features/map/constants';
 import { ArrivalReminderControl } from '../features/notifications/components/ArrivalReminderControl';
 import { useFavorites } from '../features/favorites/hooks/useFavorites';
+import { openExternalWalkingNavigation } from '../services/externalNavigation';
 
 // ── Walking‑radius config ──
 const RADIUS_BUCKETS = [
@@ -119,10 +120,27 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
     }, [location, allStops]);
 
     const totalNearby = useMemo(() => buckets.reduce((sum, b) => sum + b.stops.length, 0), [buckets]);
-    const savedStopIds = useMemo(
-        () => new Set(favorites.favoritePlaces.map((favorite) => favorite.selectedStopId).filter(Boolean)),
-        [favorites.favoritePlaces],
-    );
+    const parseStopIdParts = useCallback((value?: string | null) => (
+        String(value || '')
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean)
+    ), []);
+    const isFavoriteStop = useCallback((stop: Stop) => {
+        const stopIdParts = parseStopIdParts(stop.id);
+        const stopIdSet = new Set(stopIdParts);
+
+        return favorites.favoritePlaces.some((favorite) => {
+            const favoriteIdParts = parseStopIdParts(favorite.selectedStopId);
+            const idMatch = favoriteIdParts.some((part) => stopIdSet.has(part));
+            const coordinateMatch = Number.isFinite(favorite.latitude)
+                && Number.isFinite(favorite.longitude)
+                && Math.abs(Number(favorite.latitude) - stop.latitude) <= 0.00001
+                && Math.abs(Number(favorite.longitude) - stop.longitude) <= 0.00001;
+
+            return idMatch || coordinateMatch;
+        });
+    }, [favorites.favoritePlaces, parseStopIdParts]);
 
     // ── Fetch live ETAs when a stop is expanded ──
     const handleStopPress = useCallback(async (stopId: string) => {
@@ -155,7 +173,18 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
             notificationsEnabled: false,
         }));
 
-        const existingFavorite = favorites.favoritePlaces.find((favorite) => favorite.selectedStopId === stop.id) ?? null;
+        const existingFavorite = favorites.favoritePlaces.find((favorite) => {
+            const favoriteIdParts = parseStopIdParts(favorite.selectedStopId);
+            const stopIdParts = parseStopIdParts(stop.id);
+            const stopIdSet = new Set(stopIdParts);
+            const idMatch = favoriteIdParts.some((part) => stopIdSet.has(part));
+            const coordinateMatch = Number.isFinite(favorite.latitude)
+                && Number.isFinite(favorite.longitude)
+                && Math.abs(Number(favorite.latitude) - stop.latitude) <= 0.00001
+                && Math.abs(Number(favorite.longitude) - stop.longitude) <= 0.00001;
+
+            return idMatch || coordinateMatch;
+        }) ?? null;
 
         void (async () => {
             if (existingFavorite) {
@@ -235,25 +264,19 @@ export default function NearbyScreen({ onClose, onFocusStop, onBuildRoute }: Nea
                                                         </Text>
                                                     </View>
                                                     <TouchableOpacity
-                                                        style={[st.favoriteBtn, savedStopIds.has(stop.id) && st.favoriteBtnSaved]}
+                                                        style={[st.favoriteBtn, isFavoriteStop(stop) && st.favoriteBtnSaved]}
                                                         onPress={() => onToggleStopFavorite(stop)}
                                                     >
                                                         <Ionicons
-                                                            name={savedStopIds.has(stop.id) ? 'bookmark' : 'bookmark-outline'}
+                                                            name={isFavoriteStop(stop) ? 'bookmark' : 'bookmark-outline'}
                                                             size={15}
-                                                            color={savedStopIds.has(stop.id) ? '#A16207' : '#64748B'}
+                                                            color={isFavoriteStop(stop) ? '#A16207' : '#64748B'}
                                                         />
                                                     </TouchableOpacity>
                                                     <TouchableOpacity
                                                         style={st.routeBtn}
                                                         onPress={() => {
-                                                            const url = Platform.OS === 'ios'
-                                                                ? `maps://?daddr=${stop.latitude},${stop.longitude}&dirflg=w`
-                                                                : `google.navigation:q=${stop.latitude},${stop.longitude}&mode=w`;
-                                                            Linking.canOpenURL(url).then(supported => {
-                                                                if (supported) Linking.openURL(url);
-                                                                else Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${stop.latitude},${stop.longitude}&travelmode=walking`);
-                                                            });
+                                                            void openExternalWalkingNavigation(stop.latitude, stop.longitude);
                                                         }}
                                                     >
                                                         <Ionicons name="navigate-outline" size={16} color="#0F172A" />

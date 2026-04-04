@@ -13,6 +13,8 @@ export const useMapFloatingControls = ({ mapExperienceMode, supportUrl }: Params
     const [supportVisible, setSupportVisible] = useState(false);
     const [settingsExpanded, setSettingsExpanded] = useState(false);
     const [googleShowTraffic, setGoogleShowTraffic] = useState(mapExperienceMode === 'parking');
+    const [showVehicles, setShowVehicles] = useState(true);
+    const [showStops, setShowStops] = useState(true);
     const [mapLayerPillExpanded, setMapLayerPillExpanded] = useState(false);
     const mapLayerPillAnim = useRef(new Animated.Value(0)).current;
     const mapLayerPillAutoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -95,6 +97,16 @@ export const useMapFloatingControls = ({ mapExperienceMode, supportUrl }: Params
         expandMapLayerPill();
     }, [expandMapLayerPill]);
 
+    const handleToggleVehicles = useCallback(() => {
+        setShowVehicles((previous) => !previous);
+        expandMapLayerPill();
+    }, [expandMapLayerPill]);
+
+    const handleToggleStops = useCallback(() => {
+        setShowStops((previous) => !previous);
+        expandMapLayerPill();
+    }, [expandMapLayerPill]);
+
     const handleOpenSettings = useCallback(() => {
         collapseSettingsPill();
         setSettingsVisible(true);
@@ -148,6 +160,8 @@ export const useMapFloatingControls = ({ mapExperienceMode, supportUrl }: Params
         handleOpenSupportLink,
         handleSettingsToggle,
         handleSupportProject,
+        handleToggleStops,
+        handleToggleVehicles,
         mapLayerPillAnim,
         mapLayerPillExpanded,
         setSettingsVisible,
@@ -155,6 +169,8 @@ export const useMapFloatingControls = ({ mapExperienceMode, supportUrl }: Params
         settingsExpanded,
         settingsSlideAnim,
         settingsVisible,
+        showStops,
+        showVehicles,
         supportVisible,
     };
 };

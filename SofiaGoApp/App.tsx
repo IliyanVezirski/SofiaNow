@@ -49,6 +49,7 @@ export default function App() {
           dismissTransientPanelsToken={appFlow.dismissTransientPanelsToken}
           focusStopCoordinate={appFlow.focusStopCoordinate}
           focusStopId={appFlow.focusStopId}
+          onFocusStopHandled={appFlow.clearFocusedStop}
           focusedParkingZoneFeatureId={appFlow.focusedParkingZoneFeatureId}
           focusParkingZoneBounds={appFlow.focusParkingZoneBounds}
           focusParkingZoneToken={appFlow.focusParkingZoneToken}

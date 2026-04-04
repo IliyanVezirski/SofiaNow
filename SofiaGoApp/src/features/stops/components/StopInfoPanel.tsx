@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TouchableOpacity, StyleSheet, Modal, useWindowDimensions } from 'react-native';
 import { Stop } from '../../../services/stopsApi';
 import { StopEta } from '../../../types/vehicles';
@@ -30,11 +30,22 @@ export const StopInfoPanel: React.FC<Props> = ({
     placeSaved = false,
     placeSubmitting = false,
 }) => {
-    const visibleEtas = etas;
+    const INITIAL_VISIBLE_ETA_COUNT = 12;
+    const ETA_PAGE_SIZE = 12;
+    const [visibleEtaCount, setVisibleEtaCount] = useState(INITIAL_VISIBLE_ETA_COUNT);
+    const visibleEtas = useMemo(
+        () => etas.slice(0, visibleEtaCount),
+        [etas, visibleEtaCount],
+    );
+    const hasMoreEtas = etas.length > visibleEtas.length;
     const { height } = useWindowDimensions();
     const panelBottomOffset = Math.min(Math.max(height * 0.16, 96), 188);
     const panelMaxHeight = Math.min(Math.max(height * 0.42, 280), 420);
     const scrollMaxHeight = Math.min(Math.max(panelMaxHeight - 128, 140), 260);
+
+    useEffect(() => {
+        setVisibleEtaCount(INITIAL_VISIBLE_ETA_COUNT);
+    }, [stop.id]);
 
     return (
         <Modal transparent animationType="fade" visible onRequestClose={onClose} statusBarTranslucent>
@@ -105,6 +116,19 @@ export const StopInfoPanel: React.FC<Props> = ({
                                 </View>
                             );
                         }) : <Text style={styles.info}>Няма налични ETA в момента</Text>}
+                        {hasMoreEtas ? (
+                            <View style={styles.moreWrap}>
+                                <Text style={styles.moreHint}>
+                                    {`Показани са ${visibleEtas.length} от ${etas.length} пристигания.`}
+                                </Text>
+                                <TouchableOpacity
+                                    style={styles.moreButton}
+                                    onPress={() => setVisibleEtaCount((current) => Math.min(current + ETA_PAGE_SIZE, etas.length))}
+                                >
+                                    <Text style={styles.moreButtonText}>Покажи още</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : null}
                     </ScrollView>
                     <View style={styles.footerActions}>
                         <ReminderCenterButton inline onOpenSavedTripRoute={onOpenSavedTripRoute} />
@@ -235,6 +259,34 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         flexWrap: 'wrap',
         gap: 10,
+    },
+    moreWrap: {
+        marginTop: 4,
+        marginBottom: 6,
+        alignItems: 'center',
+    },
+    moreHint: {
+        fontSize: 11,
+        lineHeight: 16,
+        color: '#64748B',
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    moreButton: {
+        minWidth: 108,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 999,
+        backgroundColor: 'rgba(29,78,216,0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(29,78,216,0.16)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    moreButtonText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#1D4ED8',
     },
     scheduleBtn: { flex: 1, flexDirection: 'row', backgroundColor: '#1D4ED8', borderRadius: 12, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
     scheduleBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },

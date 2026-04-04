@@ -1,4 +1,4 @@
-export const TRANSIT_REMINDER_BACKGROUND_TASK = 'sofiago-transit-reminder-refresh';
+export const TRANSIT_REMINDER_BACKGROUND_TASK = 'sofianow-transit-reminder-refresh';
 
 export const ensureTransitReminderBackgroundTaskRegistered = async () => ({
     ok: false,

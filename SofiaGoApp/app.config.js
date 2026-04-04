@@ -5,9 +5,9 @@ const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyA-dURfwNmQ
 export default {
   expo: {
     owner: 'iliaynski90',
-    name: IS_DEV ? 'SofiaGo (Dev)' : 'SofiaGo',
+    name: IS_DEV ? 'SofiaNow (Dev)' : 'SofiaNow',
     slug: 'SofiaGoApp',
-    version: '1.0.0',
+    version: '1.1.3',
     orientation: 'portrait',
     icon: './assets/app-icon-new.png',
     userInterfaceStyle: 'light',
@@ -18,6 +18,9 @@ export default {
     },
     ios: {
       supportsTablet: true,
+      infoPlist: {
+        LSApplicationQueriesSchemes: ['comgooglemaps', 'waze'],
+      },
     },
     android: {
       adaptiveIcon: {
@@ -34,7 +37,7 @@ export default {
         color: '#0F766E',
       },
       package: 'com.iliyanvezirski.SofiaGoApp',
-      versionCode: 1,
+      versionCode: 6,
     },
     web: {
       favicon: './assets/app-icon-new.png',
@@ -53,7 +56,6 @@ export default {
       'expo-asset',
       'expo-font',
       'expo-background-task',
-      './plugins/withParkingSmsAutomation',
     ],
     extra: {
       eas: {

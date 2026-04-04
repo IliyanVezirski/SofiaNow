@@ -62,7 +62,7 @@ export const MapModeSwitcher: React.FC<Props> = ({ activeMode, onSelectMode }) =
                 {MODE_ITEMS.map((item) => {
                     const isActive = item.mode === activeMode;
                     const slotTop = MODE_SLOT_TOP[item.mode];
-                    const collapsedTranslateX = isActive ? 0 : 34;
+                    const collapsedTranslateX = isActive ? 0 : -34;
                     const translateX = slideAnim.interpolate({ inputRange: [0, 1], outputRange: [collapsedTranslateX, 0] });
                     const iconOpacity = isActive
                         ? slideAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1] })
@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
     container: {
         position: 'absolute',
         top: 50,
-        right: 0,
+        left: 0,
         zIndex: 0,
         elevation: 0,
     },
@@ -132,8 +132,8 @@ const styles = StyleSheet.create({
     optionNub: {
         width: 52,
         height: 48,
-        borderTopLeftRadius: 24,
-        borderBottomLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderBottomRightRadius: 24,
         backgroundColor: 'rgba(255,255,255,0.82)',
         justifyContent: 'center',
         alignItems: 'center',
@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     },
     optionLineWrap: {
         position: 'absolute',
-        left: 7,
+        right: 7,
     },
     optionLine: {
         width: 3.5,

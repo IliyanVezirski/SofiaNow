@@ -43,6 +43,7 @@ interface UseMapFocusSyncParams {
     focusParkingZoneToken?: number;
     focusStopCoordinate?: FocusCoordinate | null;
     focusStopId?: string | null;
+    onFocusStopHandled?: () => void;
     googleInitialRegion: Region;
     googleMapReady: boolean;
     googleMapRef: MutableRefObject<GoogleMapView | null>;
@@ -103,6 +104,7 @@ export const useMapFocusSync = ({
     focusParkingZoneToken,
     focusStopCoordinate,
     focusStopId,
+    onFocusStopHandled,
     googleInitialRegion,
     googleMapReady,
     googleMapRef,
@@ -359,6 +361,7 @@ export const useMapFocusSync = ({
         }
 
         let cancelled = false;
+        onFocusStopHandled?.();
 
         void (async () => {
             suppressMapPressUntilRef.current = Date.now() + 400;
@@ -396,6 +399,7 @@ export const useMapFocusSync = ({
         camera,
         focusStopCoordinate,
         focusStopId,
+        onFocusStopHandled,
         refreshEtasForStop,
         selectedStopIdRef,
         selectedVehicleIdRef,

@@ -12,6 +12,7 @@ import { getDirectionAccentColor, getDirectionArrowSamples } from '../constants'
 import { getLiveVehicleRouteCoordinates } from '../utils/liveVehicleRoute';
 import { mapLayerStyles } from './mapLayerStyles';
 import type { TripStopInfo, Vehicle } from '../../../types/vehicles';
+import type { RenderedStopMarker } from '../utils/derived';
 
 interface RenderedVehicle extends Vehicle {
     renderId: string;
@@ -35,8 +36,10 @@ interface MapboxTransitLayersProps {
     selectedStopAnnotationId: string | null;
     selectedStopIdRef: React.MutableRefObject<string | null>;
     shouldRenderTransitViewportData: boolean;
+    showStops: boolean;
+    showVehicles: boolean;
     stopAnnotationRefs: React.MutableRefObject<Record<string, { refresh: () => void } | null>>;
-    stops: Stop[];
+    stops: RenderedStopMarker[];
     tripPlannerRoute?: TripRouteGeoJSON | null;
     vehicleRouteCoords: [number, number][];
     vehicleRouteHasRoute: boolean;
@@ -45,7 +48,7 @@ interface MapboxTransitLayersProps {
     walkingRadiiGeoJSON: object | null;
     onRouteStopPress: (stop: RouteStopPreview, directionName: string, annotationId: string) => void | Promise<void>;
     onCloseSelectedStop: () => void;
-    onStopPress: (stop: Stop) => void | Promise<void>;
+    onStopPress: (stop: RenderedStopMarker) => void | Promise<void>;
     onTrackedVehiclePress: (vehicle: RenderedVehicle) => void;
     onTripPlannerStopPress: (stop: TripRouteStop, index: number) => void | Promise<void>;
     onVehicleDeselect: (vehicleId: string) => void;
@@ -64,6 +67,8 @@ export const MapboxTransitLayers: React.FC<MapboxTransitLayersProps> = ({
     selectedStopAnnotationId,
     selectedStopIdRef,
     shouldRenderTransitViewportData,
+    showStops,
+    showVehicles,
     stopAnnotationRefs,
     stops,
     tripPlannerRoute,
@@ -104,7 +109,7 @@ export const MapboxTransitLayers: React.FC<MapboxTransitLayersProps> = ({
 
     return (
         <>
-            {!hasActiveRouteOverlay && shouldRenderTransitViewportData && walkingRadiiGeoJSON ? (
+            {!hasActiveRouteOverlay && showStops && shouldRenderTransitViewportData && walkingRadiiGeoJSON ? (
                 <MapboxGL.ShapeSource id="walking-radii" shape={walkingRadiiGeoJSON as any}>
                     <MapboxGL.LineLayer id="walking-radii-line" filter={['==', ['get', 'customType'], 'circle_line']} style={{ lineColor: '#9CA3AF', lineWidth: 1.5, lineOpacity: 0.8 }} />
                     <MapboxGL.SymbolLayer id="walking-radii-label" filter={['==', ['get', 'customType'], 'circle_label']} style={{
@@ -118,25 +123,29 @@ export const MapboxTransitLayers: React.FC<MapboxTransitLayersProps> = ({
                 </MapboxGL.ShapeSource>
             ) : null}
 
-            {!hasActiveRouteOverlay && shouldRenderTransitViewportData && stops.map((stop) => (
-                <MapboxGL.PointAnnotation
-                    key={`stop-${stop.id}`}
-                    id={`stop-${stop.id}`}
-                    ref={(ref) => { stopAnnotationRefs.current[`stop-${stop.id}`] = ref as { refresh: () => void } | null; }}
-                    coordinate={[stop.longitude, stop.latitude]}
-                    selected={selectedStopAnnotationId === `stop-${stop.id}`}
-                    onSelected={() => {
-                        void onStopPress(stop);
-                    }}
-                    onDeselected={() => {
-                        if (selectedStopIdRef.current === stop.id) {
-                            onCloseSelectedStop();
-                        }
-                    }}
-                >
-                    <StopDot stop={stop} selected={selectedStopAnnotationId === `stop-${stop.id}`} />
-                </MapboxGL.PointAnnotation>
-            ))}
+            {!hasActiveRouteOverlay && showStops && shouldRenderTransitViewportData && stops.map((stop) => {
+                const isSelected = selectedStopAnnotationId === stop.id || selectedStopAnnotationId === `stop-${stop.sourceStop.id}`;
+
+                return (
+                    <MapboxGL.PointAnnotation
+                        key={stop.id}
+                        id={stop.id}
+                        ref={(ref) => { stopAnnotationRefs.current[stop.id] = ref as { refresh: () => void } | null; }}
+                        coordinate={[stop.longitude, stop.latitude]}
+                        selected={isSelected}
+                        onSelected={() => {
+                            void onStopPress(stop);
+                        }}
+                        onDeselected={() => {
+                            if (selectedStopIdRef.current === stop.sourceStop.id) {
+                                onCloseSelectedStop();
+                            }
+                        }}
+                    >
+                        <StopDot stop={stop.sourceStop} markerKinds={stop.markerKinds} selected={isSelected} />
+                    </MapboxGL.PointAnnotation>
+                );
+            })}
 
             {!hasTripRoute && routeGeometry?.directions.map((direction, index) => (
                 <React.Fragment key={`route-group-${routeGeometry.line}-${index}`}>
@@ -284,7 +293,7 @@ export const MapboxTransitLayers: React.FC<MapboxTransitLayersProps> = ({
                 </MapboxGL.PointAnnotation>
             ) : null}
 
-            {!hasActiveRouteOverlay && shouldRenderTransitViewportData && renderedDisplayVehicles.map((vehicle) => (
+            {!hasActiveRouteOverlay && showVehicles && shouldRenderTransitViewportData && renderedDisplayVehicles.map((vehicle) => (
                 <MapboxGL.PointAnnotation
                     key={vehicle.renderId}
                     id={vehicle.renderId}

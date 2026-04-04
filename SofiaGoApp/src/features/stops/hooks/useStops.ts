@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Stop, fetchStopsInBounds, fetchAllStops } from '../../../services/stopsApi';
 import { MapBounds } from '../../../types/map';
-import { VehicleType, resolveDisplayLineType } from '../../../services/transitUtils';
+import { VehicleType } from '../../../services/transitUtils';
 import { MIN_BOUNDS_DELTA_FOR_REFRESH, MAX_RENDERED_STOPS, resolveTransitDataViewportSuppressed } from '../../map/constants';
 
 export const useStops = (
@@ -11,6 +11,7 @@ export const useStops = (
     selectedVehicleTypes: VehicleType[],
     isRouteMode: boolean,
     mapCenterCoordinate: [number, number],
+    resolvedVehicleTypesByStopId: Record<string, VehicleType[]>,
 ) => {
     const [stops, setStops] = useState<Stop[]>([]);
     const [searchableStops, setSearchableStops] = useState<Stop[]>([]);
@@ -55,17 +56,34 @@ export const useStops = (
         return () => { isMounted = false; };
     }, [mapBounds, hasTripRoute]);
 
+    const stopsWithResolvedTypes = useMemo(() => stops.map((stop) => {
+        const resolvedTypes = resolvedVehicleTypesByStopId[stop.id] ?? [];
+
+        if (resolvedTypes.length) {
+            return {
+                ...stop,
+                vehicleTypes: resolvedTypes,
+            };
+        }
+
+        return {
+            ...stop,
+            vehicleTypes: stop.vehicleTypes?.length ? stop.vehicleTypes : ['bus' as VehicleType],
+        };
+    }), [resolvedVehicleTypesByStopId, stops]);
+
     const filteredStops = useMemo(() => {
-        if (isRouteMode) return stops;
+        if (isRouteMode) return stopsWithResolvedTypes;
         const normalizedSelectedLines = selectedLines.map((l) => String(l || '').trim().toUpperCase());
-        return stops.filter((stop) => {
+        return stopsWithResolvedTypes.filter((stop) => {
             const normalizedStopLines = stop.lines.map((l) => String(l || '').trim().toUpperCase()).filter(Boolean);
             const matchesLine = !normalizedSelectedLines.length || normalizedSelectedLines.some((l) => normalizedStopLines.includes(l));
             if (!matchesLine) return false;
             if (!selectedVehicleTypes.length) return true;
-            return normalizedStopLines.some((l) => selectedVehicleTypes.includes(resolveDisplayLineType(l)));
+            const stopVehicleTypes = stop.vehicleTypes?.length ? stop.vehicleTypes : ['bus' as VehicleType];
+            return stopVehicleTypes.some((type) => selectedVehicleTypes.includes(type));
         });
-    }, [stops, selectedLines, selectedVehicleTypes, isRouteMode]);
+    }, [selectedLines, selectedVehicleTypes, isRouteMode, stopsWithResolvedTypes]);
 
     const renderedStops = useMemo(() => {
         if (isRouteMode) return filteredStops;
@@ -85,9 +103,9 @@ export const useStops = (
         }).slice(0, MAX_RENDERED_STOPS);
     }, [filteredStops, isRouteMode, mapCenterCoordinate, mapBounds]);
 
-    const stopById = useMemo(() => stops.reduce<Record<string, Stop>>((r, s) => { r[s.id] = s; return r; }, {}), [stops]);
-    const stopNameByIdMap = useMemo(() => stops.reduce<Record<string, string>>((r, s) => { r[s.id] = s.name; return r; }, {}), [stops]);
+    const stopById = useMemo(() => stopsWithResolvedTypes.reduce<Record<string, Stop>>((r, s) => { r[s.id] = s; return r; }, {}), [stopsWithResolvedTypes]);
+    const stopNameByIdMap = useMemo(() => stopsWithResolvedTypes.reduce<Record<string, string>>((r, s) => { r[s.id] = s.name; return r; }, {}), [stopsWithResolvedTypes]);
     const searchableStopNameByIdMap = useMemo(() => searchableStops.reduce<Record<string, string>>((r, s) => { r[s.id] = s.name; return r; }, {}), [searchableStops]);
 
-    return { stops, searchableStops, filteredStops, renderedStops, visibleStopsRef, stopById, stopNameByIdMap, searchableStopNameByIdMap };
+    return { stops: stopsWithResolvedTypes, searchableStops, filteredStops, renderedStops, visibleStopsRef, stopById, stopNameByIdMap, searchableStopNameByIdMap };
 };

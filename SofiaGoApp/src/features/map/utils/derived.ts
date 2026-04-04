@@ -8,6 +8,7 @@ import type { FavoritePlace } from '../../../services/places/types';
 import type { LiveParkingLot } from '../../../services/parking';
 import type { Stop } from '../../../services/stopsApi';
 import type { Vehicle } from '../../../types/vehicles';
+import { type VehicleType } from '../../../services/transitUtils';
 
 const PARKING_LOT_LABELS: Record<string, string> = {
     buffer: 'БП',
@@ -36,6 +37,37 @@ export interface GoogleWalkingRadiusLabel {
     label: string;
     coordinate: { latitude: number; longitude: number };
 }
+
+export type RenderedStopMarkerKind = VehicleType | 'night';
+
+export interface RenderedStopMarker {
+    id: string;
+    latitude: number;
+    longitude: number;
+    markerKinds: RenderedStopMarkerKind[];
+    sourceStop: Stop;
+}
+
+const STOP_MARKER_KIND_ORDER: RenderedStopMarkerKind[] = ['subway', 'tram', 'trolley', 'bus', 'night'];
+
+export const buildRenderedStopMarkers = (
+    stops: Stop[],
+    stableMarkerKindsByStopId: Record<string, RenderedStopMarkerKind[]>,
+): RenderedStopMarker[] => stops.map((stop) => {
+    const markerKinds = stableMarkerKindsByStopId[stop.id]?.length
+        ? stableMarkerKindsByStopId[stop.id]
+        : ((stop.vehicleTypes?.length ? stop.vehicleTypes : ['bus']) as RenderedStopMarkerKind[]);
+    const orderedKinds = Array.from(new Set(markerKinds)).sort(
+        (left, right) => STOP_MARKER_KIND_ORDER.indexOf(left) - STOP_MARKER_KIND_ORDER.indexOf(right),
+    );
+    return {
+        id: `stop-${stop.id}`,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        markerKinds: orderedKinds,
+        sourceStop: stop,
+    };
+});
 
 export const getCurrentLocation = (location: LocationLike): CurrentLocation => (
     location

@@ -41,7 +41,7 @@ export const ParkingModesPanel: React.FC<Props> = ({
                 </View>
                 <View style={styles.primaryActionBody}>
                     <Text style={styles.primaryActionTitle}>Плати зона</Text>
-                    <Text style={styles.primaryActionSubtitle}>Изпрати или планирай паркинг SMS в следващия модал.</Text>
+                    <Text style={styles.primaryActionSubtitle}>Изпрати паркинг SMS в следващия модал.</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.92)" />
             </TouchableOpacity>

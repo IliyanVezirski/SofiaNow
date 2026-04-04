@@ -75,7 +75,7 @@ export async function searchOsmLocations(
   try {
     const res = await fetch(`${NOMINATIM_BASE_URL}/search?${params}`, {
       headers: {
-        'User-Agent': 'SofiaGoApp/1.0',
+        'User-Agent': 'SofiaNow/1.0',
         'Accept-Language': 'bg',
       },
     });
@@ -135,7 +135,7 @@ export async function searchOsmLocationsBounded(
   try {
     const res = await fetch(`${NOMINATIM_BASE_URL}/search?${params}`, {
       headers: {
-        'User-Agent': 'SofiaGoApp/1.0',
+        'User-Agent': 'SofiaNow/1.0',
         'Accept-Language': 'bg',
       },
     });
@@ -179,7 +179,7 @@ export async function reverseGeocodeOsm(lat: number, lon: number): Promise<strin
 
     const res = await fetch(`${NOMINATIM_BASE_URL}/reverse?${params}`, {
       headers: {
-        'User-Agent': 'SofiaGoApp/1.0',
+        'User-Agent': 'SofiaNow/1.0',
         'Accept-Language': 'bg',
       },
     });

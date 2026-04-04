@@ -3,7 +3,7 @@ import * as Localization from 'expo-localization';
 
 const translations = {
     bg: {
-        welcome: 'Добре дошли в SofiaGo',
+        welcome: 'Добре дошли в SofiaNow',
         map: 'Карта',
         reports: 'Сигнали',
         settings: 'Настройки',
@@ -12,7 +12,7 @@ const translations = {
         metroGuide: 'Метро Гид',
     },
     en: {
-        welcome: 'Welcome to SofiaGo',
+        welcome: 'Welcome to SofiaNow',
         map: 'Map',
         reports: 'Reports',
         settings: 'Settings',
