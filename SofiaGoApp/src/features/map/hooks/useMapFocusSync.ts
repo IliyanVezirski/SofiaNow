@@ -1,4 +1,4 @@
-import { MutableRefObject, useEffect, useRef } from 'react';
+import { MutableRefObject, RefObject, useEffect, useRef } from 'react';
 import GoogleMapView, { Region } from 'react-native-maps';
 
 import { fetchStopById } from '../../../services/stopsApi';
@@ -28,11 +28,11 @@ interface UseMapFocusSyncParams {
         setMapBounds: (nextBounds: { north: number; south: number; east: number; west: number }) => void;
     };
     camera: {
-        cameraLockedToInitialView: boolean;
+        cameraLockedToInitialViewRef: RefObject<boolean>;
         focusOnCoordinate: (latitude: number, longitude: number) => void;
-        hasInitialCameraTarget: boolean;
+        hasInitialCameraTargetRef: RefObject<boolean>;
         lockCamera: (latitude: number, longitude: number) => void;
-        mapCenterCoordinate: [number, number];
+        mapCenterCoordinateRef: MutableRefObject<[number, number]>;
         routeCameraBounds: RouteBounds | null;
         setRouteCameraBounds: (bounds: RouteBounds | null) => void;
         setTripCameraBounds: (bounds: RouteBounds | null) => void;
@@ -145,7 +145,7 @@ export const useMapFocusSync = ({
             || !hasFreshLocation
             || highlightedRoute
             || hasAppliedInitialLocationCameraRef.current
-            || camera.hasInitialCameraTarget
+            || camera.hasInitialCameraTargetRef.current
         ) {
             return;
         }
@@ -338,6 +338,12 @@ export const useMapFocusSync = ({
             return;
         }
 
+        // Skip if another imperative camera action (e.g. focusOnCoordinate) is
+        // in progress — prevents fight between two concurrent animateToRegion calls
+        if (Date.now() < suppressUserRecenterRegionSyncUntilRef.current) {
+            return;
+        }
+
         const activeBounds = camera.tripCameraBounds || camera.routeCameraBounds;
         if (activeBounds) {
             googleMapRef.current.fitToCoordinates(
@@ -378,11 +384,12 @@ export const useMapFocusSync = ({
             return;
         }
 
-        if (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget) {
+        if (camera.cameraLockedToInitialViewRef.current && camera.hasInitialCameraTargetRef.current) {
+            const coord = camera.mapCenterCoordinateRef.current;
             googleMapRef.current.animateToRegion(
                 getRegionFromCoordinate(
-                    camera.mapCenterCoordinate[1],
-                    camera.mapCenterCoordinate[0],
+                    coord[1],
+                    coord[0],
                     bounds.mapBounds,
                     userLocationRegionDelta,
                 ),
@@ -391,7 +398,7 @@ export const useMapFocusSync = ({
             return;
         }
 
-        if (!camera.hasInitialCameraTarget) {
+        if (!camera.hasInitialCameraTargetRef.current) {
             googleMapRef.current.animateToRegion(googleInitialRegion, 700);
         }
     }, [

@@ -51,7 +51,7 @@ import type { MapExperienceMode } from '../features/map/components/MapModeSwitch
 import { MapFeaturePanels } from '../features/map/components/MapFeaturePanels';
 import { MapFloatingControls } from '../features/map/components/MapFloatingControls';
 import { MapboxEcoLayers } from '../features/map/components/MapboxEcoLayers';
-import { MapboxMapCanvas } from '../features/map/components/MapboxMapCanvas';
+import { MapboxMapCanvas, type MapboxMapCameraHandle } from '../features/map/components/MapboxMapCanvas';
 import { MapboxParkingLayers } from '../features/map/components/MapboxParkingLayers';
 import { MapboxTransitLayers } from '../features/map/components/MapboxTransitLayers';
 import {
@@ -177,6 +177,8 @@ export default function MapScreen({
     const handledEcoParkFocusTokenRef = useRef(0);
     const handledParkingZoneFocusTokenRef = useRef(0);
     const suppressUserRecenterRegionSyncUntilRef = useRef(0);
+    const pauseVehicleAnimationUntilRef = useRef(0);
+    const mapboxCameraRef = useRef<MapboxMapCameraHandle>(null);
     const tripRouteViewportSnapshotRef = useRef<{
         bounds: { north: number; south: number; east: number; west: number } | null;
         center: [number, number];
@@ -192,6 +194,32 @@ export default function MapScreen({
     const { hasFreshLocation, location, refresh: refreshLocation } = useUserLocation();
     const camera = useMapCamera();
     const bounds = useMapBounds();
+
+    // Imperative + state wrapper: moves camera via ref AND updates internal state
+    const focusOnCoordinateImperative = useCallback((latitude: number, longitude: number) => {
+        suppressUserRecenterRegionSyncUntilRef.current = Date.now() + 1000;
+        pauseVehicleAnimationUntilRef.current = Date.now() + 400;
+        // Mapbox (iOS)
+        mapboxCameraRef.current?.setCamera({
+            centerCoordinate: [longitude, latitude],
+            animationDuration: 300,
+            animationMode: 'easeTo',
+        });
+        // Google Maps (Android)
+        if (Platform.OS === 'android' && googleMapRef.current) {
+            googleMapRef.current.animateToRegion(
+                getRegionFromCoordinate(latitude, longitude, bounds.mapBounds, USER_LOCATION_REGION_DELTA),
+                300,
+            );
+        }
+        camera.focusOnCoordinate(latitude, longitude);
+    }, [bounds.mapBounds, camera.focusOnCoordinate]);
+
+    // Camera object with imperative focusOnCoordinate for hooks that use camera.focusOnCoordinate
+    const cameraWithImperative = useMemo(() => ({
+        ...camera,
+        focusOnCoordinate: focusOnCoordinateImperative,
+    }), [camera, focusOnCoordinateImperative]);
 
     // ── Smooth user location animation ──
     const animatedLat = useRef(new Animated.Value(0)).current;
@@ -277,6 +305,7 @@ export default function MapScreen({
     const animation = useVehicleAnimation(
         vehicles, filters.selectedVehicleTypes, filters.selectedLines,
         filters.isRouteMode, highlightedRoute, selectedStopLines,
+        pauseVehicleAnimationUntilRef,
     );
 
     const vehicleRoute = useVehicleRoute();
@@ -338,8 +367,8 @@ export default function MapScreen({
             tripRouteViewportSnapshotRef.current = {
                 bounds: bounds.mapBounds ? { ...bounds.mapBounds } : null,
                 center: [...camera.mapCenterCoordinate] as [number, number],
-                cameraLockedToInitialView: camera.cameraLockedToInitialView,
-                hasInitialCameraTarget: camera.hasInitialCameraTarget,
+                cameraLockedToInitialView: camera.cameraLockedToInitialViewRef.current,
+                hasInitialCameraTarget: camera.hasInitialCameraTargetRef.current,
                 userLocationVisible,
                 isUserFollowLocked,
             };
@@ -348,8 +377,6 @@ export default function MapScreen({
         previousHasTripRouteRef.current = hasTripRoute;
     }, [
         bounds.mapBounds,
-        camera.cameraLockedToInitialView,
-        camera.hasInitialCameraTarget,
         camera.mapCenterCoordinate,
         hasTripRoute,
         isUserFollowLocked,
@@ -419,9 +446,9 @@ export default function MapScreen({
             return;
         }
 
-        camera.focusOnCoordinate(focusVehicleCoordinate.latitude, focusVehicleCoordinate.longitude);
+        focusOnCoordinateImperative(focusVehicleCoordinate.latitude, focusVehicleCoordinate.longitude);
         bounds.setMapBounds(createFallbackBounds(focusVehicleCoordinate.latitude, focusVehicleCoordinate.longitude));
-    }, [bounds, camera, focusVehicleCoordinate]);
+    }, [bounds, focusOnCoordinateImperative, focusVehicleCoordinate]);
 
     useEffect(() => {
         if (!focusVehicleCoordinate || !focusVehicleId) {
@@ -532,14 +559,17 @@ export default function MapScreen({
     const droppedPinAlreadySaved = droppedPinFavoriteState.alreadySaved;
     const droppedPinMatchingFavoriteId = droppedPinFavoriteState.matchingFavoriteId;
     const stopVehicleActions = useMapStopVehicleActions({
-        focusOnCoordinate: camera.focusOnCoordinate,
+        focusOnCoordinate: focusOnCoordinateImperative,
+        suppressCameraSyncUntilRef: suppressUserRecenterRegionSyncUntilRef,
         currentLocation: location ? {
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
         } : null,
         favorites,
         onBuildRouteFromCoordinate,
+        unlockCamera: camera.unlockCamera,
         renderedDisplayVehicles: animation.renderedDisplayVehicles,
+        allVehicles: vehicles,
         selectedStop,
         selectedVehicle,
         selectedVehicleIdRef,
@@ -553,7 +583,7 @@ export default function MapScreen({
         camera.setRouteCameraBounds,
     );
     const selectionActions = useMapSelectionActions({
-        camera,
+        camera: cameraWithImperative,
         etasHook,
         favorites,
         filters,
@@ -660,9 +690,16 @@ export default function MapScreen({
             suppressUserRecenterRegionSyncUntilRef.current = Date.now() + 1800;
             camera.setTripCameraBounds(null);
             camera.setRouteCameraBounds(null);
-            camera.setCameraLockedToInitialView(false);
+            camera.cameraLockedToInitialViewRef.current = false;
             camera.setMapCenterCoordinate([location.coords.longitude, location.coords.latitude]);
             bounds.setMapBounds(nextBounds);
+
+            // Imperative: instant jump to user location with zoom
+            mapboxCameraRef.current?.setCamera({
+                centerCoordinate: [location.coords.longitude, location.coords.latitude],
+                zoomLevel: INITIAL_ZOOM_LEVEL,
+                animationDuration: 0,
+            });
 
             if (Platform.OS === 'android' && googleMapReady && googleMapRef.current) {
                 googleMapRef.current.animateToRegion(
@@ -684,6 +721,12 @@ export default function MapScreen({
     }, [bounds, camera, googleMapReady, location, refreshLocation]);
 
     const handleRegionDidChange = useCallback((event: any) => {
+        // Always track the user's current zoom level so we can preserve it
+        const eventZoom = event?.properties?.zoomLevel;
+        if (typeof eventZoom === 'number' && Number.isFinite(eventZoom)) {
+            camera.currentZoomRef.current = eventZoom;
+        }
+
         if (Date.now() < suppressUserRecenterRegionSyncUntilRef.current) {
             if (location) {
                 setUserLocationVisible(true);
@@ -696,7 +739,7 @@ export default function MapScreen({
             return;
         }
 
-        if (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget) camera.unlockCamera();
+        if (camera.cameraLockedToInitialViewRef.current && camera.hasInitialCameraTargetRef.current) camera.unlockCamera();
         if (camera.tripCameraBounds) camera.setTripCameraBounds(null);
         if (camera.routeCameraBounds) camera.setRouteCameraBounds(null);
 
@@ -758,7 +801,7 @@ export default function MapScreen({
             return;
         }
 
-        if (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget) {
+        if (camera.cameraLockedToInitialViewRef.current && camera.hasInitialCameraTargetRef.current) {
             camera.unlockCamera();
         }
         if (camera.tripCameraBounds) {
@@ -793,30 +836,30 @@ export default function MapScreen({
         [location?.coords.latitude, location?.coords.longitude],
     );
     const activeMapboxBounds = camera.tripCameraBounds || camera.routeCameraBounds;
-    const mapboxCameraZoomLevel = activeMapboxBounds
-        ? undefined
-        : (isUserFollowLocked
-            ? INITIAL_ZOOM_LEVEL
-            : (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget
-                ? INITIAL_ZOOM_LEVEL
-                : (!camera.hasInitialCameraTarget ? INITIAL_ZOOM_LEVEL : undefined)));
-    const mapboxCameraCenterCoordinate = activeMapboxBounds
-        ? undefined
-        : (isUserFollowLocked && location
-            ? [location.coords.longitude, location.coords.latitude] as [number, number]
-            : (camera.cameraLockedToInitialView && camera.hasInitialCameraTarget
-                ? camera.mapCenterCoordinate
-                : (!camera.hasInitialCameraTarget ? preferredInitialCenterCoordinate : undefined)));
-    const mapboxCameraBounds = activeMapboxBounds
-        ? {
-            ne: activeMapboxBounds.ne,
-            sw: activeMapboxBounds.sw,
-            paddingTop: 60,
-            paddingBottom: 80,
-            paddingLeft: 60,
-            paddingRight: 60,
+
+    // Imperative: follow user location when follow is locked
+    useEffect(() => {
+        if (isUserFollowLocked && location) {
+            mapboxCameraRef.current?.setCamera({
+                centerCoordinate: [location.coords.longitude, location.coords.latitude],
+                zoomLevel: INITIAL_ZOOM_LEVEL,
+                animationDuration: 300,
+                animationMode: 'easeTo',
+            });
         }
-        : undefined;
+    }, [isUserFollowLocked, location?.coords.latitude, location?.coords.longitude]);
+
+    // Imperative: show trip/route bounds
+    useEffect(() => {
+        if (activeMapboxBounds) {
+            mapboxCameraRef.current?.fitBounds(
+                activeMapboxBounds.ne,
+                activeMapboxBounds.sw,
+                [60, 60, 80, 60], // top, right, bottom, left
+                800,
+            );
+        }
+    }, [activeMapboxBounds?.ne[0], activeMapboxBounds?.ne[1], activeMapboxBounds?.sw[0], activeMapboxBounds?.sw[1]]);
 
     useMapPanelOrchestration({
         clearVehicleRoute: vehicleRoute.clearVehicleRoute,
@@ -1019,12 +1062,12 @@ export default function MapScreen({
                     </GoogleMapCanvas>
                 ) : (
                 <MapboxMapCanvas
-                    bounds={mapboxCameraBounds}
-                    centerCoordinate={mapboxCameraCenterCoordinate}
+                    ref={mapboxCameraRef}
+                    defaultCenterCoordinate={preferredInitialCenterCoordinate}
+                    defaultZoomLevel={INITIAL_ZOOM_LEVEL}
                     mapStyle={MAP_STYLE}
                     style={styles.map}
                     userLocationGeoJSON={userLocationGeoJSON}
-                    zoomLevel={mapboxCameraZoomLevel}
                     onMapPress={pinParkingActions.onMapPress}
                     onRegionDidChange={handleRegionDidChange}
                     onLongPress={pinParkingActions.onMapLongPress}

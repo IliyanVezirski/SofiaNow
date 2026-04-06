@@ -36,7 +36,7 @@ export const SupportModal: React.FC<Props> = ({
                                 {/* <Ionicons name="heart-outline" size={14} color="#1D4ED8" /> */}
                                 <Text style={styles.supportTitle}>Почерпи разработчика</Text>
                             </View>
-                            <Text style={styles.supportSubtitle}>Харесвате ли Sofia Go? Почерпете разработчика едно кафе.</Text>
+                            <Text style={styles.supportSubtitle}>Харесвате ли SofiaNow? Почерпете разработчика едно кафе.</Text>
                         </View>
 
                         <TouchableOpacity

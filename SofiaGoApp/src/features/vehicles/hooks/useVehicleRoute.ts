@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { TripStopInfo, Vehicle } from '../../../types/vehicles';
 import { fetchTripStops } from '../../../services/cgmApi/tripStops';
 import { fetchLineRouteGeometry, fetchLineRouteGeometryByRouteId, fetchOsrmRoute } from '../../../services/stopsApi';
@@ -34,11 +34,20 @@ export const useVehicleRoute = () => {
     const [vehicleRouteCoords, setVehicleRouteCoords] = useState<[number, number][]>([]);
     const [vehicleRouteVehicleId, setVehicleRouteVehicleId] = useState<string | null>(null);
     const [vehicleRouteLoading, setVehicleRouteLoading] = useState(false);
+    const coordsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const hasVehicleRoute = vehicleRouteStops.length > 0;
 
+    const deferSetCoords = useCallback((coords: [number, number][]) => {
+        if (coordsTimerRef.current != null) clearTimeout(coordsTimerRef.current);
+        coordsTimerRef.current = setTimeout(() => {
+            setVehicleRouteCoords(coords);
+        }, 150);
+    }, []);
+
     const loadVehicleRoute = useCallback(async (vehicle: Vehicle) => {
         if (vehicleRouteVehicleId === vehicle.id) {
+            if (coordsTimerRef.current != null) clearTimeout(coordsTimerRef.current);
             setVehicleRouteStops([]);
             setVehicleRouteCoords([]);
             setVehicleRouteVehicleId(null);
@@ -67,7 +76,7 @@ export const useVehicleRoute = () => {
                 .sort((left, right) => right.score - left.score)[0];
 
             if (bestDirection?.direction?.coordinates?.length) {
-                setVehicleRouteCoords(bestDirection.direction.coordinates);
+                deferSetCoords(bestDirection.direction.coordinates);
                 return;
             }
 
@@ -78,17 +87,18 @@ export const useVehicleRoute = () => {
             if (waypoints.length >= 2) {
                 try {
                     const osrmCoords = await fetchOsrmRoute(waypoints);
-                    setVehicleRouteCoords(osrmCoords);
+                    deferSetCoords(osrmCoords);
                 } catch {
-                    setVehicleRouteCoords(waypoints.map((waypoint) => [waypoint.longitude, waypoint.latitude]));
+                    deferSetCoords(waypoints.map((waypoint) => [waypoint.longitude, waypoint.latitude]));
                 }
             }
         } finally {
             setVehicleRouteLoading(false);
         }
-    }, [vehicleRouteVehicleId]);
+    }, [vehicleRouteVehicleId, deferSetCoords]);
 
     const clearVehicleRoute = useCallback(() => {
+        if (coordsTimerRef.current != null) clearTimeout(coordsTimerRef.current);
         setVehicleRouteStops([]);
         setVehicleRouteCoords([]);
         setVehicleRouteVehicleId(null);

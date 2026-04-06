@@ -135,11 +135,14 @@ export const useRouteGeometry = (
 
     useEffect(() => {
         let isMounted = true;
+        let cameraTimerId: ReturnType<typeof setTimeout> | null = null;
         if (!highlightedRoute) {
             setRouteGeometryVersion((v) => v + 1);
             setRouteGeometry(null);
             onRouteBoundsChange?.(null);
-            return () => { isMounted = false; };
+            return () => {
+                isMounted = false;
+            };
         }
 
         (async () => {
@@ -167,15 +170,24 @@ export const useRouteGeometry = (
             const latSpread = maxLat - minLat;
             const lonPad = Math.max(lonSpread * 0.18, 0.0035);
             const latPad = Math.max(latSpread * 0.18, 0.0035);
-            onRouteBoundsChange?.({
-                ne: [maxLon + lonPad, maxLat + latPad],
-                sw: [minLon - lonPad, minLat - latPad],
-            });
-            const sum = allCoords.reduce((acc, c) => ({ lon: acc.lon + c[0], lat: acc.lat + c[1] }), { lon: 0, lat: 0 });
-            onCameraFocus?.(sum.lon / allCoords.length, sum.lat / allCoords.length);
+
+            // Defer camera animation until after route layers have rendered
+            // to avoid UI freeze from simultaneous layer creation + camera transition
+            cameraTimerId = setTimeout(() => {
+                if (!isMounted) return;
+                onRouteBoundsChange?.({
+                    ne: [maxLon + lonPad, maxLat + latPad],
+                    sw: [minLon - lonPad, minLat - latPad],
+                });
+                const sum = allCoords.reduce((acc, c) => ({ lon: acc.lon + c[0], lat: acc.lat + c[1] }), { lon: 0, lat: 0 });
+                onCameraFocus?.(sum.lon / allCoords.length, sum.lat / allCoords.length);
+            }, 150);
         })();
 
-        return () => { isMounted = false; };
+        return () => {
+            isMounted = false;
+            if (cameraTimerId != null) clearTimeout(cameraTimerId);
+        };
     }, [highlightedRoute]);
 
     useEffect(() => { setRouteStopsPanelVisible(false); }, [highlightedRoute]);

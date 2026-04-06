@@ -18,8 +18,8 @@ type SettingsInfoSection = {
 const ABOUT_SECTIONS: SettingsInfoSection[] = [
     {
         icon: 'information-circle-outline',
-        title: 'За Sofia Go',
-        body: 'Sofia Go е независимо информационно приложение за придвижване и паркиране в София. То не е официално приложение на Центъра за градска мобилност, София Трафик, Столична община, Google, OpenStreetMap или други външни доставчици на данни.',
+        title: 'За SofiaNow',
+        body: 'SofiaNow е независимо информационно приложение за придвижване и паркиране в София. То не е официално приложение на Центъра за градска мобилност, София Трафик, Столична община, Google, OpenStreetMap или други външни доставчици на данни.',
     },
     {
         icon: 'bus-outline',
@@ -156,7 +156,7 @@ export const SettingsModal: React.FC<Props> = ({
                         {privacyExpanded ? (
                             <View style={styles.privacyContent}>
                                 <Text style={styles.privacyIntro}>
-                                    Sofia Go е приложение за градски транспорт и паркиране в София. Тук е описано какви данни използва приложението и как се обработват.
+                                    SofiaNow е приложение за градски транспорт и паркиране в София. Тук е описано какви данни използва приложението и как се обработват.
                                 </Text>
 
                                 {PRIVACY_SECTIONS.map((section) => {

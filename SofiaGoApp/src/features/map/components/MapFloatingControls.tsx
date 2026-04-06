@@ -68,7 +68,7 @@ export function MapFloatingControls({
     const mapLayerOptionCount = isTransitMode ? 3 : 1;
     const mapLayerPillWidth = 36 + (mapLayerOptionCount * 34);
     const mapLayerHiddenOffset = -(mapLayerPillWidth - 18);
-    const mapLayerTouchAreaWidth = mapLayerPillWidth - 10;
+    const mapLayerTouchAreaWidth = 42;
 
     return (
         <>

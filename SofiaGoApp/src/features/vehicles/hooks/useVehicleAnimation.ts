@@ -38,6 +38,7 @@ export const useVehicleAnimation = (
     isRouteMode: boolean,
     highlightedRoute: { type: VehicleType; line: string } | null | undefined,
     selectedStopLines: string[],
+    pauseAnimationUntilRef?: React.MutableRefObject<number>,
 ) => {
     const [animatedVehicles, setAnimatedVehicles] = useState<Vehicle[]>([]);
     const lastHeadingByVehicleRef = useRef<Record<string, number>>({});
@@ -134,6 +135,13 @@ export const useVehicleAnimation = (
             if (!states.length) {
                 setAnimatedVehicles([]);
                 animationFrameRef.current = null;
+                return;
+            }
+
+            // While camera is animating, skip per-frame updates to avoid jank.
+            // The rAF loop keeps running so it resumes seamlessly.
+            if (pauseAnimationUntilRef && currentTime < pauseAnimationUntilRef.current) {
+                animationFrameRef.current = requestAnimationFrame(renderAnimationFrame);
                 return;
             }
 

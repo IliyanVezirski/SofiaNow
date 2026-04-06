@@ -167,7 +167,7 @@ export function MapFeaturePanels({
                 query={search.locationSearchQuery}
                 loading={search.locationSearchLoading}
                 results={visibleSearchResults}
-                placeholder={isParkingMode ? 'Търси адрес или място...' : 'Търси адрес, линия или спирка...'}
+                placeholder={isParkingMode ? 'Търси адрес или място' : 'Търси адрес, линия или спирка'}
                 allowSaveFavorite={!isParkingMode}
                 onChangeQuery={search.setLocationSearchQuery}
                 onClose={() => search.setSearchModalVisible(false)}

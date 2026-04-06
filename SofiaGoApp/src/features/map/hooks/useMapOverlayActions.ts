@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useCallback, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from 'react';
 
 type PreviousViewport = {
     bounds: { north: number; south: number; east: number; west: number } | null;
@@ -16,8 +16,8 @@ type Params = {
     camera: {
         setTripCameraBounds: (value: { ne: [number, number]; sw: [number, number] } | null) => void;
         setRouteCameraBounds: (value: { ne: [number, number]; sw: [number, number] } | null) => void;
-        setHasInitialCameraTarget: (value: boolean) => void;
-        setCameraLockedToInitialView: (value: boolean) => void;
+        hasInitialCameraTargetRef: RefObject<boolean>;
+        cameraLockedToInitialViewRef: RefObject<boolean>;
         setMapCenterCoordinate: (value: [number, number]) => void;
         unlockCamera: () => void;
     };
@@ -53,8 +53,8 @@ export const useMapOverlayActions = ({
 
         if (previousViewport) {
             suppressUserRecenterRegionSyncUntilRef.current = Date.now() + 900;
-            camera.setHasInitialCameraTarget(previousViewport.hasInitialCameraTarget);
-            camera.setCameraLockedToInitialView(previousViewport.cameraLockedToInitialView);
+            camera.hasInitialCameraTargetRef.current = previousViewport.hasInitialCameraTarget;
+            camera.cameraLockedToInitialViewRef.current = previousViewport.cameraLockedToInitialView;
             camera.setMapCenterCoordinate(previousViewport.center);
             setUserLocationVisible(previousViewport.userLocationVisible);
             setIsUserFollowLocked(previousViewport.isUserFollowLocked);

@@ -20,6 +20,22 @@ const SCHEDULE_KIND_META: Record<ScheduleKind, { label: string; ionicon: string 
     night: { label: 'Нощен', ionicon: 'moon-outline' },
 };
 
+const LINE_KIND_TINT: Record<ScheduleKind, string> = {
+    bus: 'rgba(220,38,38,0.07)',
+    tram: 'rgba(234,138,0,0.07)',
+    trolley: 'rgba(37,99,235,0.07)',
+    subway: 'rgba(37,99,235,0.07)',
+    night: 'rgba(15,23,42,0.07)',
+};
+
+const LINE_KIND_BORDER_TINT: Record<ScheduleKind, string> = {
+    bus: 'rgba(220,38,38,0.18)',
+    tram: 'rgba(234,138,0,0.18)',
+    trolley: 'rgba(37,99,235,0.18)',
+    subway: 'rgba(37,99,235,0.18)',
+    night: 'rgba(15,23,42,0.18)',
+};
+
 const getLineKind = (line: AvailableLine): ScheduleKind => {
     if (line.isNight) return 'night';
     if (line.type === 'trolley') return 'trolley';
@@ -295,7 +311,7 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
     }, [expandedDirectionAliases, expandedDirectionId, expandedDirectionName, expandedStopId, selectedDayType, selectedLine, tripApiLineSchedule]);
 
     const formatMinutes = (m: number) => {
-        const h = Math.floor(m / 60);
+        const h = Math.floor(m / 60) % 24;
         const min = m % 60;
         return `${h}:${min < 10 ? '0' : ''}${min}`;
     };
@@ -553,10 +569,15 @@ export default function SchedulesScreen({ onOpenRoute, onClose, onFocusStop }: S
                             <View style={styles.linesGrid}>
                                 {linesForKind.map((line, index) => {
                                     const isActive = selectedLine?.routeId === line.routeId && selectedLine?.line === line.line;
+                                    const kind = getLineKind(line);
                                     return (
                                         <TouchableOpacity
                                             key={`schedule-line-${line.routeId || line.line}-${index}`}
-                                            style={[styles.lineChip, isActive && styles.chipActive]}
+                                            style={[
+                                                styles.lineChip,
+                                                !isActive && { borderColor: LINE_KIND_BORDER_TINT[kind] },
+                                                isActive && styles.chipActive,
+                                            ]}
                                             onPress={() => {
                                                 setExpandedDirectionId(null);
                                                 setExpandedDirectionName(null);

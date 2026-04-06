@@ -167,20 +167,21 @@ export const normalizeStoredParkingCar = (value: unknown): ParkingCar | null => 
 
     const entry = value as Record<string, unknown>;
     const id = typeof entry.id === 'string' ? entry.id : '';
-    const plate = typeof entry.plate === 'string' ? entry.plate : '';
-    const plateKind: ParkingCarPlateKind = entry.plateKind === 'foreign' ? 'foreign' : 'bg';
-    const validation = validateParkingCarPlate(plate, plateKind);
+    const plate = typeof entry.plate === 'string' ? String(entry.plate).trim() : '';
 
-    if (!id || !validation.isValid) {
+    if (!id || !plate) {
         return null;
     }
+
+    const plateKind: ParkingCarPlateKind = entry.plateKind === 'foreign' ? 'foreign' : 'bg';
+    const normalizedPlate = normalizeParkingCarPlate(plate, plateKind);
 
     return {
         id,
         name: typeof entry.name === 'string' ? normalizeParkingCarName(entry.name).slice(0, MAX_PARKING_CAR_NAME_LENGTH) || null : null,
-        plate: validation.normalizedPlate,
-        displayPlate: formatParkingCarDisplayPlate(validation.normalizedPlate, validation.plateKind),
-        plateKind: validation.plateKind,
+        plate: normalizedPlate,
+        displayPlate: formatParkingCarDisplayPlate(normalizedPlate, plateKind),
+        plateKind,
         isDefault: entry.isDefault === true,
         createdAt: typeof entry.createdAt === 'number' && Number.isFinite(entry.createdAt) ? entry.createdAt : Date.now(),
     };

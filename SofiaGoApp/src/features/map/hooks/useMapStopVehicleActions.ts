@@ -1,8 +1,8 @@
-import { Alert, InteractionManager } from 'react-native';
-import { useCallback, useMemo, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { Alert } from 'react-native';
+import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import { fetchTripDelay } from '../../../services/cgmApi/delays';
-import { fetchVehiclesNearby } from '../../../services/cgmApi/vehiclePositions';
+import { fetchVehicleByTripId, fetchVehiclesNearby } from '../../../services/cgmApi/vehiclePositions';
 import { openExternalWalkingNavigation } from '../../../services/externalNavigation';
 import { findBestLiveVehicleForEta } from '../../vehicles/utils/liveVehicleMatching';
 import type { Vehicle } from '../../../types/vehicles';
@@ -26,6 +26,7 @@ type SelectedStopLike = {
 
 type Params = {
     focusOnCoordinate?: (latitude: number, longitude: number) => void;
+    suppressCameraSyncUntilRef?: React.MutableRefObject<number>;
     currentLocation?: {
         latitude: number;
         longitude: number;
@@ -43,6 +44,8 @@ type Params = {
         }) => Promise<unknown>;
     };
     onBuildRouteFromCoordinate?: (dstLat: number, dstLon: number, curLat?: number, curLon?: number) => void;
+    unlockCamera?: () => void;
+    allVehicles: Vehicle[];
     renderedDisplayVehicles: Vehicle[];
     selectedStop: {
         selectedStop: SelectedStopLike | null;
@@ -60,9 +63,12 @@ type Params = {
 
 export const useMapStopVehicleActions = ({
     focusOnCoordinate,
+    suppressCameraSyncUntilRef,
     currentLocation,
     favorites,
     onBuildRouteFromCoordinate,
+    unlockCamera,
+    allVehicles,
     renderedDisplayVehicles,
     selectedStop,
     selectedVehicle,
@@ -120,22 +126,49 @@ export const useMapStopVehicleActions = ({
         return findBestLiveVehicleForEta(eta, stop, renderedDisplayVehicles);
     }, [renderedDisplayVehicles, selectedStop.selectedStop]);
 
+    const selectVehicleCameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const selectVehiclePanelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     const selectVehicle = useCallback((vehicle: Vehicle, closeSelectedStop = false) => {
-        const runSelection = () => {
-            selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
-            selectedVehicleIdRef.current = vehicle.id;
-            setSelectedVehicleId(vehicle.id);
-            focusOnCoordinate?.(vehicle.latitude, vehicle.longitude);
-            void fetchTripDelay(vehicle.tripId).then((delay) => {
-                setVehicleDelays((previous) => ({ ...previous, [vehicle.id]: delay }));
-            });
-        };
+        // Cancel any pending timers from a previous rapid tap
+        if (selectVehicleCameraTimerRef.current != null) clearTimeout(selectVehicleCameraTimerRef.current);
+        if (selectVehiclePanelTimerRef.current != null) clearTimeout(selectVehiclePanelTimerRef.current);
+
+        // Suppress useMapFocusSync BEFORE closeSelectedStop triggers a re-render,
+        // otherwise the sync effect animates to the old stop coordinates
+        if (suppressCameraSyncUntilRef) {
+            suppressCameraSyncUntilRef.current = Date.now() + 1500;
+        }
 
         if (closeSelectedStop) {
             selectedStop.closeSelectedStop();
         }
 
-        InteractionManager.runAfterInteractions(runSelection);
+        selectedStop.suppressMapPressUntilRef.current = Date.now() + 400;
+        selectedVehicleIdRef.current = vehicle.id;
+
+        if (closeSelectedStop) {
+            // Delay both camera and panel until after modal close animation (~300ms)
+            selectVehicleCameraTimerRef.current = setTimeout(() => {
+                focusOnCoordinate?.(vehicle.latitude, vehicle.longitude);
+                setSelectedVehicleId(vehicle.id);
+                void fetchTripDelay(vehicle.tripId).then((delay) => {
+                    setVehicleDelays((previous) => ({ ...previous, [vehicle.id]: delay }));
+                });
+            }, 400);
+        } else {
+            // Direct tap: start camera animation immediately (lightweight render)
+            focusOnCoordinate?.(vehicle.latitude, vehicle.longitude);
+            // Defer heavy panel render so the camera animation
+            // starts before the JS thread gets busy with the vehicle info panel
+            selectVehiclePanelTimerRef.current = setTimeout(() => {
+                setSelectedVehicleId(vehicle.id);
+                void fetchTripDelay(vehicle.tripId).then((delay) => {
+                    setVehicleDelays((previous) => ({ ...previous, [vehicle.id]: delay }));
+                });
+            }, 350);
+        }
     }, [focusOnCoordinate, selectedStop, selectedVehicleIdRef, setSelectedVehicleId, setVehicleDelays]);
 
     const handleSelectedStopPlaceAction = useCallback(() => {
@@ -217,13 +250,32 @@ export const useMapStopVehicleActions = ({
             return;
         }
 
-        if (!stop) {
-            Alert.alert('Няма данни', 'В момента няма налично live превозно средство за това пристигане.');
-            return;
+        // Try to find vehicle by tripId locally in ALL loaded vehicles (not just
+        // the rendered 40) — avoids a heavy network request + protobuf decode
+        if (eta.tripId) {
+            const localMatch = allVehicles.find((v) => v.tripId === eta.tripId);
+            if (localMatch) {
+                selectVehicle(localMatch, true);
+                return;
+            }
         }
 
         void (async () => {
             try {
+                // Last resort: fetch from network
+                if (eta.tripId) {
+                    const tripVehicle = await fetchVehicleByTripId(eta.tripId);
+                    if (tripVehicle) {
+                        selectVehicle(tripVehicle, true);
+                        return;
+                    }
+                }
+
+                if (!stop) {
+                    Alert.alert('Няма данни', 'В момента няма налично live превозно средство за това пристигане.');
+                    return;
+                }
+
                 const nearbyVehicles = await fetchVehiclesNearby(stop.latitude, stop.longitude);
                 const fallbackVehicle = findBestLiveVehicleForEta(eta, stop, nearbyVehicles);
 
@@ -237,7 +289,7 @@ export const useMapStopVehicleActions = ({
                 Alert.alert('Грешка', 'Неуспешно зареждане на live превозните средства.');
             }
         })();
-    }, [resolveLiveVehicleForEta, selectVehicle, selectedStop.selectedStop]);
+    }, [resolveLiveVehicleForEta, selectVehicle, selectedStop.selectedStop, allVehicles]);
 
     const handleTrackedVehicleSelect = useCallback((vehicle: Vehicle) => {
         selectVehicle(vehicle, true);
@@ -254,12 +306,14 @@ export const useMapStopVehicleActions = ({
 
         selectedVehicleIdRef.current = null;
         setSelectedVehicleId(null);
-    }, [selectedVehicleIdRef, setSelectedVehicleId]);
+        unlockCamera?.();
+    }, [selectedVehicleIdRef, setSelectedVehicleId, unlockCamera]);
 
     const handleVehiclePanelClose = useCallback(() => {
         selectedVehicleIdRef.current = null;
         setSelectedVehicleId(null);
-    }, [selectedVehicleIdRef, setSelectedVehicleId]);
+        unlockCamera?.();
+    }, [selectedVehicleIdRef, setSelectedVehicleId, unlockCamera]);
 
     const handleVehiclePanelLoadRoute = useCallback(() => {
         if (!selectedVehicle) {

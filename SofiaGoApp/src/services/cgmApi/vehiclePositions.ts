@@ -89,6 +89,28 @@ export const fetchVehiclesNearby = async (lat: number, lon: number): Promise<Veh
     }
 };
 
+export const fetchVehicleByTripId = async (tripId: string): Promise<Vehicle | null> => {
+    if (!tripId) return null;
+    try {
+        const [vpEntities, tripUpdateEntities] = await Promise.all([
+            getVehiclePositionEntities(), getTripUpdateEntities(),
+        ]);
+        const upcomingStopTargetsByTripId = getUpcomingStopTargetsByTripId(tripUpdateEntities, stopCoordinatesById);
+
+        for (const entity of vpEntities) {
+            const entityTripId = entity.vehicle?.trip?.tripId || entity.id;
+            if (entityTripId === tripId) {
+                const vehicle = buildVehicleFromEntity(entity, upcomingStopTargetsByTripId);
+                if (vehicle) return vehicle;
+            }
+        }
+        return null;
+    } catch (error) {
+        console.error('Failed to fetch vehicle by tripId:', error);
+        return null;
+    }
+};
+
 export const fetchVehiclesInBounds = async (bounds: MapBounds): Promise<Vehicle[]> => {
     try {
         const [vpEntities, tripUpdateEntities] = await Promise.all([

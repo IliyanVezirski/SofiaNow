@@ -31,7 +31,12 @@ export function HomeActionBar({ buttons, activeTab, searchVisible, favoritesVisi
                             <View style={[styles.homeActionIconWrap, isActive && styles.homeActionIconWrapActive]}>
                                 <Ionicons name={button.icon} size={20} color={isActive ? '#FFFFFF' : '#0F172A'} />
                             </View>
-                            <Text style={[styles.homeActionLabel, isActive && styles.homeActionLabelActive]}>{button.label}</Text>
+                            <Text
+                                style={[styles.homeActionLabel, isActive && styles.homeActionLabelActive]}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.8}
+                            >{button.label}</Text>
                         </TouchableOpacity>
                     );
                 })}
