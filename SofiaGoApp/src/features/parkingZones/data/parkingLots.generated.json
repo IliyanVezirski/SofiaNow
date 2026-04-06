@@ -712,5 +712,22 @@
     "phone": null,
     "maxheight": null,
     "surface": null
+  },
+  {
+    "id": "osm-way-500059180",
+    "name": "Наказателен паркинг Славия",
+    "latitude": 42.676906,
+    "longitude": 23.2779495,
+    "category": "impound",
+    "capacity": null,
+    "fee": true,
+    "charge": null,
+    "operator": "Център за градска мобилност",
+    "parkRide": false,
+    "openingHours": null,
+    "website": null,
+    "phone": null,
+    "maxheight": null,
+    "surface": null
   }
 ]
