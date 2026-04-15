@@ -43,6 +43,7 @@
     "react-leaflet": "^5.0.0",
     "react-native": "0.83.4",
     "react-native-gesture-handler": "~2.30.0",
+    "react-native-iap": "^14.7.20",
     "react-native-maps": "1.27.2",
     "react-native-purchases": "^9.11.2",
     "react-native-reanimated": "4.2.1",

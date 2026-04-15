@@ -365,20 +365,24 @@ export const ReminderCenterButton: React.FC<Props> = ({ anchorStyle, inline = fa
         return `след ${minutesAway} мин`;
     };
 
+    const hasAnything = totalReminders > 0 || historyReminders.length > 0;
+
     return (
         <>
-            <View style={[inline ? styles.inlineWrap : styles.fabWrap, anchorStyle]} pointerEvents="box-none">
-                <TouchableOpacity style={[styles.fab, transparent && styles.fabTransparent]} onPress={() => setVisible(true)}>
-                    <View style={styles.fabIcon}>
-                        <Ionicons name="notifications-outline" size={18} color="#0F172A" />
-                    </View>
-                    {hasReminders ? (
-                        <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{countLabel}</Text>
+            {hasAnything ? (
+                <View style={[inline ? styles.inlineWrap : styles.fabWrap, anchorStyle]} pointerEvents="box-none">
+                    <TouchableOpacity style={[styles.fab, transparent && styles.fabTransparent]} onPress={() => setVisible(true)}>
+                        <View style={styles.fabIcon}>
+                            <Ionicons name="notifications-outline" size={18} color="#0F172A" />
                         </View>
-                    ) : null}
-                </TouchableOpacity>
-            </View>
+                        {hasReminders ? (
+                            <View style={styles.badge}>
+                                <Text style={styles.badgeText}>{countLabel}</Text>
+                            </View>
+                        ) : null}
+                    </TouchableOpacity>
+                </View>
+            ) : null}
 
             <Modal transparent animationType="fade" visible={visible} statusBarTranslucent onRequestClose={() => setVisible(false)}>
                 <View style={styles.panelWrap}>

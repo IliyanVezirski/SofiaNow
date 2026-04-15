@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Linking } from 'react-native';
+import { Animated, Easing } from 'react-native';
 
+import { buyOneTime, buySubscription, type OneTimeId, type SubscriptionId } from '../../../services/billing';
 import type { MapExperienceMode } from '../components/MapModeSwitcher';
 
 type Params = {
     mapExperienceMode: MapExperienceMode;
-    supportUrl: string;
 };
 
-export const useMapFloatingControls = ({ mapExperienceMode, supportUrl }: Params) => {
+export const useMapFloatingControls = ({ mapExperienceMode }: Params) => {
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [supportVisible, setSupportVisible] = useState(false);
     const [settingsExpanded, setSettingsExpanded] = useState(false);
@@ -127,24 +127,16 @@ export const useMapFloatingControls = ({ mapExperienceMode, supportUrl }: Params
     }, [collapseSettingsPill]);
 
     const handleOpenSupportLink = useCallback(() => {
-        if (!supportUrl) {
-            return;
-        }
+        // legacy – no longer used
+    }, []);
 
-        void (async () => {
-            try {
-                const canOpen = await Linking.canOpenURL(supportUrl);
-                if (!canOpen) {
-                    return;
-                }
+    const handleBuyOneTime = useCallback(async (productId: OneTimeId) => {
+        return buyOneTime(productId);
+    }, []);
 
-                await Linking.openURL(supportUrl);
-                setSupportVisible(false);
-            } catch {
-                return;
-            }
-        })();
-    }, [supportUrl]);
+    const handleBuySubscription = useCallback(async (subscriptionId: SubscriptionId) => {
+        return buySubscription(subscriptionId);
+    }, []);
 
     useEffect(() => {
         setGoogleShowTraffic(mapExperienceMode === 'parking');
@@ -155,6 +147,8 @@ export const useMapFloatingControls = ({ mapExperienceMode, supportUrl }: Params
 
     return {
         googleShowTraffic,
+        handleBuyOneTime,
+        handleBuySubscription,
         handleGoogleTrafficPress,
         handleMapLayerToggle,
         handleOpenSupportLink,

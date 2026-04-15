@@ -54,7 +54,6 @@ type Props = {
     onSelectedStopPlaceAction: () => void;
     onSelectedStopNavigateAction: () => void;
     onSelectedStopEtaVehicleAction: (eta: any) => void;
-    hasLiveVehicleForEta: (eta: any) => boolean;
     onSelectedVehicleClose: () => void;
     onSelectedVehicleLoadRoute: () => void;
     onTransitDroppedPinBuildRoute?: () => void;
@@ -126,7 +125,6 @@ export function MapFeaturePanels({
     onSelectedStopPlaceAction,
     onSelectedStopNavigateAction,
     onSelectedStopEtaVehicleAction,
-    hasLiveVehicleForEta,
     onSelectedVehicleClose,
     onSelectedVehicleLoadRoute,
     onTransitDroppedPinBuildRoute,
@@ -286,7 +284,6 @@ export function MapFeaturePanels({
                     onPlaceAction={onSelectedStopPlaceAction}
                     onNavigateAction={onSelectedStopNavigateAction}
                     onEtaVehicleAction={onSelectedStopEtaVehicleAction}
-                    hasLiveVehicleForEta={hasLiveVehicleForEta}
                     placeSaved={selectedStopMatchingFavorite}
                     placeSubmitting={selectedStopPlaceSubmitting}
                 />
@@ -338,7 +335,8 @@ export function MapFeaturePanels({
             <SupportModal
                 visible={floatingControls.supportVisible}
                 onClose={() => floatingControls.setSupportVisible(false)}
-                onOpenSupport={floatingControls.handleOpenSupportLink}
+                onBuyOneTime={floatingControls.handleBuyOneTime}
+                onBuySubscription={floatingControls.handleBuySubscription}
             />
 
             {activeParkingOverlay ? (

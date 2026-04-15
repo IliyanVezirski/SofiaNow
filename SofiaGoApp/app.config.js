@@ -7,7 +7,7 @@ export default {
     owner: 'iliaynski90',
     name: IS_DEV ? 'SofiaNow (Dev)' : 'SofiaNow',
     slug: 'SofiaGoApp',
-    version: '1.1.7',
+    version: '1.2.0',
     orientation: 'portrait',
     icon: './assets/app-icon-new.png',
     userInterfaceStyle: 'light',
@@ -37,7 +37,7 @@ export default {
         color: '#0F766E',
       },
       package: 'com.iliyanvezirski.SofiaGoApp',
-      versionCode: 11,
+      versionCode: 12,
     },
     web: {
       favicon: './assets/app-icon-new.png',
@@ -56,6 +56,7 @@ export default {
       'expo-asset',
       'expo-font',
       'expo-background-task',
+      'react-native-iap',
     ],
     extra: {
       eas: {

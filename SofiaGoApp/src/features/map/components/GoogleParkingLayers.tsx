@@ -37,14 +37,6 @@ export const GoogleParkingLayers: React.FC<GoogleParkingLayersProps> = ({
     onParkingZonePress,
     onParkingLotPress,
 }) => {
-    if (!isParkingMode) {
-        return null;
-    }
-
-    const selectedParkingZoneFeature = visibleParkingZonesFeatureCollection?.features.find(
-        (feature) => feature.properties.id === selectedParkingZoneFeatureId,
-    ) ?? null;
-
     return (
         <>
             {visibleParkingZonesFeatureCollection?.features.map((feature) => (
@@ -53,10 +45,10 @@ export const GoogleParkingLayers: React.FC<GoogleParkingLayersProps> = ({
                         <Polygon
                             key={`parking-zone-${feature.properties.id}-${index}`}
                             coordinates={ring.map(toMapCoordinate)}
-                            strokeColor={feature.properties.lineColor}
-                            strokeWidth={1.8}
-                            fillColor={`${feature.properties.lineColor}2E`}
-                            tappable
+                            strokeColor={isParkingMode ? feature.properties.lineColor : 'rgba(0,0,0,0)'}
+                            strokeWidth={isParkingMode ? 1.8 : 0}
+                            fillColor={isParkingMode ? `${feature.properties.lineColor}2E` : 'rgba(0,0,0,0)'}
+                            tappable={isParkingMode}
                             zIndex={1}
                             onPress={() => onParkingZonePress(feature.properties.id)}
                         />
@@ -64,20 +56,23 @@ export const GoogleParkingLayers: React.FC<GoogleParkingLayersProps> = ({
                 </React.Fragment>
             ))}
 
-            {selectedParkingZoneFeature ? (
-                <React.Fragment key={`parking-zone-highlight-${selectedParkingZoneFeature.properties.id}`}>
-                    {getPolygonRings(selectedParkingZoneFeature.geometry).map((ring, index) => (
-                        <Polygon
-                            key={`parking-zone-highlight-${selectedParkingZoneFeature.properties.id}-${index}`}
-                            coordinates={ring.map(toMapCoordinate)}
-                            strokeColor={selectedParkingZoneFeature.properties.lineColor}
-                            strokeWidth={5}
-                            fillColor="rgba(0,0,0,0)"
-                            zIndex={3}
-                        />
-                    ))}
-                </React.Fragment>
-            ) : null}
+            {visibleParkingZonesFeatureCollection?.features.map((feature) => {
+                const isHighlighted = isParkingMode && feature.properties.id === selectedParkingZoneFeatureId;
+                return (
+                    <React.Fragment key={`parking-zone-highlight-${feature.properties.id}`}>
+                        {getPolygonRings(feature.geometry).map((ring, index) => (
+                            <Polygon
+                                key={`parking-zone-highlight-${feature.properties.id}-${index}`}
+                                coordinates={ring.map(toMapCoordinate)}
+                                strokeColor={isHighlighted ? feature.properties.lineColor : 'rgba(0,0,0,0)'}
+                                strokeWidth={isHighlighted ? 5 : 0}
+                                fillColor="rgba(0,0,0,0)"
+                                zIndex={3}
+                            />
+                        ))}
+                    </React.Fragment>
+                );
+            })}
 
             {parkingLots.map((lot) => {
                 const meta = CATEGORY_META[lot.category];

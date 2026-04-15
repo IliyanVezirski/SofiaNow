@@ -18,7 +18,6 @@ interface Props {
     onPlaceAction?: () => void;
     onNavigateAction?: () => void;
     onEtaVehicleAction?: (eta: StopEta) => void;
-    hasLiveVehicleForEta?: (eta: StopEta) => boolean;
     placeSaved?: boolean;
     placeSubmitting?: boolean;
 }
@@ -32,7 +31,6 @@ export const StopInfoPanel: React.FC<Props> = ({
     onPlaceAction,
     onNavigateAction,
     onEtaVehicleAction,
-    hasLiveVehicleForEta,
     placeSaved = false,
     placeSubmitting = false,
 }) => {
@@ -131,7 +129,7 @@ export const StopInfoPanel: React.FC<Props> = ({
                                                         onPress={() => onEtaVehicleAction(eta)}
                                                     >
                                                         <Ionicons
-                                                            name="bus-outline"
+                                                            name="map-outline"
                                                             size={13}
                                                             color="#64748B"
                                                         />

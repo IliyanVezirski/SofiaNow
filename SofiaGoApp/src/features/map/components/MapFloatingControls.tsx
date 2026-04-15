@@ -178,11 +178,10 @@ export function MapFloatingControls({
                     style={[
                         styles.settingsCombinedPill,
                         {
-                            transform: [{ translateX: settingsSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [-42, 0] }) }],
+                            transform: [{ translateX: settingsSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [-76, 0] }) }],
                         },
                     ]}
                 >
-                    {/* TODO: временно скрит бутон за подкрепа
                     <Animated.View
                         pointerEvents={settingsExpanded ? 'auto' : 'none'}
                         style={[
@@ -204,7 +203,6 @@ export function MapFloatingControls({
                             </View>
                         </TouchableOpacity>
                     </Animated.View>
-                    */}
 
                     <TouchableOpacity
                         activeOpacity={0.82}
@@ -283,7 +281,7 @@ const styles = StyleSheet.create({
         height: '100%',
     },
     settingsCombinedPill: {
-        width: 60,
+        width: 94,
         height: 48,
         borderTopRightRadius: 24,
         borderBottomRightRadius: 24,

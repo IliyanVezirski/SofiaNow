@@ -87,7 +87,6 @@ import {
 
 import { INITIAL_ZOOM_LEVEL, MAP_STYLE, MAX_RENDERED_STOPS, MAX_RENDERED_VEHICLES, DEFAULT_BOUNDS_DELTA, DEFAULT_CENTER_COORDINATE, createFallbackBounds } from '../features/map/constants';
 
-const SUPPORT_REVOLUT_URL = 'https://buymeacoffee.com/iliqnski90c';
 const GOOGLE_FIT_EDGE_PADDING = { top: 60, right: 60, bottom: 80, left: 60 };
 const USER_LOCATION_REGION_DELTA = DEFAULT_BOUNDS_DELTA / 5;
 const MAP_FOLLOW_KEEP_AWAKE_TAG = 'map-user-follow';
@@ -97,6 +96,7 @@ interface MapScreenProps {
     preferredMapExperienceMode?: MapExperienceMode;
     highlightedRoute?: RouteSelection | null;
     onClearHighlightedRoute?: () => void;
+    onSetHighlightedRoute?: (route: RouteSelection) => void;
     isActive?: boolean;
     showReportButton?: boolean;
     filterPanelVisible?: boolean;
@@ -136,6 +136,7 @@ export default function MapScreen({
     preferredMapExperienceMode,
     highlightedRoute,
     onClearHighlightedRoute,
+    onSetHighlightedRoute,
     isActive = true,
     showReportButton = true,
     filterPanelVisible = true,
@@ -330,7 +331,6 @@ export default function MapScreen({
     const shouldShowEcoParks = isEcoMode;
     const floatingControls = useMapFloatingControls({
         mapExperienceMode,
-        supportUrl: SUPPORT_REVOLUT_URL.trim(),
     });
     const overlayActions = useMapOverlayActions({
         bounds,
@@ -567,8 +567,8 @@ export default function MapScreen({
         } : null,
         favorites,
         onBuildRouteFromCoordinate,
+        onSetHighlightedRoute,
         unlockCamera: camera.unlockCamera,
-        renderedDisplayVehicles: animation.renderedDisplayVehicles,
         allVehicles: vehicles,
         selectedStop,
         selectedVehicle,
@@ -1015,7 +1015,7 @@ export default function MapScreen({
                     >
                         <GoogleParkingLayers
                             isParkingMode={isParkingMode}
-                            parkingLots={allParkingLots}
+                            parkingLots={isParkingMode ? allParkingLots : []}
                             selectedParkingLotId={selectedParkingLotId}
                             selectedParkingZoneFeatureId={focusedParkingZoneFeatureId}
                             visibleParkingZonesFeatureCollection={visibleParkingZonesFeatureCollection}
@@ -1229,7 +1229,6 @@ export default function MapScreen({
                     onShowFavoriteRouteOnMap={(route) => {
                         onShowTripRoute?.(route, 'favorites');
                     }}
-                    hasLiveVehicleForEta={stopVehicleActions.hasLiveVehicleForEta}
                     onSelectedStopEtaVehicleAction={stopVehicleActions.handleSelectedStopEtaVehicleAction}
                     onSelectedStopPlaceAction={stopVehicleActions.handleSelectedStopPlaceAction}
                     onSelectedStopNavigateAction={stopVehicleActions.handleSelectedStopNavigateAction}

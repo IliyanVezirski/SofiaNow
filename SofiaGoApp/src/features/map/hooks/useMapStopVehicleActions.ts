@@ -2,11 +2,10 @@ import { Alert } from 'react-native';
 import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import { fetchTripDelay } from '../../../services/cgmApi/delays';
-import { fetchVehicleByTripId, fetchVehiclesNearby } from '../../../services/cgmApi/vehiclePositions';
 import { openExternalWalkingNavigation } from '../../../services/externalNavigation';
-import { findBestLiveVehicleForEta } from '../../vehicles/utils/liveVehicleMatching';
 import type { Vehicle } from '../../../types/vehicles';
 import type { StopEta } from '../../../types/vehicles';
+import type { RouteSelection } from '../../../types/routes';
 
 type FavoritePlaceLike = {
     id?: string | null;
@@ -44,9 +43,9 @@ type Params = {
         }) => Promise<unknown>;
     };
     onBuildRouteFromCoordinate?: (dstLat: number, dstLon: number, curLat?: number, curLon?: number) => void;
+    onSetHighlightedRoute?: (route: RouteSelection) => void;
     unlockCamera?: () => void;
     allVehicles: Vehicle[];
-    renderedDisplayVehicles: Vehicle[];
     selectedStop: {
         selectedStop: SelectedStopLike | null;
         closeSelectedStop: () => void;
@@ -67,9 +66,9 @@ export const useMapStopVehicleActions = ({
     currentLocation,
     favorites,
     onBuildRouteFromCoordinate,
+    onSetHighlightedRoute,
     unlockCamera,
     allVehicles,
-    renderedDisplayVehicles,
     selectedStop,
     selectedVehicle,
     selectedVehicleIdRef,
@@ -120,11 +119,6 @@ export const useMapStopVehicleActions = ({
     }, [favorites.favoritePlaces, selectedStop.selectedStop]);
 
     const [selectedStopPlaceSubmitting, setSelectedStopPlaceSubmitting] = useState(false);
-
-    const resolveLiveVehicleForEta = useCallback((eta: StopEta) => {
-        const stop = selectedStop.selectedStop;
-        return findBestLiveVehicleForEta(eta, stop, renderedDisplayVehicles);
-    }, [renderedDisplayVehicles, selectedStop.selectedStop]);
 
     const selectVehicleCameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -238,58 +232,16 @@ export const useMapStopVehicleActions = ({
         })();
     }, [currentLocation?.latitude, currentLocation?.longitude, onBuildRouteFromCoordinate, selectedStop.selectedStop]);
 
-    const hasLiveVehicleForEta = useCallback((eta: StopEta) => (
-        !!resolveLiveVehicleForEta(eta) || !!selectedStop.selectedStop
-    ), [resolveLiveVehicleForEta, selectedStop.selectedStop]);
-
     const handleSelectedStopEtaVehicleAction = useCallback((eta: StopEta) => {
-        const stop = selectedStop.selectedStop;
-        const matchingVehicle = resolveLiveVehicleForEta(eta);
-        if (matchingVehicle) {
-            selectVehicle(matchingVehicle, true);
-            return;
-        }
-
-        // Try to find vehicle by tripId locally in ALL loaded vehicles (not just
-        // the rendered 40) — avoids a heavy network request + protobuf decode
-        if (eta.tripId) {
-            const localMatch = allVehicles.find((v) => v.tripId === eta.tripId);
-            if (localMatch) {
-                selectVehicle(localMatch, true);
-                return;
-            }
-        }
-
-        void (async () => {
-            try {
-                // Last resort: fetch from network
-                if (eta.tripId) {
-                    const tripVehicle = await fetchVehicleByTripId(eta.tripId);
-                    if (tripVehicle) {
-                        selectVehicle(tripVehicle, true);
-                        return;
-                    }
-                }
-
-                if (!stop) {
-                    Alert.alert('Няма данни', 'В момента няма налично live превозно средство за това пристигане.');
-                    return;
-                }
-
-                const nearbyVehicles = await fetchVehiclesNearby(stop.latitude, stop.longitude);
-                const fallbackVehicle = findBestLiveVehicleForEta(eta, stop, nearbyVehicles);
-
-                if (!fallbackVehicle) {
-                    Alert.alert('Няма данни', 'В момента няма налично live превозно средство за това пристигане.');
-                    return;
-                }
-
-                selectVehicle(fallbackVehicle, true);
-            } catch {
-                Alert.alert('Грешка', 'Неуспешно зареждане на live превозните средства.');
-            }
-        })();
-    }, [resolveLiveVehicleForEta, selectVehicle, selectedStop.selectedStop, allVehicles]);
+        const isNight = eta.line.toUpperCase().startsWith('N');
+        onSetHighlightedRoute?.({
+            line: eta.line,
+            type: isNight ? 'bus' : eta.type,
+            isNight,
+            routeId: eta.routeId || undefined,
+        });
+        selectedStop.closeSelectedStop();
+    }, [onSetHighlightedRoute, selectedStop]);
 
     const handleTrackedVehicleSelect = useCallback((vehicle: Vehicle) => {
         selectVehicle(vehicle, true);
@@ -332,7 +284,6 @@ export const useMapStopVehicleActions = ({
         handleVehiclePanelClose,
         handleVehiclePanelLoadRoute,
         handleVehicleSelect,
-        hasLiveVehicleForEta,
         selectedStopMatchingFavorite,
         selectedStopPlaceSubmitting,
     };

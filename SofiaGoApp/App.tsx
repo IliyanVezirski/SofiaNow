@@ -1,5 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View } from 'react-native';
+import { useEffect } from 'react';
 import MapScreen from './src/screens/MapScreen';
 import { useParkingCatalog } from './src/features/parkingZones/hooks/useParkingCatalog';
 import { useParkingCars } from './src/features/parkingZones/hooks/useParkingCars';
@@ -10,11 +11,17 @@ import { useAppFlow } from './src/app/hooks/useAppFlow';
 import { useHomeActions } from './src/app/hooks/useHomeActions';
 import { useAppNotifications } from './src/app/hooks/useAppNotifications';
 import { useNavigationPreferences } from './src/app/hooks/useNavigationPreferences';
+import { setupBilling, teardownBilling } from './src/services/billing';
 
 export default function App() {
   const appFlow = useAppFlow();
   const parkingCatalog = useParkingCatalog();
   const parkingCars = useParkingCars();
+
+  useEffect(() => {
+    void setupBilling();
+    return () => teardownBilling();
+  }, []);
 
   useAppNotifications({
     setOpenedNotification: appFlow.setOpenedNotification,
@@ -40,6 +47,7 @@ export default function App() {
           preferredMapExperienceMode={appFlow.mapExperienceMode}
           highlightedRoute={appFlow.selectedRoute}
           onClearHighlightedRoute={() => appFlow.setSelectedRoute(null)}
+          onSetHighlightedRoute={(route) => appFlow.setSelectedRoute(route)}
           showReportButton={false}
           filterPanelVisible={appFlow.mapFiltersVisible}
           onCloseFilterPanel={() => appFlow.setMapFiltersVisible(false)}
