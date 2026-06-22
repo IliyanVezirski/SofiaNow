@@ -138,8 +138,8 @@
   {
     "id": "osm-node-2375388578",
     "name": "Mall of Sofia Parking",
-    "latitude": 42.6979695,
-    "longitude": 23.3082703,
+    "latitude": 42.6979851,
+    "longitude": 23.3081856,
     "category": "underground",
     "capacity": 600,
     "fee": true,
